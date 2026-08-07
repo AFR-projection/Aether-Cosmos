@@ -46,7 +46,7 @@ export function QuickActionsSheet({ open, onClose }: QuickActionsSheetProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden"
+            className="scrim fixed inset-0 z-[60] lg:hidden"
             onClick={onClose}
           />
           <motion.div
@@ -54,7 +54,7 @@ export function QuickActionsSheet({ open, onClose }: QuickActionsSheetProps) {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 34, stiffness: 320 }}
-            className="fixed inset-x-0 bottom-0 z-[61] rounded-t-3xl border-t border-border/60 bg-card/95 backdrop-blur-2xl shadow-2xl pb-safe lg:hidden"
+            className="chrome-surface fixed inset-x-0 bottom-0 z-[61] rounded-t-3xl border-t border-border/60 pb-safe lg:hidden"
             role="dialog"
             aria-label="Aksi cepat"
           >

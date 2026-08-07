@@ -229,7 +229,7 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         className={cn(
-          "fixed inset-0 z-50 flex bg-black/60 backdrop-blur-md",
+          "scrim fixed inset-0 z-50 flex",
           fullscreen ? "p-0" : "p-2 sm:p-4 lg:p-8"
         )}
         onClick={onClose}

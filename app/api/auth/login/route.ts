@@ -1,71 +1,60 @@
 import { NextRequest } from "next/server";
-import { eq, or, and, gt } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { users, sessions } from "@/lib/db/schema";
+import { users, type User } from "@/lib/db/schema";
 import { verifyPassword } from "@/lib/auth/password";
 import {
-  createSession,
   getClientIp,
   destroySession,
   getSessionUser,
   AuthError,
-  deviceLabelFromUa,
-  isBindableIp,
 } from "@/lib/auth/session";
 import { logActivity } from "@/lib/auth/audit";
-import { peekRateLimit, checkRateLimit, resetRateLimit } from "@/lib/security";
+import { peekRateLimit, checkRateLimit } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { notifyUser } from "@/lib/email/notify-user";
-import { getIpLocation } from "@/lib/access-tracking";
-import { publishToAdmins } from "@/lib/realtime/events";
+import { getAdminSettings } from "@/lib/admin-settings";
+import { completeLogin } from "@/lib/auth/login-complete";
+import { verifyTotpCode, consumeRecoveryCode } from "@/lib/security/totp";
 import {
-  createPending2faToken,
-  verifyPending2faToken,
-  verifyTotpCode,
-  consumeRecoveryCode,
-} from "@/lib/security/totp";
+  createStagedToken,
+  verifyStagedToken,
+  verifyStepCode,
+  STEP_CODE_MAX_ATTEMPTS,
+  STEP_CODE_LOCKOUT_MS,
+} from "@/lib/security/step-code";
 
-async function notifyNewLogin(
-  userId: string,
-  ip: string,
-  userAgent: string
-): Promise<void> {
-  let location: string | null = null;
-  try {
-    if (isBindableIp(ip)) {
-      const loc = await getIpLocation(ip);
-      if (loc) {
-        if (loc.city && loc.city !== "Unknown" && loc.country && loc.country !== "Unknown") {
-          location = `${loc.city}, ${loc.country}`;
-        } else if (loc.country && loc.country !== "Unknown") {
-          location = loc.country;
-        }
-      }
-    }
-  } catch {
-    // ignore geo failures
-  }
-  await notifyUser(userId, {
-    type: "login",
-    at: new Date(),
-    ip,
-    device: deviceLabelFromUa(userAgent),
-    location,
-  });
-}
+/**
+ * Login is a three-layer sequence:
+ *
+ *   1. password        → issues a "password"-stage token
+ *   2. 2-Step Code     → issues a "step_code"-stage token
+ *   3. authenticator   → creates the session
+ *
+ * Each request carries the token proving the previous layer passed, and
+ * verifyStagedToken is bound to the specific stage being gated, so a client
+ * cannot present a password-stage token to the TOTP branch and skip layer 2.
+ * Layers 2 and 3 are skipped only when the account genuinely has neither
+ * configured.
+ */
 
 const loginSchema = z
   .object({
     identifier: z.string().min(1).optional(),
     password: z.string().min(1).optional(),
+    /** Layer 2 */
+    stepCode: z.string().optional(),
+    stepToken: z.string().optional(),
+    /** Layer 3 */
     totpCode: z.string().optional(),
     recoveryCode: z.string().optional(),
     pendingToken: z.string().optional(),
   })
-  .refine((d) => !!d.pendingToken || (!!d.identifier && !!d.password), {
-    message: "Credentials required",
-  });
+  .refine(
+    (d) => !!d.pendingToken || !!d.stepToken || (!!d.identifier && !!d.password),
+    { message: "Credentials required" }
+  );
 
 const ACCOUNT_MAX_FAILED = parseInt(process.env.RATE_LIMIT_LOGIN_MAX ?? "5", 10) || 5;
 const LOCKOUT_WINDOW_MS =
@@ -79,18 +68,62 @@ const MSG_IP_THROTTLE =
 
 async function recordIpFailure(ip: string, userId?: string) {
   const result = await checkRateLimit(`login:${ip}`, IP_MAX_FAILED, LOCKOUT_WINDOW_MS);
-  if (!result.allowed) {
-    if (userId) {
-      const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-      if (u) {
-        await logActivity(u, "ip_rate_limit", {
-          ip,
-          metadata: { max: IP_MAX_FAILED, windowMs: LOCKOUT_WINDOW_MS },
-        });
-      }
+  if (!result.allowed && userId) {
+    const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (u) {
+      await logActivity(u, "ip_rate_limit", {
+        ip,
+        metadata: { max: IP_MAX_FAILED, windowMs: LOCKOUT_WINDOW_MS },
+      });
     }
   }
   return result;
+}
+
+/** Loads the user behind a staged token, re-checking status on every layer. */
+async function loadStagedUser(userId: string): Promise<User | null> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user || user.status !== "active") return null;
+  return user;
+}
+
+/**
+ * What the client must do after the password layer. Returned as a discriminated
+ * response so the UI never has to infer the next screen from absence of data.
+ */
+async function nextAfterPassword(user: User) {
+  const settings = await getAdminSettings().catch(() => null);
+  const stepCodeRequired = settings?.stepCodeRequired ?? false;
+
+  if (user.stepCodeHash) {
+    return {
+      requiresStepCode: true as const,
+      stepCodeEnrollment: false as const,
+      stepToken: createStagedToken(user.id, "password"),
+    };
+  }
+
+  // No code on file. Force enrolment when policy demands it or a master flagged
+  // the account; otherwise fall through to the authenticator layer.
+  if (stepCodeRequired || user.stepCodeMustChange) {
+    return {
+      requiresStepCode: true as const,
+      stepCodeEnrollment: true as const,
+      stepToken: createStagedToken(user.id, "password"),
+    };
+  }
+
+  return null;
+}
+
+function nextAfterStepCode(user: User) {
+  if (user.totpEnabled && user.totpSecret) {
+    return {
+      requires2fa: true as const,
+      pendingToken: createStagedToken(user.id, "step_code"),
+    };
+  }
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -98,41 +131,32 @@ export async function POST(request: NextRequest) {
     const ip = getClientIp(request);
     const userAgent = request.headers.get("user-agent") ?? "unknown";
 
-    // Layer 2 peek — only block if already over threshold (do not count this request yet)
     const ipStatus = await peekRateLimit(`login:${ip}`, IP_MAX_FAILED, LOCKOUT_WINDOW_MS);
     if (!ipStatus.allowed) {
       return apiError(MSG_IP_THROTTLE, 429, { code: "IP_RATE_LIMIT" });
     }
 
     const body = await request.json();
-    const { identifier, password, totpCode, recoveryCode, pendingToken } =
+    const { identifier, password, stepCode, stepToken, totpCode, recoveryCode, pendingToken } =
       loginSchema.parse(body);
 
-    // Complete 2FA step with pending token (password already verified)
+    // ── Layer 3: authenticator ──
     if (pendingToken) {
-      const pending = verifyPending2faToken(pendingToken);
+      const pending = verifyStagedToken(pendingToken, "step_code");
       if (!pending) {
-        return apiError("2FA session expired. Please sign in again.", 401, {
-          code: "2FA_EXPIRED",
-        });
+        return apiError("Session expired. Please sign in again.", 401, { code: "2FA_EXPIRED" });
       }
 
-      const [pendingUser] = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, pending.userId))
-        .limit(1);
-      if (!pendingUser || pendingUser.status !== "active") {
-        return apiError("Invalid credentials", 401);
-      }
+      const user = await loadStagedUser(pending.userId);
+      if (!user) return apiError("Invalid credentials", 401);
 
       let totpOk = false;
-      if (totpCode && pendingUser.totpSecret) {
-        totpOk = verifyTotpCode(pendingUser.totpSecret, totpCode);
+      if (totpCode && user.totpSecret) {
+        totpOk = verifyTotpCode(user.totpSecret, totpCode);
       }
       if (!totpOk && recoveryCode) {
         const result = await consumeRecoveryCode(
-          pendingUser.totpRecoveryCodes as string[] | null,
+          user.totpRecoveryCodes as string[] | null,
           recoveryCode
         );
         if (result.ok) {
@@ -140,62 +164,127 @@ export async function POST(request: NextRequest) {
           await db
             .update(users)
             .set({ totpRecoveryCodes: result.remaining, updatedAt: new Date() })
-            .where(eq(users.id, pendingUser.id));
+            .where(eq(users.id, user.id));
         }
       }
       if (!totpOk) {
-        await recordIpFailure(ip, pendingUser.id);
+        await recordIpFailure(ip, user.id);
         return apiError("Invalid authentication code", 401, { code: "2FA_INVALID" });
       }
 
-      const prior = await db
-        .select({ ip: sessions.ip, userAgent: sessions.userAgent })
-        .from(sessions)
-        .where(and(eq(sessions.userId, pendingUser.id), gt(sessions.expiresAt, new Date())));
-
-      const newDevice =
-        prior.length === 0 ||
-        !prior.some((s) => s.userAgent === userAgent) ||
-        !prior.some((s) => s.ip === ip);
-
-      await createSession(pendingUser.id, ip, userAgent);
-      await resetRateLimit(`login:${ip}`, LOCKOUT_WINDOW_MS);
-
-      await logActivity(pendingUser, "login", {
-        ip,
-        metadata: { userAgent, success: true, via2fa: true, newDevice },
-      });
-
-      void publishToAdmins({
-        type: "user_presence",
-        userId: pendingUser.id,
-        online: true,
-        at: Date.now(),
-      });
-
-      if (newDevice) {
-        void notifyNewLogin(pendingUser.id, ip, userAgent);
-      }
-
-      return apiSuccess({
-        user: {
-          id: pendingUser.id,
-          username: pendingUser.username,
-          email: pendingUser.email,
-          role: pendingUser.role,
-        },
-        mustChangePassword: pendingUser.mustChangePassword,
-        newDevice,
-      });
+      return apiSuccess(
+        await completeLogin(user, {
+          ip,
+          userAgent,
+          lockoutWindowMs: LOCKOUT_WINDOW_MS,
+          layers: ["password", "step_code", "totp"],
+        })
+      );
     }
 
+    // ── Layer 2: 2-Step Code ──
+    if (stepToken) {
+      const pending = verifyStagedToken(stepToken, "password");
+      if (!pending) {
+        return apiError("Session expired. Please sign in again.", 401, {
+          code: "STEP_CODE_EXPIRED",
+        });
+      }
+
+      const user = await loadStagedUser(pending.userId);
+      if (!user) return apiError("Invalid credentials", 401);
+      if (!stepCode) return apiError("2-Step Code is required", 400);
+
+      // Enrolment is handled by its own endpoint so this branch only ever
+      // verifies an existing code.
+      if (!user.stepCodeHash) {
+        return apiError("No 2-Step Code is set for this account", 400, {
+          code: "STEP_CODE_NOT_SET",
+        });
+      }
+
+      if (user.stepCodeLockedUntil && new Date(user.stepCodeLockedUntil) > new Date()) {
+        return apiError(
+          "Your 2-Step Code is temporarily locked due to repeated incorrect entries. Try again in 15 minutes.",
+          429,
+          { code: "STEP_CODE_LOCKED" }
+        );
+      }
+
+      const ok = await verifyStepCode(stepCode, user.stepCodeHash);
+      if (!ok) {
+        const attempts = (user.stepCodeFailedAttempts ?? 0) + 1;
+        const shouldLock = attempts >= STEP_CODE_MAX_ATTEMPTS;
+
+        await db
+          .update(users)
+          .set({
+            stepCodeFailedAttempts: attempts,
+            stepCodeLockedUntil: shouldLock
+              ? new Date(Date.now() + STEP_CODE_LOCKOUT_MS)
+              : null,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, user.id));
+
+        await recordIpFailure(ip, user.id);
+
+        if (shouldLock) {
+          await logActivity(user, "step_code_lock", {
+            ip,
+            metadata: { userAgent, attempts },
+          });
+          void notifyUser(user.id, {
+            type: "account_locked",
+            minutes: Math.round(STEP_CODE_LOCKOUT_MS / 60000),
+          });
+          return apiError(
+            "Your 2-Step Code is temporarily locked due to repeated incorrect entries. Try again in 15 minutes.",
+            429,
+            { code: "STEP_CODE_LOCKED" }
+          );
+        }
+
+        const remaining = STEP_CODE_MAX_ATTEMPTS - attempts;
+        return apiError(
+          `Incorrect 2-Step Code. ${remaining} attempt(s) remaining.`,
+          401,
+          { code: "STEP_CODE_INVALID", remaining }
+        );
+      }
+
+      if ((user.stepCodeFailedAttempts ?? 0) > 0) {
+        await db
+          .update(users)
+          .set({ stepCodeFailedAttempts: 0, stepCodeLockedUntil: null, updatedAt: new Date() })
+          .where(eq(users.id, user.id));
+      }
+
+      const totpStep = nextAfterStepCode(user);
+      if (totpStep) {
+        return apiSuccess({
+          ...totpStep,
+          message: "Enter your authenticator code to continue",
+        });
+      }
+
+      return apiSuccess(
+        await completeLogin(user, {
+          ip,
+          userAgent,
+          lockoutWindowMs: LOCKOUT_WINDOW_MS,
+          layers: ["password", "step_code"],
+        })
+      );
+    }
+
+    // ── Layer 1: password ──
     const [user] = await db
       .select()
       .from(users)
       .where(or(eq(users.username, identifier!), eq(users.email, identifier!.toLowerCase())))
       .limit(1);
 
-    // Unknown user — count toward IP throttle only
     if (!user) {
       const ipResult = await recordIpFailure(ip);
       if (!ipResult.allowed) {
@@ -204,7 +293,6 @@ export async function POST(request: NextRequest) {
       return apiError("Invalid credentials", 401);
     }
 
-    // Clear expired lock before counting again
     if (user.lockedUntil && new Date(user.lockedUntil) <= new Date()) {
       await db
         .update(users)
@@ -214,7 +302,6 @@ export async function POST(request: NextRequest) {
       user.lockedUntil = null;
     }
 
-    // Layer 1 — account lock
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
       return apiError(MSG_ACCOUNT_LOCKED, 429, { code: "ACCOUNT_LOCKED" });
     }
@@ -281,61 +368,35 @@ export async function POST(request: NextRequest) {
 
     await db
       .update(users)
-      .set({
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-        updatedAt: new Date(),
-      })
+      .set({ failedLoginAttempts: 0, lockedUntil: null, updatedAt: new Date() })
       .where(eq(users.id, user.id));
 
-    if (user.totpEnabled && user.totpSecret) {
-      const token = createPending2faToken(user.id);
+    const stepStep = await nextAfterPassword(user);
+    if (stepStep) {
       return apiSuccess({
-        requires2fa: true,
-        pendingToken: token,
+        ...stepStep,
+        message: stepStep.stepCodeEnrollment
+          ? "Set up your 2-Step Code to continue"
+          : "Enter your 2-Step Code to continue",
+      });
+    }
+
+    const totpStep = nextAfterStepCode(user);
+    if (totpStep) {
+      return apiSuccess({
+        ...totpStep,
         message: "Enter your authenticator code to continue",
       });
     }
 
-    const prior = await db
-      .select({ ip: sessions.ip, userAgent: sessions.userAgent })
-      .from(sessions)
-      .where(and(eq(sessions.userId, user.id), gt(sessions.expiresAt, new Date())));
-
-    const newDevice =
-      prior.length === 0 ||
-      !prior.some((s) => s.userAgent === userAgent) ||
-      !prior.some((s) => s.ip === ip);
-
-    await createSession(user.id, ip, userAgent);
-    await resetRateLimit(`login:${ip}`, LOCKOUT_WINDOW_MS);
-
-    await logActivity(user, "login", {
-      ip,
-      metadata: { userAgent, success: true, newDevice },
-    });
-
-    void publishToAdmins({
-      type: "user_presence",
-      userId: user.id,
-      online: true,
-      at: Date.now(),
-    });
-
-    if (newDevice) {
-      void notifyNewLogin(user.id, ip, userAgent);
-    }
-
-    return apiSuccess({
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-      },
-      mustChangePassword: user.mustChangePassword,
-      newDevice,
-    });
+    return apiSuccess(
+      await completeLogin(user, {
+        ip,
+        userAgent,
+        lockoutWindowMs: LOCKOUT_WINDOW_MS,
+        layers: ["password"],
+      })
+    );
   } catch (error) {
     return handleApiError(error);
   }
@@ -347,7 +408,7 @@ export async function DELETE() {
     try {
       user = await getSessionUser();
     } catch (err) {
-      // Session may already be inactive/IP-revoked — still clear cookie
+      // Session may already be inactive/IP-revoked — still clear the cookie
       if (!(err instanceof AuthError)) throw err;
     }
     if (user) {
@@ -355,6 +416,7 @@ export async function DELETE() {
     }
     await destroySession();
     if (user) {
+      const { publishToAdmins } = await import("@/lib/realtime/events");
       void publishToAdmins({ type: "user_updated", userId: user.id, at: Date.now() });
     }
     return apiSuccess({ message: "Logged out" });
@@ -379,6 +441,8 @@ export async function GET() {
       usedBytes: user.usedBytes,
       mustChangePassword: user.mustChangePassword,
       totpEnabled: user.totpEnabled,
+      stepCodeEnabled: !!user.stepCodeHash,
+      stepCodeMustChange: user.stepCodeMustChange,
       effectiveUserId: user.effectiveUserId,
       isImpersonating: user.isImpersonating,
       sessionId: user.sessionId,

@@ -20,7 +20,6 @@ import {
   X,
   Loader2,
   Settings,
-  Link2,
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { cn, formatBytes } from "@/lib/utils";
@@ -49,7 +48,6 @@ const navItems = [
   { href: "/favorites", label: "Favorites", icon: Star },
   { href: "/shares", label: "Shared", icon: Share2 },
   { href: "/recycle-bin", label: "Recycle Bin", icon: Trash2 },
-  { href: "/connection", label: "Connection", icon: Link2 },
 ];
 
 const STORAGE_KEY = "sidebar_collapsed";
@@ -348,7 +346,7 @@ export function Sidebar({ user, collapsed, setCollapsed, mobileOpen = false, onM
       {/* Desktop sidebar — plain aside, no framer-motion. CSS hides on mobile. */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 hidden h-screen flex-col border-r border-border bg-sidebar backdrop-blur-2xl shadow-lg shadow-black/5 transition-[width] duration-250 ease-out lg:flex",
+          "chrome-surface fixed left-0 top-0 z-40 hidden h-screen flex-col border-r border-border transition-[width] duration-250 ease-out lg:flex",
           sidebarWidth
         )}
         suppressHydrationWarning
@@ -366,7 +364,7 @@ export function Sidebar({ user, collapsed, setCollapsed, mobileOpen = false, onM
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
+              className="scrim fixed inset-0 z-40 lg:hidden"
               onClick={onMobileClose}
               suppressHydrationWarning
             />
@@ -375,13 +373,13 @@ export function Sidebar({ user, collapsed, setCollapsed, mobileOpen = false, onM
               animate={{ x: 0 }}
               exit={{ x: -280 }}
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed left-0 top-0 z-50 flex h-screen w-[280px] flex-col border-r border-border bg-sidebar backdrop-blur-2xl shadow-2xl lg:hidden"
+              className="chrome-surface fixed left-0 top-0 z-50 flex h-screen w-[280px] flex-col border-r border-border lg:hidden"
               suppressHydrationWarning
               aria-label="Navigation menu"
             >
               <button
                 onClick={onMobileClose}
-                className="absolute -right-10 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-sidebar/80 border border-border/50 text-muted-foreground hover:text-foreground shadow-lg"
+                className="chrome-surface absolute -right-10 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-border/50 text-muted-foreground hover:text-foreground"
                 aria-label="Close navigation menu"
               >
                 <X className="h-4 w-4" />

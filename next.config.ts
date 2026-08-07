@@ -12,6 +12,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["sharp", "@node-rs/argon2", "nodemailer"],
   experimental: {
     turbopackFileSystemCacheForDev: true,
+    // lucide-react, date-fns and recharts are already on Next's built-in
+    // optimize list — only the barrels it does not cover are listed here.
+    optimizePackageImports: ["framer-motion", "@tanstack/react-query"],
   },
   headers: async () => [
     {

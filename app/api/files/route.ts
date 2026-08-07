@@ -17,7 +17,7 @@ import {
   copyR2Object,
   deleteR2Object,
 } from "@/lib/storage/r2";
-import { validateCsrf, checkRateLimit } from "@/lib/security";
+import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
 import { tiptapToPlainText } from "@/lib/search/tiptap-text";
 import { cacheGet, cacheSet, cacheDelPattern } from "@/lib/cache/redis";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
     const sessionUser = await requireAuth();
     const userId = getEffectiveUserId(sessionUser);
     const settings = await getAdminSettings();
-    const rl = await checkRateLimit(`api:${userId}`, settings.rateLimitPerMinute, 60_000);
+    const rl = await checkUserApiRateLimit(userId, settings.rateLimitPerMinute);
     if (!rl.allowed) return apiError("Rate limit exceeded", 429);
 
     const body = createNoteSchema.parse(await request.json());

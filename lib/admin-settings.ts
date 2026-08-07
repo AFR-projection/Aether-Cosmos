@@ -17,6 +17,8 @@ export interface AdminSettings {
   autoDeleteTrashDays: number;
   rateLimitPerMinute: number;
   logRetentionDays: number;
+  /** Require every user to set a 2-Step Code; enrolment is forced at next login. */
+  stepCodeRequired: boolean;
   // ── Email delivery (smart router) ──
   /** Default per-sender daily send cap when a sender doesn't set its own. */
   emailDailyLimitPerSender: number;
@@ -41,6 +43,7 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   autoDeleteTrashDays: 30,
   rateLimitPerMinute: 60,
   logRetentionDays: 90,
+  stepCodeRequired: false,
   emailDailyLimitPerSender: 400,
   emailFailureThreshold: 3,
   emailCooldownMinutes: 30,
@@ -124,6 +127,7 @@ function normalizeSettings(raw: Partial<AdminSettings> | null | undefined): Admi
       730,
       DEFAULT_ADMIN_SETTINGS.logRetentionDays
     ),
+    stepCodeRequired: !!cleaned.stepCodeRequired,
     emailDailyLimitPerSender: clamp(
       Number(cleaned.emailDailyLimitPerSender),
       1,

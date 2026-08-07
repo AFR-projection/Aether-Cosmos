@@ -179,7 +179,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4"
+      className="scrim fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
     >
       <motion.div
         initial={{ scale: 0.97, opacity: 0, y: 8 }}

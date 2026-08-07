@@ -3,6 +3,12 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import * as schema from "../lib/db/schema";
 import { activityLogs, files, folders } from "../lib/db/schema";
+import {
+  claimCleanupRun,
+  recordCleanupResult,
+  type CleanupResult,
+  type CleanupSource,
+} from "../lib/system/cleanup-state";
 
 type Db = PostgresJsDatabase<typeof schema>;
 
@@ -106,12 +112,35 @@ async function cleanupLogs(db: Db, days: number) {
   return { deleted: (result as { rowCount?: number }).rowCount ?? 0 };
 }
 
-export async function runScheduledCleanups(db: Db): Promise<void> {
-  const settings = await loadSettings(db);
-  const trash = await cleanupTrash(db, settings.autoDeleteTrashDays);
-  const lifetime = await cleanupFileLifetime(db, settings.maxFileLifetimeDays);
-  const logs = await cleanupLogs(db, settings.logRetentionDays);
-  console.log(
-    `[cleanup] trash files=${trash.files} folders=${trash.folders} lifetime=${lifetime.softDeleted} logs=${logs.deleted}`
-  );
+export async function runScheduledCleanups(
+  db: Db,
+  source: CleanupSource = "worker"
+): Promise<CleanupResult | null> {
+  // Both the BullMQ worker and the web app schedule this. Only the one that
+  // wins the claim actually sweeps; the other returns null immediately.
+  if (!(await claimCleanupRun(db, source))) return null;
+
+  try {
+    const settings = await loadSettings(db);
+    const trash = await cleanupTrash(db, settings.autoDeleteTrashDays);
+    const lifetime = await cleanupFileLifetime(db, settings.maxFileLifetimeDays);
+    const logs = await cleanupLogs(db, settings.logRetentionDays);
+
+    const result: CleanupResult = {
+      trashFiles: trash.files,
+      trashFolders: trash.folders,
+      lifetimeSoftDeleted: lifetime.softDeleted,
+      logsDeleted: logs.deleted,
+    };
+
+    await recordCleanupResult(db, { result });
+    console.log(
+      `[cleanup:${source}] trash files=${result.trashFiles} folders=${result.trashFolders} lifetime=${result.lifetimeSoftDeleted} logs=${result.logsDeleted}`
+    );
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordCleanupResult(db, { error: message }).catch(() => {});
+    throw error;
+  }
 }

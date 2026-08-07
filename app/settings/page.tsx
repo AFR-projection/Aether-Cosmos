@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { KeyRound, User, Monitor, Shield, Plug, ArrowRight } from "lucide-react";
-import Link from "next/link";
+import { KeyRound, User, Monitor, Shield, Hash } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useTheme } from "@/components/theme-provider";
 import { apiFetch } from "@/lib/api/client";
@@ -12,9 +11,11 @@ import { cn } from "@/lib/utils";
 import {
   PasswordSection as SharedPasswordSection,
   TwoFactorSection as SharedTwoFactorSection,
+  StepCodeSection,
 } from "@/components/account/account-security-sections";
 import { SessionsSection } from "@/components/settings/sessions-section";
 import { rememberCurrentSessionId } from "@/hooks/use-realtime-events";
+import { setLitePreference, useLiteMode, useLitePreference } from "@/lib/system/lite-mode";
 interface SessionUser {
   id: string;
   username: string;
@@ -58,6 +59,14 @@ function SettingsContent({ user }: { user: SessionUser }) {
       component: <PasswordSection />,
     },
     {
+      id: "step-code",
+      title: "2-Step Code",
+      description: "Numpad code entered after your password",
+      icon: Hash,
+      gradient: "from-cyan-500 to-blue-500",
+      component: <StepCodeSection />,
+    },
+    {
       id: "2fa",
       title: "Two-factor authentication",
       description: "Authenticator app (TOTP) + recovery codes",
@@ -99,25 +108,6 @@ function SettingsContent({ user }: { user: SessionUser }) {
           Manage your account settings and preferences
         </p>
       </div>
-
-      {/* Integrations live on their own page — point users there instead of duplicating */}
-      <Link href="/connection" className="block">
-        <Card className="group relative overflow-hidden border-violet-500/25 bg-gradient-to-br from-violet-500/[0.08] via-transparent to-sky-500/[0.05] p-4 transition-all hover:border-violet-500/40 hover:shadow-lg sm:p-5">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-violet-500/10 blur-2xl" />
-          <div className="relative flex items-center gap-3.5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-sm">
-              <Plug className="h-5 w-5 text-white" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold">Connection & integrations</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                API keys, MCP setup, connected apps, and webhooks — all in one place
-              </p>
-            </div>
-            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-violet-500" />
-          </div>
-        </Card>
-      </Link>
 
       <div className="space-y-3">
         {sections.map((section) => {
@@ -240,6 +230,68 @@ function AppearanceSection() {
           </button>
         ))}
       </div>
+
+      <LiteModeSetting />
+    </div>
+  );
+}
+
+// ─── Lite mode ────────────────────────────────────────────────────────────────
+
+/**
+ * Auto is the right default for almost everyone — the override exists for the
+ * two cases detection cannot see: a capable phone on a metered/throttled link
+ * that wants Lite anyway, and a device that trips the heuristic but is actually
+ * fine (or is plugged into a fast network) and wants the full chrome back.
+ */
+function LiteModeSetting() {
+  const preference = useLitePreference();
+  const active = useLiteMode();
+
+  const options = [
+    { value: "auto", label: "Auto", hint: "Follow device & network" },
+    { value: "on", label: "On", hint: "Always lightweight" },
+    { value: "off", label: "Off", hint: "Always full effects" },
+  ] as const;
+
+  return (
+    <div className="space-y-3 border-t border-border/50 pt-4">
+      <div>
+        <label className="text-sm font-medium">Lite mode</label>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Drops heavy visual effects and loads smaller thumbnails to keep things
+          smooth on slower devices and connections.
+        </p>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {options.map(({ value, label, hint }) => (
+          <button
+            key={value}
+            onClick={() => setLitePreference(value)}
+            className={cn(
+              "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-center transition-all",
+              preference === value
+                ? "border-accent bg-accent/10"
+                : "border-border/50 bg-transparent hover:border-border/80"
+            )}
+          >
+            <span
+              className={cn(
+                "text-xs font-medium",
+                preference === value ? "text-accent" : "text-muted-foreground"
+              )}
+            >
+              {label}
+            </span>
+            <span className="text-[10px] leading-tight text-muted-foreground/70">{hint}</span>
+          </button>
+        ))}
+      </div>
+      {preference === "auto" && (
+        <p className="text-xs text-muted-foreground/70">
+          Currently {active ? "on" : "off"} for this device.
+        </p>
+      )}
     </div>
   );
 }

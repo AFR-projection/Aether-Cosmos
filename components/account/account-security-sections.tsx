@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Check, Loader2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -337,6 +337,296 @@ export function TwoFactorSection({ enabled: initiallyEnabled }: { enabled: boole
       )}
 
       {error && <p className="text-sm text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+// ─── 2-Step Code ──────────────────────────────────────────────────────────────
+
+const STEP_CODE_MIN = 6;
+const STEP_CODE_MAX = 10;
+
+/** Digits-only field for entering a 2-Step Code, with a reveal toggle. */
+function CodeInput({
+  value,
+  onChange,
+  placeholder,
+  autoFocus,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  autoFocus?: boolean;
+}) {
+  const [reveal, setReveal] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        type={reveal ? "text" : "password"}
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder={placeholder}
+        value={value}
+        autoFocus={autoFocus}
+        maxLength={STEP_CODE_MAX}
+        // Strip non-digits on the way in so the field can never hold a value
+        // the server will reject.
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, ""))}
+        className="pr-10 font-mono tracking-[0.3em]"
+      />
+      <button
+        type="button"
+        onClick={() => setReveal(!reveal)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+        aria-label={reveal ? "Hide code" : "Show code"}
+      >
+        {reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+}
+
+export function StepCodeSection() {
+  const queryClient = useQueryClient();
+  const [password, setPassword] = useState("");
+  const [currentCode, setCurrentCode] = useState("");
+  const [newCode, setNewCode] = useState("");
+  const [confirmCode, setConfirmCode] = useState("");
+  const [mode, setMode] = useState<"idle" | "edit" | "remove">("idle");
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(
+    null
+  );
+
+  const statusQuery = useQuery({
+    queryKey: ["step-code"],
+    queryFn: async () => {
+      const res = await apiFetch<{
+        enabled: boolean;
+        updatedAt: string | null;
+        mustChange: boolean;
+        required: boolean;
+        rules: string[];
+      }>("/api/auth/step-code");
+      if (!res.success) throw new Error(res.error ?? "Failed to load status");
+      return res.data!;
+    },
+  });
+
+  function reset() {
+    setPassword("");
+    setCurrentCode("");
+    setNewCode("");
+    setConfirmCode("");
+    setMode("idle");
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch<{ message: string }>("/api/auth/step-code", {
+        method: "PUT",
+        body: JSON.stringify({
+          password,
+          currentCode: status?.enabled ? currentCode : undefined,
+          newCode,
+        }),
+      });
+      if (!res.success) throw new Error(res.error ?? "Failed to save code");
+      return res.data!;
+    },
+    onSuccess: (data) => {
+      setMessage({ type: "success", text: data.message });
+      reset();
+      statusQuery.refetch();
+      queryClient.invalidateQueries({ queryKey: ["session"] });
+    },
+    onError: (err: Error) => setMessage({ type: "error", text: err.message }),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch<{ message: string }>("/api/auth/step-code", {
+        method: "DELETE",
+        body: JSON.stringify({ password, currentCode }),
+      });
+      if (!res.success) throw new Error(res.error ?? "Failed to remove code");
+      return res.data!;
+    },
+    onSuccess: (data) => {
+      setMessage({ type: "success", text: data.message });
+      reset();
+      statusQuery.refetch();
+      queryClient.invalidateQueries({ queryKey: ["session"] });
+    },
+    onError: (err: Error) => setMessage({ type: "error", text: err.message }),
+  });
+
+  const status = statusQuery.data;
+  const pending = saveMutation.isPending || removeMutation.isPending;
+
+  function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setMessage(null);
+    if (newCode !== confirmCode) {
+      setMessage({ type: "error", text: "Codes do not match" });
+      return;
+    }
+    saveMutation.mutate();
+  }
+
+  if (statusQuery.isLoading) {
+    return <div className="h-20 skeleton rounded-xl" />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Status:</span>
+        <span className={cn("font-medium", status?.enabled ? "text-emerald-500" : "")}>
+          {status?.enabled ? "Active" : "Not set"}
+        </span>
+        {status?.required && (
+          <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+            Required by admin
+          </span>
+        )}
+        {status?.mustChange && (
+          <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+            Must be changed
+          </span>
+        )}
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Entered on a numpad after your password, before your authenticator code.
+      </p>
+
+      {status?.updatedAt && (
+        <p className="text-xs text-muted-foreground/70">
+          Last changed {new Date(status.updatedAt).toLocaleDateString()}
+        </p>
+      )}
+
+      {message && (
+        <motion.div
+          role="alert"
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={cn(
+            "rounded-lg px-4 py-2 text-sm",
+            message.type === "success"
+              ? "bg-emerald-500/10 text-emerald-400"
+              : "bg-danger/10 text-danger"
+          )}
+        >
+          {message.type === "success" && <Check className="mb-0.5 mr-1.5 inline h-3.5 w-3.5" />}
+          {message.text}
+        </motion.div>
+      )}
+
+      {mode === "idle" && (
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => { setMode("edit"); setMessage(null); }}>
+            {status?.enabled ? "Change 2-Step Code" : "Set 2-Step Code"}
+          </Button>
+          {status?.enabled && !status.required && (
+            <Button
+              variant="ghost"
+              onClick={() => { setMode("remove"); setMessage(null); }}
+            >
+              Remove
+            </Button>
+          )}
+        </div>
+      )}
+
+      {mode === "edit" && (
+        <form onSubmit={handleSave} className="space-y-3">
+          <ul className="space-y-1 rounded-xl border border-border/40 bg-muted/20 p-3 text-xs text-muted-foreground">
+            {(status?.rules ?? []).map((rule) => (
+              <li key={rule}>• {rule}</li>
+            ))}
+          </ul>
+
+          <Input
+            type="password"
+            placeholder="Account password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          {status?.enabled && (
+            <CodeInput
+              value={currentCode}
+              onChange={setCurrentCode}
+              placeholder="Current 2-Step Code"
+            />
+          )}
+          <CodeInput
+            value={newCode}
+            onChange={setNewCode}
+            placeholder={`New code (${STEP_CODE_MIN}-${STEP_CODE_MAX} digits)`}
+          />
+          <CodeInput
+            value={confirmCode}
+            onChange={setConfirmCode}
+            placeholder="Confirm new code"
+          />
+
+          <div className="flex gap-2">
+            <Button
+              type="submit"
+              disabled={
+                pending ||
+                !password ||
+                newCode.length < STEP_CODE_MIN ||
+                !confirmCode ||
+                (status?.enabled && !currentCode)
+              }
+            >
+              {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {status?.enabled ? "Update code" : "Set code"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={reset} disabled={pending}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {mode === "remove" && (
+        <div className="space-y-3 rounded-xl border border-danger/25 bg-danger/[0.04] p-4">
+          <p className="text-sm font-medium text-danger">Remove your 2-Step Code?</p>
+          <p className="text-xs text-muted-foreground">
+            Sign-in will drop back to password and authenticator only.
+          </p>
+          <Input
+            type="password"
+            placeholder="Account password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <CodeInput
+            value={currentCode}
+            onChange={setCurrentCode}
+            placeholder="Current 2-Step Code"
+          />
+          <div className="flex gap-2">
+            <Button
+              variant="destructive"
+              onClick={() => { setMessage(null); removeMutation.mutate(); }}
+              disabled={pending || !password || currentCode.length < STEP_CODE_MIN}
+            >
+              {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Remove code
+            </Button>
+            <Button variant="ghost" onClick={reset} disabled={pending}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

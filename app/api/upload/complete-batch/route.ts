@@ -13,13 +13,15 @@ import {
   completeMultipartUpload,
   abortMultipartUpload,
 } from "@/lib/storage/r2";
-import { validateCsrf, checkRateLimit } from "@/lib/security";
+import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
 import { validateFileMagicBytes } from "@/lib/security/file-validation";
 import { enqueueJob } from "@/lib/queue";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { recalculateUsedBytes } from "@/lib/db";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 import { publishToUser } from "@/lib/realtime/events";
+import { getAdminSettings } from "@/lib/admin-settings";
+import { UPLOAD_RATE_MULTIPLIER } from "@/lib/upload/limits";
 
 const encryptionMetaSchema = z.object({
   salt: z.string().min(1),
@@ -79,7 +81,11 @@ export async function POST(request: NextRequest) {
     const userId = getEffectiveUserId(sessionUser);
     const ip = getClientIp(request);
 
-    const rateLimit = await checkRateLimit(`upload:${userId}`, 300, 60_000);
+    const settings = await getAdminSettings();
+    const rateLimit = await checkUserApiRateLimit(userId, settings.rateLimitPerMinute, {
+      bucket: "upload",
+      multiplier: UPLOAD_RATE_MULTIPLIER,
+    });
     if (!rateLimit.allowed) return apiError("Upload rate limit exceeded", 429);
 
     const body = schema.parse(await request.json());

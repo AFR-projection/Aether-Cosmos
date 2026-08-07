@@ -11,8 +11,16 @@ import {
   updateAdminSettings,
   type AdminSettings,
 } from "@/lib/admin-settings";
+import { readCleanupState } from "@/lib/system/cleanup-state";
 
 export type { AdminSettings };
+
+function parseInactivityMs(): number | null {
+  const raw = process.env.SESSION_INACTIVITY_MS;
+  if (!raw) return null;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 const patchSchema = z
   .object({
@@ -30,6 +38,7 @@ const patchSchema = z
     autoDeleteTrashDays: z.number().optional(),
     rateLimitPerMinute: z.number().optional(),
     logRetentionDays: z.number().optional(),
+    stepCodeRequired: z.boolean().optional(),
     emailDailyLimitPerSender: z.number().optional(),
     emailFailureThreshold: z.number().optional(),
     emailCooldownMinutes: z.number().optional(),
@@ -40,7 +49,10 @@ export async function GET(request: NextRequest) {
   try {
     await requireMasterOrApiKey(request, "settings");
     const settings = await getAdminSettings(true);
-    const [userCount] = await db.select({ count: count() }).from(users);
+    const [[userCount], cleanup] = await Promise.all([
+      db.select({ count: count() }).from(users),
+      readCleanupState(db).catch(() => null),
+    ]);
 
     return apiSuccess({
       ...settings,
@@ -49,6 +61,10 @@ export async function GET(request: NextRequest) {
         version: "1.0.0",
         persistence: "database",
         cacheTtlSeconds: 30,
+        cleanup,
+        // Idle expiry is opt-in via env; the UI warns when it is shorter than
+        // the configured session duration, since the shorter one wins.
+        sessionInactivityMs: parseInactivityMs(),
       },
     });
   } catch (error) {

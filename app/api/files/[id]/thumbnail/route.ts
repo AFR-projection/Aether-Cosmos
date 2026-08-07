@@ -4,11 +4,14 @@ import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth/session";
 import { getEffectiveUserId, canAccessUserResource } from "@/lib/auth/permissions";
-import { downloadFromR2Stream, objectExists } from "@/lib/storage/r2";
+import { downloadFromR2Stream } from "@/lib/storage/r2";
 import { apiError } from "@/lib/api/response";
 
 const THUMB_SIZES = [150, 300, 600, 1200] as const;
 type ThumbSize = (typeof THUMB_SIZES)[number];
+
+/** Largest original we will serve verbatim when no thumbnail exists yet. */
+const ORIGINAL_FALLBACK_MAX_BYTES = 256 * 1024;
 
 function parseSize(val: string | null): ThumbSize {
   const n = parseInt(val ?? "300", 10);
@@ -48,7 +51,7 @@ export async function GET(
     const legacyKey = getLegacyThumbKey(file.id);
 
     // Prefer the size-specific key, then whatever thumbnailKey points to
-    // (e.g. legacy .jpg or the default 300px), then the original image.
+    // (e.g. legacy .jpg or the default 300px).
     const keysToTry = [thumbKey];
     if (file.thumbnailKey && !keysToTry.includes(file.thumbnailKey)) {
       keysToTry.push(file.thumbnailKey);
@@ -56,13 +59,18 @@ export async function GET(
     if (file.thumbnailKey === legacyKey && !keysToTry.includes(legacyKey)) {
       keysToTry.push(legacyKey);
     }
-    if (file.mimeType.startsWith("image/")) {
+    // Falling back to the original is only safe when the original is already
+    // thumbnail-sized. Streaming a multi-megabyte camera photo into a 170px
+    // grid tile burns the user's data and stalls low-end devices, so anything
+    // larger returns 404 and the UI renders its icon placeholder instead.
+    if (file.mimeType.startsWith("image/") && file.sizeBytes <= ORIGINAL_FALLBACK_MAX_BYTES) {
       keysToTry.push(file.r2Key);
     }
 
     for (const r2Key of keysToTry) {
       try {
-        if (!await objectExists(r2Key)) continue;
+        // No HEAD probe first — GET already fails on a missing key, and the
+        // extra round trip doubled R2 latency for every tile in the grid.
         const r2 = await downloadFromR2Stream(r2Key);
         if (!r2.body) continue;
 
@@ -90,7 +98,9 @@ export async function GET(
             : "image/jpeg";
         headers.set("Content-Type", contentType);
         headers.set("Content-Length", String(r2.contentLength ?? 0));
-        headers.set("Cache-Control", "public, max-age=86400");
+        // `private`: these are per-user files behind auth, so shared proxies
+        // and CDNs must never hold a copy.
+        headers.set("Cache-Control", "private, max-age=86400");
 
         return new Response(stream, { status: 200, headers });
       } catch {

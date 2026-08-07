@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { useConfirm } from "@/components/admin/confirm-dialog";
+import { UserSecurityPanel } from "@/components/admin/user-security-panel";
 import { useAdminEvents } from "@/hooks/use-admin-events";
 import { notify } from "@/lib/system/notify-store";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
@@ -860,7 +861,7 @@ export default function AdminUsersPage() {
 
       {/* Edit User Modal */}
       {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+        <div className="scrim fixed inset-0 z-50 flex items-center justify-center p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -930,6 +931,12 @@ export default function AdminUsersPage() {
                 />
                 Force password reset on next login
               </label>
+
+              <div className="border-t border-border/40 pt-4">
+                <p className="mb-3 text-sm font-semibold">Login security</p>
+                <UserSecurityPanel userId={editingUser.id} />
+              </div>
+
               <div className="flex justify-end gap-2">
                 <Button variant="secondary" onClick={() => setEditingUser(null)}>
                   Cancel

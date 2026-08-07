@@ -36,7 +36,7 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
   return (
     <>
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-card/90 backdrop-blur-2xl pb-safe lg:hidden"
+        className="chrome-surface fixed inset-x-0 bottom-0 z-40 border-t border-border/50 pb-safe lg:hidden"
         aria-label="Navigasi utama"
       >
         <div className="mx-auto flex h-[60px] max-w-md items-stretch justify-around px-2">

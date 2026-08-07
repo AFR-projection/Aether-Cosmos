@@ -12,9 +12,20 @@ import { getIpLocation, parseUserAgent } from "@/lib/access-tracking";
 const SESSION_COOKIE = "storage_session";
 const ROTATION_INTERVAL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
-function inactivityMs(): number {
-  const raw = parseInt(process.env.SESSION_INACTIVITY_MS ?? "1800000", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : 1_800_000;
+/**
+ * Idle cut-off, in ms, or null when idle expiry is not configured.
+ *
+ * This is deliberately opt-in. It used to default to 30 minutes, which silently
+ * overrode the admin's "Session Duration" setting — a session configured for a
+ * week still died after half an hour of inactivity, so the setting did nothing.
+ * Absolute expiry (sessionDurationHours) is now the authority; SESSION_INACTIVITY_MS
+ * is an explicit extra tightening on top of it.
+ */
+function inactivityMs(): number | null {
+  const raw = process.env.SESSION_INACTIVITY_MS;
+  if (!raw) return null;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function ipBindEnabled(): boolean {
@@ -353,11 +364,12 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
   const currentIp = await getClientIpFromHeaders();
 
-  // Inactivity timeout
+  // Optional idle cut-off on top of the absolute expiry checked in the query above.
+  const idleLimit = inactivityMs();
   const lastActive = session.lastActiveAt
     ? new Date(session.lastActiveAt).getTime()
     : new Date(session.createdAt).getTime();
-  if (Date.now() - lastActive > inactivityMs()) {
+  if (idleLimit !== null && Date.now() - lastActive > idleLimit) {
     await db.delete(sessions).where(eq(sessions.id, sessionId));
     const cookieStore2 = await cookies();
     cookieStore2.delete(SESSION_COOKIE);

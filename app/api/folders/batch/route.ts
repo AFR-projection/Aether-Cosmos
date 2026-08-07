@@ -6,7 +6,7 @@ import { folders, files } from "@/lib/db/schema";
 import { requireAuth, getClientIp } from "@/lib/auth/session";
 import { getEffectiveUserId, canAccessUserResource } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf, checkRateLimit } from "@/lib/security";
+import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { getAdminSettings } from "@/lib/admin-settings";
 import { escapeRegex } from "@/lib/utils";
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     const sessionUser = await requireAuth();
     const userId = getEffectiveUserId(sessionUser);
     const settings = await getAdminSettings();
-    const rl = await checkRateLimit(`api:${userId}`, settings.rateLimitPerMinute, 60_000);
+    const rl = await checkUserApiRateLimit(userId, settings.rateLimitPerMinute);
     if (!rl.allowed) return apiError("Rate limit exceeded", 429);
     const { paths, rootFolderId } = schema.parse(await request.json());
 

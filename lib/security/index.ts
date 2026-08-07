@@ -61,6 +61,24 @@ export async function resetRateLimit(key: string, windowMs: number): Promise<voi
   memResetIp(loginMemIp(key));
 }
 
+/**
+ * Per-user API rate limit from the admin "Rate Limit" setting.
+ *
+ * Bulk endpoints get a multiplier rather than a fixed floor: a batch upload
+ * legitimately issues far more requests than a page load, but an admin who sets
+ * the limit to 20 still expects uploads to be limited proportionally. A fixed
+ * floor meant any value below it was silently ignored.
+ */
+export async function checkUserApiRateLimit(
+  userId: string,
+  perMinute: number,
+  opts?: { bucket?: string; multiplier?: number }
+): Promise<{ allowed: boolean; remaining: number }> {
+  const bucket = opts?.bucket ?? "api";
+  const max = Math.max(1, Math.round(perMinute * (opts?.multiplier ?? 1)));
+  return checkRateLimit(`${bucket}:${userId}`, max, 60_000);
+}
+
 export function checkIpRateLimit(
   ip: string,
   maxAttempts: number,

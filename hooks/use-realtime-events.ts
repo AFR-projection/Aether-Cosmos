@@ -121,6 +121,18 @@ export function useRealtimeEvents(enabled = true): void {
       if (cancelled) return;
       clearTimer();
 
+      // Always retire the previous stream first. Without this, a network
+      // handover that fires `online` before the old EventSource errors leaves
+      // that socket open forever — on a phone with flaky signal they stack up,
+      // each one holding a server connection and its heartbeat timer.
+      if (esRef.current) {
+        esRef.current.onopen = null;
+        esRef.current.onmessage = null;
+        esRef.current.onerror = null;
+        esRef.current.close();
+        esRef.current = null;
+      }
+
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         setConnectionStatus("offline");
         return;

@@ -54,6 +54,9 @@ export const activityActionEnum = pgEnum("activity_action", [
   "ip_rate_limit",
   "session_revoked",
   "password_change",
+  "step_code_change",
+  "step_code_lock",
+  "step_code_reset",
 ]);
 
 export const users = pgTable(
@@ -75,6 +78,14 @@ export const users = pgTable(
     totpSecret: text("totp_secret"),
     totpEnabled: boolean("totp_enabled").notNull().default(false),
     totpRecoveryCodes: jsonb("totp_recovery_codes").$type<string[]>().default([]),
+    /** 2-Step Code (numpad layer between password and TOTP), argon2-hashed. */
+    stepCodeHash: text("step_code_hash"),
+    stepCodeUpdatedAt: timestamp("step_code_updated_at", { withTimezone: true }),
+    /** Tracked separately from password attempts so one lockout cannot mask the other. */
+    stepCodeFailedAttempts: integer("step_code_failed_attempts").notNull().default(0),
+    stepCodeLockedUntil: timestamp("step_code_locked_until", { withTimezone: true }),
+    /** Set by a master to force the user to choose a new code at next login. */
+    stepCodeMustChange: boolean("step_code_must_change").notNull().default(false),
     bandwidthQuotaBytes: bigint("bandwidth_quota_bytes", { mode: "number" }).notNull().default(0),
     bandwidthUsedBytes: bigint("bandwidth_used_bytes", { mode: "number" }).notNull().default(0),
     bandwidthPeriodStart: timestamp("bandwidth_period_start", { withTimezone: true }),

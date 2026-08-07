@@ -9,11 +9,11 @@ import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions"
 import {
   buildR2Key,
   getPresignedUploadUrl,
-  getMaxFileSize,
 } from "@/lib/storage/r2";
-import { validateCsrf, checkRateLimit } from "@/lib/security";
+import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getAdminSettings, isUploadAllowed } from "@/lib/admin-settings";
+import { getAdminSettings, isUploadAllowed, maxUploadBytes } from "@/lib/admin-settings";
+import { UPLOAD_RATE_MULTIPLIER } from "@/lib/upload/limits";
 
 const encryptionMetaSchema = z.object({
   salt: z.string().min(1),
@@ -41,11 +41,10 @@ export async function POST(request: NextRequest) {
     const ip = getClientIp(request);
     const settings = await getAdminSettings();
 
-    const rateLimit = await checkRateLimit(
-      `upload:${userId}`,
-      Math.max(300, settings.rateLimitPerMinute),
-      60000
-    );
+    const rateLimit = await checkUserApiRateLimit(userId, settings.rateLimitPerMinute, {
+      bucket: "upload",
+      multiplier: UPLOAD_RATE_MULTIPLIER,
+    });
     if (!rateLimit.allowed) return apiError("Upload rate limit exceeded", 429);
 
     const body = schema.parse(await request.json());
@@ -59,7 +58,7 @@ export async function POST(request: NextRequest) {
       return apiError(policy.reason ?? "File type not allowed", 400);
     }
 
-    if (body.sizeBytes > getMaxFileSize()) {
+    if (body.sizeBytes > maxUploadBytes(settings)) {
       return apiError(
         `File exceeds maximum size (${settings.maxUploadSizeMB} MB)`,
         400

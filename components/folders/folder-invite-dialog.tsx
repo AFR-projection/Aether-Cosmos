@@ -86,7 +86,7 @@ export function FolderInviteDialog({ folderId, folderName, onClose }: FolderInvi
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      className="scrim fixed inset-0 z-[60] flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div

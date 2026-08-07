@@ -12,7 +12,7 @@ import {
   resolveFolderAccess,
 } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf, SECURITY_HEADERS, checkRateLimit } from "@/lib/security";
+import { validateCsrf, SECURITY_HEADERS, checkUserApiRateLimit } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { escapeRegex } from "@/lib/utils";
 import { cacheDelPattern } from "@/lib/cache/redis";
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
     const sessionUser = await requireAuth();
     const userId = getEffectiveUserId(sessionUser);
     const settings = await getAdminSettings();
-    const rl = await checkRateLimit(`api:${userId}`, settings.rateLimitPerMinute, 60_000);
+    const rl = await checkUserApiRateLimit(userId, settings.rateLimitPerMinute);
     if (!rl.allowed) return apiError("Rate limit exceeded", 429);
 
     const body = createSchema.parse(await request.json());

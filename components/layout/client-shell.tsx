@@ -141,7 +141,7 @@ export function ClientShell({
       />
 
       {/* Mobile/Tablet Header */}
-      <header className="fixed top-0 left-0 right-0 z-30 flex h-14 items-center gap-2 border-b border-border/50 bg-card/90 backdrop-blur-xl px-3 shadow-sm pt-safe lg:hidden" style={{ height: "calc(3.5rem + var(--safe-top))" }}>
+      <header className="chrome-surface fixed top-0 left-0 right-0 z-30 flex h-14 items-center gap-2 border-b border-border/50 px-3 pt-safe lg:hidden" style={{ height: "calc(3.5rem + var(--safe-top))" }}>
         <Button
           variant="ghost"
           size="icon"

@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState, useEffect, useMemo, memo } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { motion } from "framer-motion";
+import { useRef, useState, useEffect, useMemo, memo, useSyncExternalStore } from "react";
+import { useVirtualizer, useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   FileText, Image, Film, Music, FileArchive, File,
   Star, Trash2, Copy, CopyPlus, Scissors, RotateCcw, Pencil, MoreHorizontal, Download,
@@ -15,9 +14,52 @@ import { Button } from "@/components/ui/button";
 import { FloatingActionMenu, useFloatingMenu, type FloatingMenuItem } from "@/components/ui/floating-action-menu";
 import type { File as FileRecord } from "@/lib/db/schema";
 import { Spinner } from "@/components/system/spinner";
+import { isLiteMode } from "@/lib/system/lite-mode";
 
 const ROW_HEIGHT = 56;
 const OVERSCAN = 8;
+
+// ─── Grid virtualization metrics ────────────────────────────────────────────
+// The grid scrolls with the page (no inner scroll container), so it uses the
+// window virtualizer. Only the visible band of rows is mounted — on a 200-file
+// folder that is ~3 rows instead of 200 cards, which is the difference between
+// a smooth and an unusable scroll on a low-end phone.
+
+/** Column counts must mirror the Tailwind classes on the grid container. */
+const GRID_BREAKPOINTS = [
+  { min: 1536, cols: 6 },
+  { min: 1280, cols: 5 },
+  { min: 1024, cols: 4 },
+  { min: 640, cols: 3 },
+  { min: 0, cols: 2 },
+] as const;
+
+/** Height of the name/size block under each thumbnail (px-3 py-2.5). */
+const CARD_META_HEIGHT = 56;
+const GRID_OVERSCAN = 3;
+
+function readColumns(): number {
+  if (typeof window === "undefined") return 2;
+  const w = window.innerWidth;
+  return GRID_BREAKPOINTS.find((b) => w >= b.min)?.cols ?? 2;
+}
+
+function subscribeColumns(onChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+  const queries = GRID_BREAKPOINTS.filter((b) => b.min > 0).map((b) =>
+    window.matchMedia(`(min-width:${b.min}px)`)
+  );
+  queries.forEach((q) => q.addEventListener("change", onChange));
+  return () => queries.forEach((q) => q.removeEventListener("change", onChange));
+}
+
+/**
+ * Column count derived from breakpoint crossings only — not from a continuous
+ * width value — so scrolling and resizing never re-render on every pixel.
+ */
+function useGridColumns(): number {
+  return useSyncExternalStore(subscribeColumns, readColumns, () => 2);
+}
 
 // ─── Right-click context menu hook ────────────────────────────────────────────
 // Places a zero-size fixed anchor at the cursor so FloatingActionMenu can position
@@ -95,6 +137,22 @@ function getTypeLabel(mimeType: string): string {
 
 // ─── Thumbnail lazy loader ──────────────────────────────────────────────────
 
+/** Sizes the thumbnail endpoint can actually serve. */
+const THUMB_SIZES = [150, 300, 600, 1200] as const;
+
+/**
+ * Picks the smallest served size that still covers the box the image is painted
+ * into. Device pixel ratio is capped at 2 — a 3x panel on a budget phone gains
+ * nothing visible from a 3x image but pays for every extra pixel in download,
+ * decode and memory. Lite mode caps harder still.
+ */
+function pickThumbnailSize(cssWidth: number, lite: boolean): number {
+  const dpr = Math.min(window.devicePixelRatio || 1, lite ? 1.5 : 2);
+  const needed = Math.ceil((cssWidth || 160) * dpr);
+  const cap = lite ? 300 : 1200;
+  return THUMB_SIZES.find((s) => s >= needed && s <= cap) ?? cap;
+}
+
 function useThumbnail(fileId: string, hasThumb: boolean) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -109,11 +167,7 @@ function useThumbnail(fileId: string, hasThumb: boolean) {
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          const dpr = window.devicePixelRatio || 1;
-          let size = 300;
-          if (dpr >= 2) size = 600;
-          if (el.clientWidth > 400) size = 600;
-          if (el.clientWidth > 800) size = 1200;
+          const size = pickThumbnailSize(el.clientWidth, isLiteMode());
           setCurrentSrc(`/api/files/${fileId}/thumbnail?size=${size}`);
           observer.disconnect();
         }
@@ -192,12 +246,9 @@ function SortHeader({ label, sortKey, current, order, onSort }: SortHeaderProps)
 
 function HoverInfoCard({ file, style }: { file: FileRecord; style?: React.CSSProperties }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 4, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 4, scale: 0.96 }}
+    <div
       style={style}
-      className="absolute z-40 left-1/2 -translate-x-1/2 top-full mt-2 w-72 rounded-2xl border border-border/60 bg-surface-elevated p-4 shadow-xl backdrop-blur-xl"
+      className="animate-fade-in-scale absolute z-40 left-1/2 -translate-x-1/2 top-full mt-2 w-72 rounded-2xl border border-border/60 bg-surface-elevated p-4 shadow-xl"
     >
       <div className="flex items-start gap-3 mb-3">
         <div className={cn(
@@ -231,7 +282,7 @@ function HoverInfoCard({ file, style }: { file: FileRecord; style?: React.CSSPro
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -274,6 +325,44 @@ export function FileGrid({
     overscan: OVERSCAN,
   });
 
+  // ── Virtual grid ──
+  // The grid scrolls with the document, so it virtualizes against the window
+  // and offsets by the container's distance from the top of the page.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const columns = useGridColumns();
+  const [gridWidth, setGridWidth] = useState(0);
+  const [gridOffset, setGridOffset] = useState(0);
+
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el || view !== "grid") return;
+    const measure = () => {
+      setGridWidth(el.clientWidth);
+      setGridOffset(el.getBoundingClientRect().top + window.scrollY);
+    };
+    measure();
+    // Only fires on real layout changes (resize / sidebar collapse), not scroll.
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [view]);
+
+  const gridGap = columns >= 3 ? 16 : 12; // gap-3 / sm:gap-4
+  const estimatedRowHeight = useMemo(() => {
+    const cardWidth =
+      gridWidth > 0 ? (gridWidth - gridGap * (columns - 1)) / columns : 168;
+    // aspect-[4/3] thumbnail + meta block + row gap
+    return Math.round(cardWidth * 0.75 + CARD_META_HEIGHT + gridGap);
+  }, [gridWidth, gridGap, columns]);
+
+  const gridRowCount = Math.ceil(sorted.length / columns);
+  const gridVirtualizer = useWindowVirtualizer({
+    count: gridRowCount,
+    estimateSize: () => estimatedRowHeight,
+    overscan: GRID_OVERSCAN,
+    scrollMargin: gridOffset,
+  });
+
   // Infinite scroll trigger
   const lastItemRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -289,11 +378,7 @@ export function FileGrid({
   // ── Empty ──
   if (files.length === 0) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col items-center justify-center py-24 text-muted-foreground"
-      >
+      <div className="animate-fade-in flex flex-col items-center justify-center py-24 text-muted-foreground">
         <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/5 border border-accent/10">
           <File className="h-10 w-10 text-accent/40" />
         </div>
@@ -301,27 +386,52 @@ export function FileGrid({
         <p className="mt-1 text-sm text-muted-foreground/70">
           {trash ? "Recycle bin is empty" : "Upload files or create a note to get started"}
         </p>
-      </motion.div>
+      </div>
     );
   }
 
   // ====== GRID VIEW ======
   if (view === "grid") {
+    const virtualRows = gridVirtualizer.getVirtualItems();
+
     return (
       <div>
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-          {sorted.map((file, i) => (
-            <GridCard
-              key={file.id}
-              file={file}
-              index={i}
-              selected={selectedIds.has(file.id)}
-              trash={trash}
-              onFileAction={onFileAction}
-              onFileClick={onFileClick}
-              onSelect={onSelect}
-            />
-          ))}
+        <div
+          ref={gridRef}
+          className="relative w-full"
+          style={{ height: `${gridVirtualizer.getTotalSize()}px` }}
+        >
+          {virtualRows.map((virtualRow) => {
+            const start = virtualRow.index * columns;
+            const rowFiles = sorted.slice(start, start + columns);
+            return (
+              <div
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={gridVirtualizer.measureElement}
+                className="absolute left-0 top-0 w-full"
+                style={{
+                  transform: `translateY(${virtualRow.start - gridVirtualizer.options.scrollMargin}px)`,
+                }}
+              >
+                <div
+                  className="grid grid-cols-2 gap-3 pb-3 sm:gap-4 sm:pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
+                >
+                  {rowFiles.map((file) => (
+                    <GridCard
+                      key={file.id}
+                      file={file}
+                      selected={selectedIds.has(file.id)}
+                      trash={trash}
+                      onFileAction={onFileAction}
+                      onFileClick={onFileClick}
+                      onSelect={onSelect}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
         {hasMore && loadMore && (
           <div ref={lastItemRef} className="flex justify-center py-8">
@@ -434,9 +544,9 @@ export function FileGrid({
 // ─── Grid Card ──────────────────────────────────────────────────────────────
 
 const GridCard = memo(function GridCard({
-  file, index, selected, trash, onFileAction, onFileClick, onSelect,
+  file, selected, trash, onFileAction, onFileClick, onSelect,
 }: {
-  file: FileRecord; index: number; selected: boolean;
+  file: FileRecord; selected: boolean;
   trash?: boolean; onFileAction: (a: string, f: FileRecord) => void;
   onFileClick: (f: FileRecord) => void; onSelect: (id: string, shiftKey?: boolean) => void;
 }) {
@@ -447,16 +557,17 @@ const GridCard = memo(function GridCard({
   const isAudio = cat === "audio";
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ delay: Math.min(index * 0.025, 0.3), duration: 0.2 }}
-      whileHover={{ y: -4 }}
+    // Hover lift and press feedback run on transform/opacity only — compositor
+    // work, no layout or paint — and there is no mount animation, because cards
+    // mount and unmount constantly while the virtualized grid scrolls.
+    <div
       className={cn(
-        "group relative rounded-2xl border bg-surface overflow-hidden transition-all duration-200 cursor-pointer",
+        "group relative rounded-2xl border bg-surface overflow-hidden cursor-pointer",
+        "transition-[transform,box-shadow,border-color] duration-200 ease-out",
+        "active:scale-[0.985] motion-reduce:transition-none motion-reduce:active:scale-100",
         selected
           ? "border-accent/50 shadow-md shadow-accent/5 ring-1 ring-accent/20"
-          : "border-border/60 hover:shadow-lg hover:border-accent/30 hover:shadow-accent/5"
+          : "border-border/60 hover:-translate-y-1 hover:shadow-lg hover:border-accent/30 hover:shadow-accent/5"
       )}
       onClick={() => onFileClick(file)}
       onContextMenu={ctxMenu.onContextMenu}
@@ -527,7 +638,7 @@ const GridCard = memo(function GridCard({
         items={buildFileMenuItems(file, trash, onFileAction)}
         align="start"
       />
-    </motion.div>
+    </div>
   );
 });
 
@@ -578,9 +689,15 @@ const ListRow = memo(function ListRow({
         <div className="shrink-0 w-8 h-8 rounded-lg overflow-hidden relative">
           {hasThumb ? (
             <img
-              src={`/api/files/${file.id}/thumbnail?size=80`}
+              // 32px box — 150 is the smallest size the endpoint serves. The old
+              // `size=80` was not a served size, so the server silently fell
+              // back to 300 for every row.
+              src={`/api/files/${file.id}/thumbnail?size=150`}
               alt={file.name}
               loading="lazy"
+              decoding="async"
+              width={32}
+              height={32}
               className="w-full h-full object-cover"
             />
           ) : (
@@ -668,6 +785,7 @@ function ThumbnailCard({ file, children }: { file: FileRecord; children: React.R
           src={currentSrc}
           alt={file.name}
           loading="lazy"
+          decoding="async"
           onLoad={() => setLoaded(true)}
           onError={() => setError(true)}
           className={cn(

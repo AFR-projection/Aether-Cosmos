@@ -47,6 +47,23 @@ export const viewport: Viewport = {
   ],
 };
 
+// Resolves lite mode before first paint so a low-end device never renders the
+// expensive chrome once and then drops it. Mirrors lib/system/lite-mode.ts —
+// keep the two in sync.
+const LITE_MODE_BOOT = `(function(){try{
+var p=localStorage.getItem('lite_mode');
+var on=p==='on';
+if(!on&&p!=='off'){
+var c=navigator.connection||{};
+var m=navigator.deviceMemory,k=navigator.hardwareConcurrency;
+on=!!c.saveData
+||['slow-2g','2g','3g'].indexOf(c.effectiveType)>-1
+||(typeof m==='number'&&m<=2)
+||(typeof m==='number'&&m<=4&&typeof k==='number'&&k<=4);
+}
+if(on)document.documentElement.classList.add('lite');
+}catch(e){}})();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -54,6 +71,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="id" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: LITE_MODE_BOOT }} />
+      </head>
       <body className="min-h-full antialiased" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>

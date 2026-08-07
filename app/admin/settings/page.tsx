@@ -51,6 +51,26 @@ interface Section {
   icon: typeof Shield;
   gradient: string;
   fields: SettingField[];
+  /** Extra panel rendered under the fields — status the admin needs to trust the settings. */
+  footer?: "cleanup";
+}
+
+interface CleanupState {
+  lastRunAt: string | null;
+  lastSource: "worker" | "app" | null;
+  lastResult: {
+    trashFiles: number;
+    trashFolders: number;
+    lifetimeSoftDeleted: number;
+    logsDeleted: number;
+  } | null;
+  lastError: string | null;
+}
+
+interface SettingsMeta {
+  totalUsers?: number;
+  cleanup?: CleanupState | null;
+  sessionInactivityMs?: number | null;
 }
 
 const SETTING_SECTIONS: Section[] = [
@@ -85,9 +105,10 @@ const SETTING_SECTIONS: Section[] = [
     icon: Shield,
     gradient: "from-violet-500 to-fuchsia-500",
     fields: [
-      { key: "sessionDurationHours", label: "Session Duration", description: "How long a session stays active", type: "number", unit: "hours", min: 1, max: 8760 },
-      { key: "maxSessionsPerUser", label: "Max Sessions", description: "Concurrent sessions per user", type: "number", unit: "sessions", min: 1, max: 100 },
-      { key: "rateLimitPerMinute", label: "Rate Limit", description: "API requests per minute per user", type: "number", unit: "req/min", min: 10, max: 1000 },
+      { key: "sessionDurationHours", label: "Session Duration", description: "How long a session stays valid before the user must sign in again", type: "number", unit: "hours", min: 1, max: 8760 },
+      { key: "maxSessionsPerUser", label: "Max Sessions", description: "Concurrent sessions per user — the oldest is signed out when exceeded", type: "number", unit: "sessions", min: 1, max: 100 },
+      { key: "rateLimitPerMinute", label: "Rate Limit", description: "API requests per minute per user. Upload endpoints get 5× this value.", type: "number", unit: "req/min", min: 10, max: 1000 },
+      { key: "stepCodeRequired", label: "Require 2-Step Code", description: "Every user must set a numpad code entered after their password. Users without one are prompted to create it at next sign-in and cannot remove it.", type: "toggle" },
     ],
   },
   {
@@ -96,6 +117,7 @@ const SETTING_SECTIONS: Section[] = [
     description: "File policies, expiration and cleanup rules",
     icon: FileWarning,
     gradient: "from-amber-500 to-orange-500",
+    footer: "cleanup",
     fields: [
       { key: "maxFileLifetimeDays", label: "Max File Lifetime", description: "Auto-delete files after this many days (0 = unlimited)", type: "number", unit: "days", min: 0, max: 3650 },
       { key: "autoDeleteTrashDays", label: "Auto Delete Trash", description: "Automatically empty trash after this many days", type: "number", unit: "days", min: 0, max: 365 },
@@ -106,11 +128,12 @@ const SETTING_SECTIONS: Section[] = [
   {
     id: "retention",
     title: "Retention",
-    description: "Activity log retention (auto-cleanup needs worker + Redis)",
+    description: "Activity log retention",
     icon: Database,
     gradient: "from-blue-500 to-cyan-500",
+    footer: "cleanup",
     fields: [
-      { key: "logRetentionDays", label: "Log Retention", description: "How long to keep activity logs (cleaned hourly by the worker)", type: "number", unit: "days", min: 7, max: 730 },
+      { key: "logRetentionDays", label: "Log Retention", description: "How long to keep activity logs", type: "number", unit: "days", min: 7, max: 730 },
     ],
   },
   {
@@ -268,6 +291,91 @@ function SettingsField({ field, value, onChange }: {
   }
 }
 
+// ─── Cleanup status ───────────────────────────────────────────────────────────
+
+function formatAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return "just now";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * Retention settings only mean something if a sweep is actually running, so the
+ * admin sees when it last ran and which scheduler did it — the web app's own
+ * interval, or the BullMQ worker when Redis is up.
+ */
+function CleanupStatus({ cleanup }: { cleanup?: CleanupState | null }) {
+  if (!cleanup) return null;
+
+  const { lastRunAt, lastSource, lastResult, lastError } = cleanup;
+
+  return (
+    <div className="border-t border-border/30 px-6 py-4 text-xs">
+      {lastRunAt ? (
+        <div className="space-y-1.5">
+          <p className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+            <span className="text-foreground/80">
+              Last cleanup {formatAgo(lastRunAt)}
+            </span>
+            <span className="text-muted-foreground/60">
+              via {lastSource === "worker" ? "background worker" : "app scheduler"}
+            </span>
+          </p>
+          {lastResult && (
+            <p className="pl-5 text-muted-foreground/70">
+              {lastResult.trashFiles} trash files · {lastResult.trashFolders} folders ·{" "}
+              {lastResult.lifetimeSoftDeleted} expired · {lastResult.logsDeleted} logs
+            </p>
+          )}
+          {lastError && (
+            <p className="pl-5 text-red-500">Last run failed: {lastError}</p>
+          )}
+        </div>
+      ) : (
+        <p className="flex items-center gap-1.5 text-muted-foreground">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          No cleanup has run yet — the first sweep happens within ~20 minutes of server start.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The idle cut-off is set via SESSION_INACTIVITY_MS and, when shorter than the
+ * configured session duration, is what actually logs users out. Surfacing it
+ * here stops "Session Duration" from looking like it does nothing.
+ */
+function SessionDurationNote({
+  inactivityMs,
+  sessionDurationHours,
+}: {
+  inactivityMs?: number | null;
+  sessionDurationHours: number;
+}) {
+  if (!inactivityMs) return null;
+  const durationMs = sessionDurationHours * 3600_000;
+  if (inactivityMs >= durationMs) return null;
+
+  const minutes = Math.round(inactivityMs / 60000);
+  return (
+    <p className="flex items-start gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-xs text-amber-600 dark:text-amber-400">
+      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+      <span>
+        An idle timeout of {minutes} minutes is set via <code>SESSION_INACTIVITY_MS</code>,
+        so inactive users are signed out well before the {sessionDurationHours}h session
+        duration. Remove that variable to let this setting take full effect.
+      </span>
+    </p>
+  );
+}
+
 // ─── Settings Section ─────────────────────────────────────────────────────────
 
 function ToggleSwitch({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
@@ -322,7 +430,7 @@ export default function AdminSettingsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["admin-settings"],
     queryFn: async () => {
-      const res = await apiFetch<AdminSettings & { _meta?: { totalUsers?: number } }>("/api/admin/settings");
+      const res = await apiFetch<AdminSettings & { _meta?: SettingsMeta }>("/api/admin/settings");
       return res.data;
     },
   });
@@ -400,7 +508,7 @@ export default function AdminSettingsPage() {
 
   if (isLoading && !values) return <SettingsSkeleton />;
 
-  const meta = data?._meta as { totalUsers?: number } | undefined;
+  const meta = data?._meta as SettingsMeta | undefined;
 
   return (
     <div className="pb-28">
@@ -569,6 +677,12 @@ export default function AdminSettingsPage() {
                     </div>
                   </div>
                   <div className="space-y-5 px-6 py-5">
+                    {section.id === "security" && (
+                      <SessionDurationNote
+                        inactivityMs={meta?.sessionInactivityMs}
+                        sessionDurationHours={values.sessionDurationHours}
+                      />
+                    )}
                     {section.fields.map((field) => (
                       <div
                         key={field.key as string}
@@ -585,6 +699,7 @@ export default function AdminSettingsPage() {
                       </div>
                     ))}
                   </div>
+                  {section.footer === "cleanup" && <CleanupStatus cleanup={meta?.cleanup} />}
                 </motion.div>
               );
             })}
