@@ -11,12 +11,17 @@ load_env
 generate_nginx() {
   local domain="${DEPLOY_DOMAIN:-}"
   [[ -n "$domain" ]] || die "DEPLOY_DOMAIN missing"
+  domain="${domain,,}"
 
   local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
   local key="/etc/letsencrypt/live/${domain}/privkey.pem"
 
   [[ -f "$NGINX_TEMPLATE" ]] || die "Template not found: $NGINX_TEMPLATE"
-  [[ -f "$cert" ]] || die "SSL cert not found at $cert — run ssl.sh first"
+  if [[ $EUID -eq 0 ]]; then
+    [[ -f "$cert" ]] || die "SSL cert not found at $cert — run ssl.sh first"
+  else
+    sudo test -f "$cert" || die "SSL cert not found at $cert — run ssl.sh first"
+  fi
 
   command -v envsubst >/dev/null 2>&1 || {
     log "Installing gettext-base (envsubst)..."

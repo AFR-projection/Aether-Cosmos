@@ -36,8 +36,9 @@ main() {
   log "Database migration..."
   "${COMPOSE[@]}" --profile setup run --rm setup
 
-  if [[ -f "$NGINX_GEN" ]]; then
+  if [[ -f "$NGINX_TEMPLATE" ]]; then
     bash "$SCRIPT_DIR/ssl.sh" 2>/dev/null || warn "SSL renew skipped"
+    bash "$SCRIPT_DIR/nginx.sh" || warn "Nginx config generation skipped"
     "${COMPOSE[@]}" up -d nginx
   else
     "${COMPOSE[@]}" up -d
