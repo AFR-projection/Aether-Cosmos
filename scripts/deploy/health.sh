@@ -69,6 +69,7 @@ check_worker() {
 
 check_ssl() {
   local domain="${DEPLOY_DOMAIN:-}"
+  domain="${domain,,}"
   local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
   if [[ -f "$cert" ]]; then
     local expiry

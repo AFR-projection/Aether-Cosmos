@@ -12,6 +12,7 @@ setup_ssl() {
   local domain="${DEPLOY_DOMAIN:-}"
   local email="${CERTBOT_EMAIL:-admin@${domain}}"
 
+  domain="${domain,,}"
   [[ -n "$domain" ]] || die "DEPLOY_DOMAIN tidak ditemukan"
 
   log "Setting up SSL for $domain"
