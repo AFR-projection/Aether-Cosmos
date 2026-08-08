@@ -9,6 +9,7 @@ const publicPaths = [
   "/register",
   "/verify-email",
   "/maintenance",
+  "/auth",
   "/shared",
   "/api/auth/login",
   "/api/auth/register",

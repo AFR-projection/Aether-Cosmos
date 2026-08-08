@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef } from "react";
 import { Delete, Loader2, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -105,22 +105,16 @@ export function Numpad({
     >
       {/* Progress dots — one per possible position up to the minimum, then a
           growing tail so a longer code still reads as progress. */}
-      <div
-        className={cn("flex justify-center gap-2.5 py-1", error && "animate-shake")}
-        aria-hidden="true"
-      >
+      <div className={cn("auth-code-dots", error && "auth-code-dots--error")} aria-hidden="true">
         {Array.from({ length: Math.max(minLength, value.length) }).map((_, i) => {
           const filled = i < value.length;
           return (
             <span
               key={i}
               className={cn(
-                "h-3 w-3 rounded-full border-2 transition-[background-color,border-color,transform] duration-150",
-                filled
-                  ? error
-                    ? "scale-110 border-danger bg-danger"
-                    : "scale-110 border-accent bg-accent"
-                  : "border-border bg-transparent"
+                "auth-code-dot",
+                filled && "auth-code-dot--filled",
+                filled && error && "auth-code-dot--error"
               )}
             />
           );
@@ -131,25 +125,17 @@ export function Numpad({
         {value.length} of at least {minLength} digits entered
       </p>
 
-      <div className="mt-3 min-h-[2.5rem] px-2 text-center">
+      <div className="auth-code-caption mt-3 min-h-[2.5rem] px-2 text-center">
         {message ? (
-          <p
-            role="alert"
-            className={cn(
-              "text-sm leading-snug",
-              error ? "font-medium text-danger" : "text-muted-foreground"
-            )}
-          >
+          <p role="alert" className={cn(error && "auth-error-text")}>
             {message}
           </p>
         ) : (
-          <p className="text-xs text-muted-foreground/70">
-            {minLength}–{maxLength} digits
-          </p>
+          <p>{minLength}–{maxLength} digits</p>
         )}
       </div>
 
-      <div className="mx-auto mt-4 grid max-w-[280px] grid-cols-3 gap-3">
+      <div className="auth-numpad mt-4">
         {KEYS.map((key) => (
           <NumpadKey key={key} onPress={() => append(key)} disabled={disabled || loading}>
             {key}
@@ -176,15 +162,7 @@ export function Numpad({
         type="button"
         onClick={onSubmit}
         disabled={!canSubmit}
-        className={cn(
-          "mx-auto mt-6 flex h-12 w-full max-w-[280px] items-center justify-center gap-2 rounded-xl",
-          "bg-accent text-base font-semibold text-white shadow-sm",
-          "transition-[background-color,opacity,transform] duration-150",
-          "hover:bg-accent/90 active:scale-[0.98]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-          "disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100",
-          "motion-reduce:transition-none motion-reduce:active:scale-100"
-        )}
+        className="auth-primary-button auth-code-submit"
       >
         {loading ? (
           <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
@@ -216,17 +194,10 @@ function NumpadKey({
       onClick={onPress}
       disabled={disabled}
       aria-label={label}
-      className={cn(
-        "flex h-14 items-center justify-center rounded-xl border text-xl font-semibold tabular-nums",
-        "transition-[background-color,border-color,transform] duration-150",
-        "active:scale-[0.96]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        "disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100",
-        "motion-reduce:transition-none motion-reduce:active:scale-100",
-        variant === "muted"
-          ? "border-transparent bg-transparent text-muted-foreground hover:bg-surface-hover"
-          : "border-border/60 bg-surface hover:border-accent/40 hover:bg-surface-hover"
-      )}
+        className={cn(
+          "auth-numpad-button",
+          variant === "muted" && "auth-numpad-button--muted"
+        )}
     >
       {children}
     </button>
