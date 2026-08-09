@@ -12,6 +12,9 @@ const publicPaths = [
   "/auth",
   "/shared",
   "/api/auth/login",
+  // Pre-session enrollment is authenticated by the short-lived HMAC-signed
+  // password-stage token inside the route, not by a session cookie.
+  "/api/auth/step-code/enroll",
   "/api/auth/register",
   "/api/auth/register-email",
   "/api/auth/verify-otp",

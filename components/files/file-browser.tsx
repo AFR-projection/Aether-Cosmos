@@ -1146,31 +1146,15 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
               />
             </label>
 
-            {/* New item dropdown */}
-            <div className="relative">
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-9 gap-1.5 px-3"
-                onClick={() => setSortMenuOpen(false) as unknown as void || void 0}
-                title="New…"
-              >
-                <FolderPlus className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">New</span>
-              </Button>
-              {/* quick-access below */}
-              <div className="absolute right-0 top-full mt-1 hidden group-focus-within:flex flex-col" />
-            </div>
-
-            <Button variant="secondary" size="sm" onClick={createFolder} className="h-9 px-2.5 gap-1.5" title="New folder">
+            <Button variant="secondary" size="sm" onClick={() => void createFolder()} className="h-9 px-2.5 gap-1.5" title="New folder">
               <FolderPlus className="h-3.5 w-3.5" />
               <span className="hidden md:inline text-xs">Folder</span>
             </Button>
-            <Button variant="secondary" size="sm" onClick={createNote} className="h-9 px-2.5 gap-1.5" title="New note">
+            <Button variant="secondary" size="sm" onClick={() => void createNote()} className="h-9 px-2.5 gap-1.5" title="New note">
               <FilePlus className="h-3.5 w-3.5" />
               <span className="hidden md:inline text-xs">Note</span>
             </Button>
-            <Button variant="secondary" size="sm" onClick={pickAndUploadFolder} className="h-9 px-2.5 gap-1.5" title="Upload folder">
+            <Button variant="secondary" size="sm" onClick={() => void pickAndUploadFolder()} className="h-9 px-2.5 gap-1.5" title="Upload folder">
               <FolderUp className="h-3.5 w-3.5" />
               <span className="hidden lg:inline text-xs">Folder upload</span>
             </Button>

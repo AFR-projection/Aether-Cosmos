@@ -62,30 +62,20 @@ function useGridColumns(): number {
 }
 
 // ─── Right-click context menu hook ────────────────────────────────────────────
-// Places a zero-size fixed anchor at the cursor so FloatingActionMenu can position
-// its popover exactly where the user right-clicked.
+// Keeps the pointer in viewport coordinates so the menu stays correct inside
+// transformed and virtualized grid/list rows.
 function useContextMenu() {
-  const anchorRef = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setPos({ x: e.clientX, y: e.clientY });
+    setPoint({ x: e.clientX, y: e.clientY });
     setOpen(true);
   };
 
-  const anchorStyle: React.CSSProperties = {
-    position: "fixed",
-    left: pos.x,
-    top: pos.y,
-    width: 0,
-    height: 0,
-    pointerEvents: "none",
-  };
-
-  return { anchorRef, open, close: () => setOpen(false), onContextMenu, anchorStyle };
+  return { open, point, close: () => setOpen(false), onContextMenu };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -192,19 +182,19 @@ function buildFileMenuItems(
   if (trash) {
     return [
       { id: "restore", label: "Restore", icon: RotateCcw, onClick: () => onAction("restore", file) },
-      { id: "delete", label: "Delete permanently", icon: Trash2, danger: true, onClick: () => onAction("delete", file) },
+      { id: "delete", label: "Delete permanently", icon: Trash2, danger: true, shortcut: "Del", onClick: () => onAction("delete", file) },
     ];
   }
   return [
     { id: "download", label: "Download", icon: Download, onClick: () => onAction("download", file) },
     { id: "share", label: "Share", icon: Share2, onClick: () => onAction("share", file) },
-    { id: "clip-copy", label: "Copy", icon: Copy, onClick: () => onAction("clip-copy", file) },
-    { id: "clip-cut", label: "Cut", icon: Scissors, onClick: () => onAction("clip-cut", file) },
-    { id: "rename", label: "Rename", icon: Pencil, onClick: () => onAction("rename", file) },
-    { id: "move", label: "Move to…", icon: FolderInput, onClick: () => onAction("move", file) },
+    { id: "clip-copy", label: "Copy", icon: Copy, shortcut: "Ctrl C", onClick: () => onAction("clip-copy", file) },
+    { id: "clip-cut", label: "Cut", icon: Scissors, shortcut: "Ctrl X", onClick: () => onAction("clip-cut", file) },
+    { id: "rename", label: "Rename", icon: Pencil, shortcut: "F2", onClick: () => onAction("rename", file) },
+    { id: "move", label: "Move to…", icon: FolderInput, shortcut: "M", onClick: () => onAction("move", file) },
     { id: "favorite", label: file.isFavorite ? "Unfavorite" : "Favorite", icon: Star, onClick: () => onAction("favorite", file) },
     { id: "duplicate", label: "Duplicate", icon: CopyPlus, onClick: () => onAction("duplicate", file) },
-    { id: "delete", label: "Move to trash", icon: Trash2, danger: true, onClick: () => onAction("delete", file) },
+    { id: "delete", label: "Move to trash", icon: Trash2, danger: true, shortcut: "Del", onClick: () => onAction("delete", file) },
   ];
 }
 
@@ -421,7 +411,10 @@ export function FileGrid({
                 key={virtualRow.key}
                 data-index={virtualRow.index}
                 ref={gridVirtualizer.measureElement}
-                className="absolute left-0 top-0 w-full"
+                // Each transformed virtual row is its own stacking context.
+                // Lift the hovered row above the next row so the card details
+                // popover is never painted underneath it.
+                className="absolute left-0 top-0 w-full hover:z-20"
                 style={{
                   transform: `translateY(${virtualRow.start - gridVirtualizer.options.scrollMargin}px)`,
                 }}
@@ -581,8 +574,23 @@ const GridCard = memo(function GridCard({
           ? "ring-2 ring-accent/50 ring-offset-2 ring-offset-background shadow-lg shadow-accent/8"
           : "ring-1 ring-border/50 hover:-translate-y-0.5 hover:shadow-[0_6px_24px_rgba(0,0,0,0.10)] hover:ring-border/80"
       )}
-      onClick={() => onFileClick(file)}
-      onContextMenu={ctxMenu.onContextMenu}
+      onClick={(e) => {
+        if (e.button !== 0) return;
+        onFileClick(file);
+      }}
+      onMouseDown={(e) => {
+        if (e.button !== 0) e.stopPropagation();
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 0) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
+      onContextMenu={(e) => {
+        ctxMenu.onContextMenu(e);
+        if (!selected) onSelect(file.id);
+      }}
       onMouseEnter={() => setHoverInfo(true)}
       onMouseLeave={() => setHoverInfo(false)}
     >
@@ -645,13 +653,14 @@ const GridCard = memo(function GridCard({
       {hoverInfo && <HoverInfoCard file={file} />}
 
       {/* Right-click context menu */}
-      <span ref={ctxMenu.anchorRef} style={ctxMenu.anchorStyle} aria-hidden />
       <FloatingActionMenu
         open={ctxMenu.open}
         onClose={ctxMenu.close}
-        anchorRef={ctxMenu.anchorRef}
+        anchorPoint={ctxMenu.point}
         items={buildFileMenuItems(file, trash, onFileAction)}
-        align="start"
+        placement="context"
+        menuLabel={`Actions for ${file.name}`}
+        header={{ title: file.name, subtitle: `${getTypeLabel(file.mimeType)} · ${formatBytes(file.sizeBytes)}` }}
       />
     </div>
   );
@@ -679,8 +688,23 @@ const ListRow = memo(function ListRow({
         "items-center px-3 sm:px-4 border-b border-border/15 transition-colors cursor-pointer",
         selected ? "bg-accent/5" : "hover:bg-muted/40"
       )}
-      onClick={() => onFileClick(file)}
-      onContextMenu={ctxMenu.onContextMenu}
+      onClick={(e) => {
+        if (e.button !== 0) return;
+        onFileClick(file);
+      }}
+      onMouseDown={(e) => {
+        if (e.button !== 0) e.stopPropagation();
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 0) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
+      onContextMenu={(e) => {
+        ctxMenu.onContextMenu(e);
+        if (!selected) onSelect(file.id);
+      }}
     >
       {/* Checkbox */}
       <button
@@ -757,13 +781,14 @@ const ListRow = memo(function ListRow({
       </div>
 
       {/* Right-click context menu */}
-      <span ref={ctxMenu.anchorRef} style={ctxMenu.anchorStyle} aria-hidden />
       <FloatingActionMenu
         open={ctxMenu.open}
         onClose={ctxMenu.close}
-        anchorRef={ctxMenu.anchorRef}
+        anchorPoint={ctxMenu.point}
         items={menuItems}
-        align="start"
+        placement="context"
+        menuLabel={`Actions for ${file.name}`}
+        header={{ title: file.name, subtitle: `${getTypeLabel(file.mimeType)} · ${formatBytes(file.sizeBytes)}` }}
       />
     </div>
   );

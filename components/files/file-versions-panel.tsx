@@ -121,7 +121,7 @@ export function FileVersionsPanel({
                 size="sm"
                 className="h-8 shrink-0"
                 disabled={restoring === v.version}
-                onClick={() => handleRestore(v.version)}
+                onClick={() => void handleRestore(v.version)}
               >
                 {restoring === v.version ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       return apiError(validation.errors.join(", "), 400, { code: "STEP_CODE_WEAK" });
     }
 
-    await db
+    const [enrolled] = await db
       .update(users)
       .set({
         stepCodeHash: await hashStepCode(body.newCode),
@@ -83,7 +83,16 @@ export async function POST(request: NextRequest) {
         stepCodeMustChange: false,
         updatedAt: new Date(),
       })
-      .where(eq(users.id, user.id));
+      // Keep the preflight check above race-safe: a staged token may be
+      // submitted twice, but only the first request may claim enrollment.
+      .where(and(eq(users.id, user.id), isNull(users.stepCodeHash)))
+      .returning({ id: users.id });
+
+    if (!enrolled) {
+      return apiError("A 2-Step Code is already set for this account", 409, {
+        code: "STEP_CODE_ALREADY_SET",
+      });
+    }
 
     await logActivity(user, "step_code_change", {
       ip,
