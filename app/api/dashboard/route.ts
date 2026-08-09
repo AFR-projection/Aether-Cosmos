@@ -16,7 +16,7 @@ export async function GET() {
     const [fileStats] = await db
       .select({ total: count(), totalSize: sum(files.sizeBytes) })
       .from(files)
-      .where(and(eq(files.userId, userId), isNull(files.deletedAt)));
+      .where(and(eq(files.userId, userId), isNull(files.deletedAt), eq(files.status, "ready")));
 
     const [folderStats] = await db
       .select({ total: count() })
@@ -26,7 +26,7 @@ export async function GET() {
     const recentFiles = await db
       .select()
       .from(files)
-      .where(and(eq(files.userId, userId), isNull(files.deletedAt)))
+      .where(and(eq(files.userId, userId), isNull(files.deletedAt), eq(files.status, "ready")))
       .orderBy(desc(files.createdAt))
       .limit(10);
 
@@ -45,7 +45,7 @@ export async function GET() {
       const [allFiles] = await db
         .select({ total: count(), totalSize: sum(files.sizeBytes) })
         .from(files)
-        .where(isNull(files.deletedAt));
+        .where(and(isNull(files.deletedAt), eq(files.status, "ready")));
       globalStats = {
         totalUsers: allUsers.total,
         totalFiles: allFiles.total,

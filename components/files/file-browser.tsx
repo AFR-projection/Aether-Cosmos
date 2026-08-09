@@ -20,7 +20,7 @@ import dynamic from "next/dynamic";
 import { DndContext, DragEndEvent } from "@dnd-kit/core";
 import { FolderCard } from "@/components/folders/folder-card";
 import { UploadQueue, traverseDirectory } from "@/lib/upload-queue";
-import { requestDownload, downloadZip } from "@/lib/download/download-actions";
+import { requestDownload, downloadZip, requestFolderArchive } from "@/lib/download/download-actions";
 import { EncryptionSetupDialog } from "./encryption-setup-dialog";
 import { MoveToFolderDialog } from "./move-to-folder-dialog";
 import { BulkRenameDialog } from "./bulk-rename-dialog";
@@ -1325,6 +1325,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
               onRename={(f) => folderAction("rename", f)}
               onDelete={(f) => folderAction("delete", f)}
               onShare={trash ? undefined : (f) => setInviteFolder(f)}
+              onDownload={trash ? undefined : (f) => void requestFolderArchive(f.id, f.name)}
             />
           ))}
         </div>

@@ -18,7 +18,7 @@ export async function GET(
     const [file] = await db
       .select()
       .from(files)
-      .where(and(eq(files.id, share.fileId), isNull(files.deletedAt)))
+      .where(and(eq(files.id, share.fileId), isNull(files.deletedAt), eq(files.status, "ready")))
       .limit(1);
 
     if (!file) return apiError("File not found", 404);

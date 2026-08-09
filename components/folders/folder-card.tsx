@@ -1,7 +1,7 @@
 "use client";
 
 import { useDroppable } from "@dnd-kit/core";
-import { Folder, MoreHorizontal, Pencil, Trash2, Users } from "lucide-react";
+import { Download, Folder, MoreHorizontal, Pencil, Trash2, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FloatingActionMenu, useFloatingMenu, type FloatingMenuItem } from "@/components/ui/floating-action-menu";
@@ -13,6 +13,7 @@ interface FolderCardProps {
   onRename: (folder: FolderRecord) => void;
   onDelete: (folder: FolderRecord) => void;
   onShare?: (folder: FolderRecord) => void;
+  onDownload?: (folder: FolderRecord) => void;
 }
 
 export function FolderCard({
@@ -21,6 +22,7 @@ export function FolderCard({
   onRename,
   onDelete,
   onShare,
+  onDownload,
 }: FolderCardProps) {
   const { isOver, setNodeRef } = useDroppable({ id: folder.id });
   const menu = useFloatingMenu();
@@ -33,6 +35,15 @@ export function FolderCard({
       label: "Share folder",
       icon: Users,
       onClick: () => onShare(folder),
+    });
+  }
+
+  if (!trash && onDownload) {
+    menuItems.push({
+      id: "download",
+      label: "Download folder",
+      icon: Download,
+      onClick: () => onDownload(folder),
     });
   }
 

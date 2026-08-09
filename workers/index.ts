@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { Worker } from "bullmq";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, sql as drizzleSql } from "drizzle-orm";
 import sharp from "sharp";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -11,10 +11,28 @@ import path from "path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "../lib/db/schema";
-import { files, webhooks } from "../lib/db/schema";
+import {
+  archiveJobItems,
+  archiveJobs,
+  deletionJobItems,
+  deletionJobs,
+  files,
+  folders,
+  users,
+  webhooks,
+} from "../lib/db/schema";
 import { QUEUE_NAME } from "../lib/queue";
 import { runScheduledCleanups } from "./cleanup";
 import { Queue } from "bullmq";
+import { PassThrough, Readable } from "stream";
+import { ZipArchive } from "archiver";
+import {
+  deleteR2Object,
+  deleteR2Objects,
+  downloadFromR2Stream,
+  headObject,
+  uploadR2Stream,
+} from "../lib/storage/r2";
 
 const execFileAsync = promisify(execFile);
 
@@ -51,8 +69,8 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const sql = postgres(connectionString, { max: 5 });
-const db = drizzle(sql, { schema });
+const postgresClient = postgres(connectionString, { max: 5 });
+const db = drizzle(postgresClient, { schema });
 
 function getR2Client() {
   return new S3Client({
@@ -303,6 +321,220 @@ async function deliverWebhook(data: {
   }
 }
 
+function waitForReadableEnd(stream: Readable): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onEnd = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      stream.removeListener("end", onEnd);
+      stream.removeListener("error", onError);
+    };
+    stream.once("end", onEnd);
+    stream.once("error", onError);
+  });
+}
+
+/** Build a folder archive as a streaming R2 object. No complete archive or
+ * source file is buffered in the worker process. */
+async function buildArchive(archiveJobId: string): Promise<void> {
+  const [claimed] = await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(archiveJobs)
+      .set({
+        status: "processing",
+        startedAt: new Date(),
+        processedFiles: 0,
+        processedBytes: 0,
+        errorCode: null,
+        errorMessage: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(archiveJobs.id, archiveJobId),
+        inArray(archiveJobs.status, ["created", "failed"])
+      ))
+      .returning();
+
+    if (rows.length === 0) return [];
+    await tx
+      .update(archiveJobItems)
+      .set({ status: "pending", lastError: null, updatedAt: new Date() })
+      .where(eq(archiveJobItems.archiveJobId, archiveJobId));
+    return rows;
+  });
+
+  if (!claimed) return;
+
+  try {
+    await deleteR2Object(claimed.objectKey);
+    const items = await db
+      .select()
+      .from(archiveJobItems)
+      .where(eq(archiveJobItems.archiveJobId, archiveJobId));
+    if (items.length === 0) throw new Error("Archive contains no files");
+
+    const output = new PassThrough();
+    const archive = new ZipArchive({ zlib: { level: 1 } });
+    let archiveError: Error | null = null;
+    archive.on("error", (error: Error) => {
+      archiveError = error;
+      output.destroy(error);
+    });
+    archive.pipe(output);
+
+    const uploadPromise = uploadR2Stream(claimed.objectKey, output, "application/zip");
+
+    for (const item of items) {
+      await db.update(archiveJobItems).set({ status: "processing", updatedAt: new Date() })
+        .where(eq(archiveJobItems.id, item.id));
+
+      const object = await downloadFromR2Stream(item.objectKey);
+      if (!object.body) throw new Error(`Source object is empty: ${item.objectKey}`);
+      if (object.contentLength !== undefined && object.contentLength !== item.sizeBytes) {
+        throw new Error(`Source object size mismatch: ${item.objectKey}`);
+      }
+
+      const body = object.body as unknown;
+      const source = typeof (body as { pipe?: unknown }).pipe === "function"
+        ? body as Readable
+        : Readable.fromWeb(body as import("stream/web").ReadableStream);
+      const sourceEnd = waitForReadableEnd(source);
+      archive.append(source, { name: item.archivePath });
+      await sourceEnd;
+      if (archiveError) throw archiveError;
+
+      const now = new Date();
+      await db.transaction(async (tx) => {
+        await tx.update(archiveJobItems).set({ status: "completed", updatedAt: now })
+          .where(eq(archiveJobItems.id, item.id));
+        await tx.update(archiveJobs).set({
+          processedFiles: drizzleSql`processed_files + 1`,
+          processedBytes: drizzleSql`processed_bytes + ${item.sizeBytes}`,
+          updatedAt: now,
+        }).where(and(eq(archiveJobs.id, archiveJobId), eq(archiveJobs.status, "processing")));
+      });
+    }
+
+    await archive.finalize();
+    await uploadPromise;
+    const archivedObject = await headObject(claimed.objectKey);
+    if (archivedObject.contentLength <= 0) throw new Error("Generated archive is empty");
+
+    const completedAt = new Date();
+    await db.update(archiveJobs).set({
+      status: "ready",
+      processedFiles: claimed.totalFiles,
+      processedBytes: claimed.totalBytes,
+      completedAt,
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: completedAt,
+    }).where(and(eq(archiveJobs.id, archiveJobId), eq(archiveJobs.status, "processing")));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Archive build failed";
+    await db.update(archiveJobs).set({
+      status: "failed",
+      errorCode: "ARCHIVE_BUILD_FAILED",
+      errorMessage: message.slice(0, 1000),
+      updatedAt: new Date(),
+    }).where(and(eq(archiveJobs.id, archiveJobId), eq(archiveJobs.status, "processing")));
+    await db.update(archiveJobItems).set({ status: "failed", lastError: message.slice(0, 1000), updatedAt: new Date() })
+      .where(and(eq(archiveJobItems.archiveJobId, archiveJobId), eq(archiveJobItems.status, "processing")));
+    throw error;
+  }
+}
+
+/** Delete a large folder in bounded R2 batches, then remove its metadata. */
+async function processDeletion(deletionJobId: string): Promise<void> {
+  const [claimed] = await db.transaction(async (tx) => {
+    const rows = await tx.update(deletionJobs).set({
+      status: "processing",
+      startedAt: new Date(),
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(deletionJobs.id, deletionJobId),
+      inArray(deletionJobs.status, ["created", "failed"])
+    )).returning();
+    if (rows.length === 0) return [];
+    await tx.update(deletionJobItems).set({ status: "pending", lastError: null, updatedAt: new Date() })
+      .where(eq(deletionJobItems.deletionJobId, deletionJobId));
+    return rows;
+  });
+  if (!claimed) return;
+
+  try {
+    const items = await db.select().from(deletionJobItems)
+      .where(eq(deletionJobItems.deletionJobId, deletionJobId));
+
+    for (let offset = 0; offset < items.length; offset += 100) {
+      const batch = items.slice(offset, offset + 100);
+      await db.update(deletionJobItems).set({ status: "processing", updatedAt: new Date() })
+        .where(inArray(deletionJobItems.id, batch.map((item) => item.id)));
+
+      const keys = batch.flatMap((item) => [item.objectKey, item.thumbnailKey ?? ""]);
+      await deleteR2Objects(keys);
+
+      const fileIds = batch.map((item) => item.fileId).filter((id): id is string => !!id);
+      await db.transaction(async (tx) => {
+        if (fileIds.length > 0) await tx.delete(files).where(inArray(files.id, fileIds));
+        await tx.update(deletionJobItems).set({ status: "completed", updatedAt: new Date() })
+          .where(inArray(deletionJobItems.id, batch.map((item) => item.id)));
+        await tx.update(deletionJobs).set({
+          processedItems: drizzleSql`processed_items + ${batch.length}`,
+          updatedAt: new Date(),
+        }).where(and(eq(deletionJobs.id, deletionJobId), eq(deletionJobs.status, "processing")));
+      });
+    }
+
+    const folder = claimed.folderId
+      ? (await db.select().from(folders).where(eq(folders.id, claimed.folderId)).limit(1))[0]
+      : null;
+    if (folder) {
+      const prefix = `${folder.materializedPath.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      await db.execute(drizzleSql`
+        DELETE FROM ${folders}
+        WHERE user_id = ${claimed.userId}
+          AND materialized_path LIKE ${prefix} ESCAPE '\\'
+      `);
+    }
+
+    const [usage] = await db.select({ total: drizzleSql<number>`COALESCE(SUM(${files.sizeBytes}), 0)` })
+      .from(files).where(and(
+        eq(files.userId, claimed.userId),
+        drizzleSql`deleted_at IS NULL`,
+        inArray(files.status, ["ready", "legacy_unverified"])
+      ));
+    await db.update(users).set({ usedBytes: Number(usage?.total ?? 0), updatedAt: new Date() })
+      .where(eq(users.id, claimed.userId));
+
+    await db.update(deletionJobs).set({
+      status: "completed",
+      processedItems: claimed.totalItems,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(eq(deletionJobs.id, deletionJobId), eq(deletionJobs.status, "processing")));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Deletion failed";
+    await db.update(deletionJobs).set({
+      status: "failed",
+      errorCode: "DELETE_BATCH_FAILED",
+      errorMessage: message.slice(0, 1000),
+      updatedAt: new Date(),
+    }).where(and(eq(deletionJobs.id, deletionJobId), eq(deletionJobs.status, "processing")));
+    await db.update(deletionJobItems).set({ status: "failed", lastError: message.slice(0, 1000), updatedAt: new Date() })
+      .where(and(eq(deletionJobItems.deletionJobId, deletionJobId), eq(deletionJobItems.status, "processing")));
+    throw error;
+  }
+}
+
 const worker = new Worker(
   QUEUE_NAME,
   async (job) => {
@@ -317,6 +549,8 @@ const worker = new Worker(
       url?: string;
       secret?: string;
       body?: string;
+      archiveJobId?: string;
+      deletionJobId?: string;
     };
 
     switch (data.type) {
@@ -341,6 +575,12 @@ const worker = new Worker(
         break;
       case "cleanup_schedules":
         await runScheduledCleanups(db);
+        break;
+      case "build_archive":
+        await buildArchive(data.archiveJobId!);
+        break;
+      case "process_deletion":
+        await processDeletion(data.deletionJobId!);
         break;
     }
   },

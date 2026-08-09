@@ -18,6 +18,9 @@ import { escapeRegex } from "@/lib/utils";
 import { cacheDelPattern } from "@/lib/cache/redis";
 import { getAdminSettings } from "@/lib/admin-settings";
 import { deleteR2Objects } from "@/lib/storage/r2";
+import { createFolderDeletionJob } from "@/lib/storage/deletion-service";
+
+const LARGE_FOLDER_DELETE_THRESHOLD = 500;
 
 async function buildPath(parentId: string | null, name: string, userId: string) {
   if (!parentId) {
@@ -227,8 +230,8 @@ export async function DELETE(request: NextRequest) {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
 
     const sessionUser = await requireAuth();
-    const { id, permanent } = z
-      .object({ id: z.string().uuid(), permanent: z.boolean().default(false) })
+    const { id, permanent, idempotencyKey } = z
+      .object({ id: z.string().uuid(), permanent: z.boolean().default(false), idempotencyKey: z.string().min(16).max(128).optional() })
       .parse(await request.json());
     const ip = getClientIp(request);
 
@@ -250,6 +253,23 @@ export async function DELETE(request: NextRequest) {
               AND materialized_path ILIKE ${subPathPattern}
           )`
         );
+
+      if (subtreeFiles.length > LARGE_FOLDER_DELETE_THRESHOLD) {
+        const deletion = await createFolderDeletionJob(
+          folder.userId,
+          folder.id,
+          idempotencyKey ?? crypto.randomUUID()
+        );
+        if (!deletion) return apiError("Folder not found", 404);
+        if (!deletion.queued) return apiError("Deletion worker sedang tidak tersedia, silakan coba lagi", 503);
+        await logActivity(sessionUser, "delete_folder", {
+          resourceType: "folder",
+          resourceId: id,
+          metadata: { permanent: true, asynchronous: true, jobId: deletion.job.id, count: subtreeFiles.length },
+          ip,
+        });
+        return apiSuccess({ deleteJob: deletion.job }, 202);
+      }
 
       const keys: string[] = [];
       for (const f of subtreeFiles) {

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { Readable, PassThrough } from "stream";
 import { ZipArchive } from "archiver";
 import { z } from "zod";
-import { inArray, and, isNull } from "drizzle-orm";
+import { inArray, and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { requireAuthOrApiKey } from "@/lib/auth/api-key";
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     const rows = await db
       .select()
       .from(files)
-      .where(and(inArray(files.id, body.ids), isNull(files.deletedAt)));
+      .where(and(inArray(files.id, body.ids), isNull(files.deletedAt), eq(files.status, "ready")));
 
     if (rows.length === 0) return apiError("No files found", 404);
 

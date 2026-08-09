@@ -43,19 +43,23 @@ export type JobType =
   | "trim_media"
   | "recalculate_quota"
   | "deliver_webhook"
-  | "cleanup_schedules";
+  | "cleanup_schedules"
+  | "build_archive"
+  | "process_deletion";
 
 export async function enqueueJob(
   type: JobType,
   data: Record<string, unknown> = {},
   opts?: { jobId?: string; repeat?: { every: number } }
-): Promise<void> {
+): Promise<boolean> {
   try {
     const q = getQueue();
-    if (!q) return;
+    if (!q) return false;
     await q.add(type, { type, ...data }, opts);
+    return true;
   } catch {
     // Jobs are optional in dev without Redis
+    return false;
   }
 }
 

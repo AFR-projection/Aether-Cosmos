@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     const cached = await cacheGet(cacheKey);
     if (cached) return apiSuccess(cached);
 
-    const conditions = [eq(files.userId, userId), isNull(files.deletedAt)];
+    const conditions = [eq(files.userId, userId), isNull(files.deletedAt), eq(files.status, "ready")];
 
     // Non-empty trimmed query enables full-text mode; null means filter-only.
     const query = hasSearchTerms(params.q) ? params.q.trim() : null;

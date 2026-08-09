@@ -37,12 +37,20 @@ export const db = new Proxy({} as Database, {
 
 export async function recalculateUsedBytes(userId: string) {
   const { files, users } = await import("./schema");
-  const { eq, and, isNull, sum } = await import("drizzle-orm");
+  const { eq, and, inArray, isNull, sum } = await import("drizzle-orm");
 
   const [result] = await getDatabase()
     .select({ total: sum(files.sizeBytes) })
     .from(files)
-    .where(and(eq(files.userId, userId), isNull(files.deletedAt)));
+    .where(
+      and(
+        eq(files.userId, userId),
+        isNull(files.deletedAt),
+        // Legacy rows are counted conservatively until the R2 reconciliation
+        // worker verifies them. New non-ready uploads must not consume usedBytes.
+        inArray(files.status, ["ready", "legacy_unverified"])
+      )
+    );
 
   await getDatabase()
     .update(users)

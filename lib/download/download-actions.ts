@@ -1,36 +1,21 @@
 "use client";
 
 import { getCsrfToken } from "@/lib/api/client";
-import {
-  decryptToBlob,
-  isEncryptionMeta,
-  type EncryptionMetaV1,
-} from "@/lib/crypto/client-encryption";
-import {
-  startDownload,
-  finishDownload,
-  failDownload,
-  updateDownloadProgress,
-} from "./download-store";
+import { decryptToBlob, isEncryptionMeta, type EncryptionMetaV1 } from "@/lib/crypto/client-encryption";
+import { startDownload, finishDownload, failDownload, updateDownloadProgress } from "./download-store";
 import { setPendingEncryptedDownload } from "./encrypted-download-store";
 
-/** Trigger a browser download of a blob URL with the given filename. */
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoke on the next tick so the browser has grabbed the URL.
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/**
- * Minimal shape needed to decide how to download a file. Any record with these
- * fields works (the full DB File row satisfies it).
- */
 export type DownloadableFile = {
   id: string;
   name: string;
@@ -40,55 +25,21 @@ export type DownloadableFile = {
   encryptionMeta?: unknown;
 };
 
-/**
- * Files at or above this size download through the progress proxy so the user
- * gets a live progress bar + speed + resume. Smaller files go straight to R2
- * (instant, zero server bandwidth) since a progress bar would just flash.
- */
-const PROGRESS_THRESHOLD_BYTES = 25 * 1024 * 1024; // 25 MB
-
-/**
- * Central, "smart" entry point for downloading a file — one action, right
- * behaviour for each case:
- *   - Encrypted (E2E): hand off to the passphrase dialog, which decrypts in the
- *     browser and saves the real file (passphrase never touches the server).
- *   - Large plain file: stream via the progress proxy (live progress + resume).
- *   - Small plain file: redirect straight to R2 (instant, no server bandwidth).
- *
- * Prefer this over calling downloadFile/downloadFileWithProgress directly.
- */
 export function requestDownload(file: DownloadableFile) {
   if (file.encrypted) {
     if (!isEncryptionMeta(file.encryptionMeta)) {
-      // No metadata means we can't decrypt — surface it instead of handing over
-      // unusable bytes.
       const id = startDownload(file.name);
       failDownload(id, "File terenkripsi tapi metadata enkripsi tidak ada");
       return;
     }
-    setPendingEncryptedDownload({
-      fileId: file.id,
-      fileName: file.name,
-      mimeType: file.mimeType,
-      meta: file.encryptionMeta as EncryptionMetaV1,
-    });
+    setPendingEncryptedDownload({ fileId: file.id, fileName: file.name, mimeType: file.mimeType, meta: file.encryptionMeta as EncryptionMetaV1 });
     return;
   }
-
-  if ((file.sizeBytes ?? 0) >= PROGRESS_THRESHOLD_BYTES) {
-    void downloadFileWithProgress(file.id, file.name);
-    return;
-  }
-
+  // The API authenticates and returns a short-lived R2 URL. The browser then
+  // transfers the bytes directly, including for multi-GB objects.
   downloadFile(file.id, file.name);
 }
 
-/**
- * Fetch an encrypted file's ciphertext, decrypt it in the browser with the
- * given passphrase, and save the real plaintext file. Used by the global
- * encrypted-download dialog. Throws on wrong passphrase so the dialog can show
- * an inline error and let the user retry (no download-store failure toast).
- */
 export async function saveDecryptedFile(
   fileId: string,
   fileName: string,
@@ -96,238 +47,187 @@ export async function saveDecryptedFile(
   meta: EncryptionMetaV1,
   passphrase: string
 ) {
-  // Fetch ciphertext (auth-gated, same endpoint the preview uses).
-  const res = await fetch(`/api/files/${fileId}/preview`);
-  if (!res.ok) throw new Error("Gagal mengambil file terenkripsi");
-  const cipher = await res.arrayBuffer();
-
-  // decryptToBlob throws on a wrong passphrase — let it propagate to the dialog.
-  const blob = await decryptToBlob(cipher, passphrase, meta, mimeType);
-
-  // Only record the download in the manager once decryption succeeded.
+  const response = await fetch(`/api/files/${fileId}/preview`);
+  if (!response.ok) throw new Error("Gagal mengambil file terenkripsi");
+  const plaintext = await decryptToBlob(await response.arrayBuffer(), passphrase, meta, mimeType);
   const id = startDownload(fileName);
   try {
-    saveBlob(blob, fileName);
+    saveBlob(plaintext, fileName);
     finishDownload(id);
-  } catch (err) {
-    failDownload(id, err instanceof Error ? err.message : "Gagal menyimpan file");
-    throw err;
+  } catch (error) {
+    failDownload(id, error instanceof Error ? error.message : "Gagal menyimpan file");
+    throw error;
   }
 }
 
-/**
- * Download helper for in-viewer toolbar buttons. Viewers receive a `src` that is
- * either a decrypted `blob:` URL (for E2E-encrypted files, already decrypted in
- * the browser for preview) or a server URL. When it's a blob we save that real
- * decrypted content directly under the correct filename; otherwise we fall back
- * to the efficient R2 download path (no server bandwidth, no in-memory copy).
- */
 export function downloadViewerSource(src: string, fileId: string, fileName: string) {
   if (src.startsWith("blob:")) {
     const id = startDownload(fileName);
     try {
-      const a = document.createElement("a");
-      a.href = src;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      const anchor = document.createElement("a");
+      anchor.href = src;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
       finishDownload(id);
-    } catch (err) {
-      failDownload(id, err instanceof Error ? err.message : "Gagal menyimpan file");
+    } catch (error) {
+      failDownload(id, error instanceof Error ? error.message : "Gagal menyimpan file");
     }
     return;
   }
   downloadFile(fileId, fileName);
 }
 
-/**
- * Single-file download. Goes straight to R2 via a top-level navigation, which
- * is the cheapest and most reliable path (no server bandwidth, resumable by the
- * browser). We can't observe byte progress here, so the store entry flips from
- * started → done optimistically.
- */
 export function downloadFile(fileId: string, fileName: string) {
   const id = startDownload(fileName);
   try {
-    // A hidden iframe/anchor navigation avoids opening a blank tab while still
-    // letting the server's Content-Disposition force the download.
-    const a = document.createElement("a");
-    a.href = `/api/download/${fileId}`;
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    // The browser owns the transfer; mark done shortly after handing off.
+    const anchor = document.createElement("a");
+    anchor.href = `/api/download/${fileId}`;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    // Browser navigation owns the transfer; JavaScript cannot observe the R2
+    // response without buffering it. Keep the manager bounded and honest.
     setTimeout(() => finishDownload(id), 800);
-  } catch (err) {
-    failDownload(id, err instanceof Error ? err.message : "Failed to start download");
+  } catch (error) {
+    failDownload(id, error instanceof Error ? error.message : "Failed to start download");
   }
 }
 
-/**
- * Single-file download WITH live progress + speed, via the server proxy
- * (?proxy=1). Costs server bandwidth, so this is opt-in — call it only when the
- * user explicitly wants progress (e.g. a "Download with progress" action).
- *
- * Includes resume: if the stream breaks mid-transfer, it retries with a Range
- * request starting at the last received byte, up to `maxRetries` times.
- */
-export async function downloadFileWithProgress(
-  fileId: string,
-  fileName: string,
-  maxRetries = 3
-) {
-  const id = startDownload(fileName);
-  const url = `/api/download/${fileId}?proxy=1`;
-  const chunks: Uint8Array[] = [];
-  let loaded = 0;
-  let total = 0;
-  let attempt = 0;
-
-  // Smoothed speed state, preserved across resume attempts.
-  let lastTime = performance.now();
-  let lastLoaded = 0;
-  let speed = 0;
-
-  for (;;) {
-    try {
-      const headers: HeadersInit = {};
-      // Resume from where we left off after a mid-stream failure.
-      if (loaded > 0) headers["Range"] = `bytes=${loaded}-`;
-
-      const res = await fetch(url, { headers });
-      if (!res.ok && res.status !== 206) {
-        // 416 = range not satisfiable (already have it all) → treat as done.
-        if (res.status === 416 && loaded > 0) break;
-        const json = await res.json().catch(() => null);
-        throw new Error(json?.error ?? `Download failed (${res.status})`);
-      }
-
-      if (total === 0) {
-        const len = Number(res.headers.get("content-length") ?? 0);
-        // On a 206 the length is the remaining bytes; add what we already have.
-        total = res.status === 206 ? loaded + len : len;
-      }
-
-      if (!res.body) {
-        chunks.push(new Uint8Array(await res.arrayBuffer()));
-        loaded = chunks.reduce((n, c) => n + c.length, 0);
-        break;
-      }
-
-      const reader = res.body.getReader();
-      let streamDone = false;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          streamDone = true;
-          break;
-        }
-        if (!value) continue;
-        chunks.push(value);
-        loaded += value.length;
-
-        const now = performance.now();
-        const dt = (now - lastTime) / 1000;
-        if (dt >= 0.25) {
-          const inst = (loaded - lastLoaded) / dt;
-          speed = speed === 0 ? inst : speed * 0.7 + inst * 0.3;
-          lastTime = now;
-          lastLoaded = loaded;
-          updateDownloadProgress(id, loaded, total, speed);
-        }
-      }
-      if (streamDone) break;
-    } catch (err) {
-      attempt += 1;
-      if (attempt > maxRetries) {
-        failDownload(id, err instanceof Error ? err.message : "Download failed");
-        return;
-      }
-      // Brief backoff before resuming.
-      await new Promise((r) => setTimeout(r, 400 * attempt));
-    }
-  }
-
-  updateDownloadProgress(id, loaded, total || loaded, speed);
-  saveBlob(new Blob(chunks as BlobPart[]), fileName);
-  finishDownload(id);
+/** Compatibility API. It intentionally delegates to direct R2 navigation. */
+export async function downloadFileWithProgress(fileId: string, fileName: string, _maxRetries = 3) {
+  downloadFile(fileId, fileName);
 }
 
-/**
- * Multi-file download as a streamed ZIP built by the server. We read the
- * response as a stream so we can report progress (the ZIP is streamed, so
- * `total` is usually unknown → indeterminate progress with a live byte count).
- */
 export async function downloadZip(ids: string[], label = "download.zip") {
   if (ids.length === 0) return;
   const id = startDownload(label);
-
   try {
-    const res = await fetch("/api/download/zip", {
+    const response = await fetch("/api/download/zip", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-csrf-token": await getCsrfToken(),
-      },
+      headers: { "Content-Type": "application/json", "x-csrf-token": await getCsrfToken() },
       body: JSON.stringify({ ids }),
     });
-
-    if (!res.ok) {
-      const json = await res.json().catch(() => null);
-      failDownload(id, json?.error ?? `ZIP failed (${res.status})`);
+    if (!response.ok) {
+      const json = await response.json().catch(() => null) as { error?: string } | null;
+      failDownload(id, json?.error ?? `ZIP failed (${response.status})`);
       return;
     }
-
-    const total = Number(res.headers.get("content-length") ?? 0);
-    const blob = await readStreamWithProgress(id, res, total);
+    const total = Number(response.headers.get("content-length") ?? 0);
+    const blob = await readStreamWithProgress(id, response, total);
     saveBlob(blob, label);
     finishDownload(id);
-  } catch (err) {
-    failDownload(id, err instanceof Error ? err.message : "ZIP download failed");
+  } catch (error) {
+    failDownload(id, error instanceof Error ? error.message : "ZIP download failed");
   }
 }
 
-/**
- * Read a fetch Response body to a Blob while reporting progress + smoothed
- * speed to the download store. Falls back to res.blob() if streaming is
- * unavailable.
- */
-async function readStreamWithProgress(
-  id: string,
-  res: Response,
-  total: number
-): Promise<Blob> {
-  if (!res.body) return res.blob();
+/** Queue a large folder archive and download the verified R2 result directly. */
+export async function requestFolderArchive(folderId: string, folderName: string) {
+  const label = `${folderName}.zip`;
+  const downloadId = startDownload(label);
+  const idempotencyKey = crypto.randomUUID();
+  try {
+    const response = await fetch(`/api/folders/${folderId}/download`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-csrf-token": await getCsrfToken() },
+      body: JSON.stringify({ idempotencyKey, archiveName: folderName }),
+    });
+    const json = await response.json().catch(() => null) as {
+      data?: { job?: ArchiveJobClient; downloadUrl?: string };
+      error?: string;
+    } | null;
+    if (!response.ok || !json?.data?.job) {
+      failDownload(downloadId, json?.error ?? `Archive failed (${response.status})`);
+      return;
+    }
 
-  const reader = res.body.getReader();
+    let job = json.data.job;
+    let lastBytes = 0;
+    let lastAt = performance.now();
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      if (job.status === "ready") {
+        const url = json.data.downloadUrl ?? (await getArchiveStatus(job.id)).downloadUrl;
+        if (!url) throw new Error("Archive URL belum tersedia");
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = job.archiveName;
+        anchor.rel = "noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        finishDownload(downloadId);
+        return;
+      }
+      if (job.status === "failed" || job.status === "expired") {
+        throw new Error(job.errorMessage ?? "Archive gagal diproses");
+      }
+
+      const now = performance.now();
+      const seconds = (now - lastAt) / 1000;
+      if (seconds > 0) updateDownloadProgress(downloadId, job.processedBytes, job.totalBytes, (job.processedBytes - lastBytes) / seconds);
+      lastBytes = job.processedBytes;
+      lastAt = now;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const status = await getArchiveStatus(job.id);
+      job = status.job;
+      if (status.downloadUrl) {
+        // Keep the URL in the same polling result so the ready branch does not
+        // issue a second request or generate another signed URL.
+        json.data.downloadUrl = status.downloadUrl;
+      }
+    }
+    throw new Error("Archive terlalu lama diproses, silakan cek lagi nanti");
+  } catch (error) {
+    failDownload(downloadId, error instanceof Error ? error.message : "Archive download failed");
+  }
+}
+
+type ArchiveJobClient = {
+  id: string;
+  status: "created" | "processing" | "ready" | "failed" | "expired";
+  archiveName: string;
+  processedBytes: number;
+  totalBytes: number;
+  errorMessage?: string | null;
+};
+
+async function getArchiveStatus(id: string): Promise<{ job: ArchiveJobClient; downloadUrl?: string }> {
+  const response = await fetch(`/api/download/archive/${id}`);
+  const json = await response.json().catch(() => null) as {
+    data?: { job?: ArchiveJobClient; downloadUrl?: string };
+    error?: string;
+  } | null;
+  if (!response.ok || !json?.data?.job) throw new Error(json?.error ?? `Archive status failed (${response.status})`);
+  return { job: json.data.job, downloadUrl: json.data.downloadUrl };
+}
+
+async function readStreamWithProgress(id: string, response: Response, total: number): Promise<Blob> {
+  if (!response.body) return response.blob();
+  const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let loaded = 0;
-
-  // Exponential moving average for a stable speed readout.
   let lastTime = performance.now();
   let lastLoaded = 0;
   let speed = 0;
-
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value) continue;
     chunks.push(value);
-    loaded += value.length;
-
+    loaded += value.byteLength;
     const now = performance.now();
-    const dt = (now - lastTime) / 1000;
-    if (dt >= 0.25) {
-      const inst = (loaded - lastLoaded) / dt;
-      speed = speed === 0 ? inst : speed * 0.7 + inst * 0.3;
+    const elapsed = (now - lastTime) / 1000;
+    if (elapsed >= 0.25) {
+      const instant = (loaded - lastLoaded) / elapsed;
+      speed = speed === 0 ? instant : speed * 0.7 + instant * 0.3;
       lastTime = now;
       lastLoaded = loaded;
       updateDownloadProgress(id, loaded, total, speed);
     }
   }
-
   updateDownloadProgress(id, loaded, total || loaded, speed);
   return new Blob(chunks as BlobPart[]);
 }

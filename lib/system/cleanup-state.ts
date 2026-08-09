@@ -29,6 +29,12 @@ export interface CleanupResult {
   trashFolders: number;
   lifetimeSoftDeleted: number;
   logsDeleted: number;
+  expiredUploads?: number;
+  verifiedLegacyFiles?: number;
+  inconsistentReadyFiles?: number;
+  abortedMultipartUploads?: number;
+  orphanObjectsReported?: number;
+  expiredArchives?: number;
 }
 
 export interface CleanupState {

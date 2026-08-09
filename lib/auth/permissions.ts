@@ -88,7 +88,7 @@ export async function resolveFileAccess(
   const [file] = await db
     .select()
     .from(files)
-    .where(and(eq(files.id, fileId), isNull(files.deletedAt)))
+    .where(and(eq(files.id, fileId), isNull(files.deletedAt), eq(files.status, "ready")))
     .limit(1);
 
   if (!file) return null;

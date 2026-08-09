@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
       const conditions = [
         eq(files.folderId, params.folderId),
         isNull(files.deletedAt),
+        eq(files.status, "ready"),
       ];
       if (params.cursor) {
         conditions.push(lt(files.createdAt, new Date(params.cursor)));
@@ -77,6 +78,7 @@ export async function GET(request: NextRequest) {
       conditions.push(isNotNull(files.deletedAt));
     } else {
       conditions.push(isNull(files.deletedAt));
+      conditions.push(eq(files.status, "ready"));
     }
 
     if (params.favorites) {

@@ -70,6 +70,7 @@ function UploadRow({ item, onRetry, onCancel }: {
         <div className="shrink-0">
           {item.status === "done" && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
           {item.status === "error" && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
+          {item.status === "resume_requires_file" && <AlertCircle className="h-3.5 w-3.5 text-amber-500" />}
           {item.status === "uploading" && (
             <div className="h-3.5 w-3.5 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
           )}
@@ -78,14 +79,17 @@ function UploadRow({ item, onRetry, onCancel }: {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium truncate leading-tight">{item.file?.name ?? "Unknown"}</p>
+          <p className="text-[11px] font-medium truncate leading-tight">{item.file?.name ?? item.remotePath}</p>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[10px] text-muted-foreground">{formatBytes(item.file?.size ?? 0)}</span>
-            {item.status === "uploading" && (
-              <span className="text-[10px] font-mono text-accent">{item.progress}%</span>
+            <span className="text-[10px] text-muted-foreground">{formatBytes(item.totalBytes)}</span>
+            {(item.status === "uploading" || item.status === "verifying") && (
+              <span className="text-[10px] font-mono text-accent">{Math.round(item.progress)}%</span>
             )}
             {item.status === "queued" && (
               <span className="text-[10px] text-muted-foreground/50">Waiting</span>
+            )}
+            {item.status === "resume_requires_file" && (
+              <span className="text-[10px] text-amber-500/80">Pilih ulang file untuk resume</span>
             )}
           </div>
         </div>
@@ -102,7 +106,7 @@ function UploadRow({ item, onRetry, onCancel }: {
           )}
         </div>
       </div>
-      {item.status === "uploading" && (
+      {(item.status === "uploading" || item.status === "verifying") && (
         <div className="mt-1.5 h-0.5 rounded-full bg-muted/40 overflow-hidden ml-5">
           <motion.div
             className="h-full rounded-full bg-accent"
@@ -111,7 +115,7 @@ function UploadRow({ item, onRetry, onCancel }: {
           />
         </div>
       )}
-      {item.status === "error" && item.error && (
+      {(item.status === "error" || item.status === "resume_requires_file") && item.error && (
         <p className="mt-0.5 ml-5 text-[10px] text-red-500/80 truncate">{item.error}</p>
       )}
     </motion.div>
@@ -144,8 +148,8 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
 
   const smartItems = useMemo(() => {
     const visible = items.filter((i) => i.status !== "cancelled");
-    const active = visible.filter((i) => i.status === "uploading" || i.status === "queued");
-    const failed = visible.filter((i) => i.status === "error");
+    const active = visible.filter((i) => i.status === "uploading" || i.status === "verifying" || i.status === "queued");
+    const failed = visible.filter((i) => i.status === "error" || i.status === "resume_requires_file");
     const done = visible.filter((i) => i.status === "done");
     if (expanded) {
       return [...active, ...failed, ...done.slice(-3)];
@@ -341,7 +345,7 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
       {!expanded && smartItems[0] && (
         <div className="px-3 pb-2.5 -mt-0.5">
           <p className="text-[10px] text-muted-foreground/70 truncate pl-[48px]">
-            {smartItems[0].file?.name}
+            {smartItems[0].file?.name ?? smartItems[0].remotePath}
           </p>
         </div>
       )}

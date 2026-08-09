@@ -27,6 +27,67 @@ const tsvector = customType<{ data: string }>({
 
 export const userRoleEnum = pgEnum("user_role", ["master", "user"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "suspended"]);
+/** Lifecycle of a file's backing object. Only `ready` is user-visible/downloadable. */
+export const fileUploadStatusEnum = pgEnum("file_upload_status", [
+  "legacy_unverified",
+  "created",
+  "uploading",
+  "verifying",
+  "ready",
+  "failed",
+  "cancelled",
+  "deleting",
+  "delete_failed",
+  "inconsistent",
+]);
+export const uploadSessionStatusEnum = pgEnum("upload_session_status", [
+  "created",
+  "uploading",
+  "verifying",
+  "completed",
+  "failed",
+  "cancelled",
+  "expired",
+]);
+export const uploadPartStatusEnum = pgEnum("upload_part_status", [
+  "pending",
+  "uploaded",
+  "failed",
+]);
+export const uploadTypeEnum = pgEnum("upload_type", ["single", "multipart"]);
+export const archiveJobStatusEnum = pgEnum("archive_job_status", [
+  "created",
+  "processing",
+  "ready",
+  "failed",
+  "expired",
+]);
+export const archiveItemStatusEnum = pgEnum("archive_item_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+]);
+export const deletionJobStatusEnum = pgEnum("deletion_job_status", [
+  "created",
+  "processing",
+  "completed",
+  "failed",
+  "expired",
+]);
+export const deletionItemStatusEnum = pgEnum("deletion_item_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+]);
+export type FileUploadStatus = (typeof fileUploadStatusEnum.enumValues)[number];
+export type UploadSessionStatus = (typeof uploadSessionStatusEnum.enumValues)[number];
+export type UploadPartStatus = (typeof uploadPartStatusEnum.enumValues)[number];
+export type ArchiveJobStatus = (typeof archiveJobStatusEnum.enumValues)[number];
+export type ArchiveItemStatus = (typeof archiveItemStatusEnum.enumValues)[number];
+export type DeletionJobStatus = (typeof deletionJobStatusEnum.enumValues)[number];
+export type DeletionItemStatus = (typeof deletionItemStatusEnum.enumValues)[number];
 /** Verification state of a Gmail SMTP sender: "ok" once a live SMTP handshake succeeds. */
 export const mailStatusEnum = pgEnum("mail_status", ["unverified", "ok", "error"]);
 export const sharePermissionEnum = pgEnum("share_permission", ["view", "edit"]);
@@ -71,6 +132,8 @@ export const users = pgTable(
     status: userStatusEnum("status").notNull().default("active"),
     quotaBytes: bigint("quota_bytes", { mode: "number" }).notNull().default(10737418240),
     usedBytes: bigint("used_bytes", { mode: "number" }).notNull().default(0),
+    /** Bytes reserved by upload sessions that have not reached READY yet. */
+    reservedBytes: bigint("reserved_bytes", { mode: "number" }).notNull().default(0),
     failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
     suspendReason: text("suspend_reason"),
@@ -164,7 +227,13 @@ export const files = pgTable(
     mimeType: text("mime_type").notNull(),
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
     r2Key: text("r2_key").notNull(),
+    /** A file is available only after the R2 object has been verified and finalized. */
+    status: fileUploadStatusEnum("status").notNull().default("created"),
     checksumSha256: text("checksum_sha256"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
     isFavorite: boolean("is_favorite").notNull().default(false),
     isNote: boolean("is_note").notNull().default(false),
     thumbnailKey: text("thumbnail_key"),
@@ -188,10 +257,184 @@ export const files = pgTable(
     index("files_user_id_idx").on(table.userId),
     index("files_folder_id_idx").on(table.folderId),
     index("files_user_active_idx").on(table.userId, table.deletedAt),
+    index("files_status_idx").on(table.status),
+    index("files_user_status_idx").on(table.userId, table.status),
     index("files_r2_key_idx").on(table.r2Key),
     index("files_favorite_idx").on(table.userId, table.isFavorite),
     // GIN index makes tsvector @@ tsquery lookups fast.
     index("files_search_vector_idx").using("gin", table.searchVector),
+  ]
+);
+
+export const uploadSessions = pgTable(
+  "upload_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Client-generated stable key used to make init safe to retry. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    uploadType: uploadTypeEnum("upload_type").notNull(),
+    r2UploadId: text("r2_upload_id"),
+    objectKey: text("object_key").notNull(),
+    totalSizeBytes: bigint("total_size_bytes", { mode: "number" }).notNull(),
+    partSizeBytes: bigint("part_size_bytes", { mode: "number" }),
+    expectedChecksumSha256: text("expected_checksum_sha256"),
+    status: uploadSessionStatusEnum("status").notNull().default("created"),
+    retryCount: integer("retry_count").notNull().default(0),
+    reservationReleased: boolean("reservation_released").notNull().default(false),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("upload_sessions_user_idempotency_unique").on(
+      table.userId,
+      table.idempotencyKey
+    ),
+    index("upload_sessions_file_idx").on(table.fileId),
+    index("upload_sessions_user_status_idx").on(table.userId, table.status),
+    index("upload_sessions_expiry_idx").on(table.status, table.expiresAt),
+    index("upload_sessions_r2_upload_idx").on(table.r2UploadId),
+  ]
+);
+
+export const uploadParts = pgTable(
+  "upload_parts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    uploadSessionId: uuid("upload_session_id")
+      .notNull()
+      .references(() => uploadSessions.id, { onDelete: "cascade" }),
+    partNumber: integer("part_number").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    etag: text("etag"),
+    checksumSha256: text("checksum_sha256"),
+    status: uploadPartStatusEnum("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("upload_parts_session_part_unique").on(
+      table.uploadSessionId,
+      table.partNumber
+    ),
+    index("upload_parts_session_status_idx").on(table.uploadSessionId, table.status),
+  ]
+);
+
+/** Asynchronous folder/archive download jobs. The item rows are an immutable
+ * authorization snapshot, so a later rename/move cannot change the archive. */
+export const archiveJobs = pgTable(
+  "archive_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    objectKey: text("object_key").notNull(),
+    archiveName: text("archive_name").notNull(),
+    status: archiveJobStatusEnum("status").notNull().default("created"),
+    totalFiles: integer("total_files").notNull().default(0),
+    processedFiles: integer("processed_files").notNull().default(0),
+    totalBytes: bigint("total_bytes", { mode: "number" }).notNull().default(0),
+    processedBytes: bigint("processed_bytes", { mode: "number" }).notNull().default(0),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("archive_jobs_user_idempotency_unique").on(table.userId, table.idempotencyKey),
+    index("archive_jobs_user_status_idx").on(table.userId, table.status),
+    index("archive_jobs_expiry_idx").on(table.status, table.expiresAt),
+  ]
+);
+
+export const archiveJobItems = pgTable(
+  "archive_job_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    archiveJobId: uuid("archive_job_id")
+      .notNull()
+      .references(() => archiveJobs.id, { onDelete: "cascade" }),
+    fileId: uuid("file_id").references(() => files.id, { onDelete: "set null" }),
+    archivePath: text("archive_path").notNull(),
+    objectKey: text("object_key").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    status: archiveItemStatusEnum("status").notNull().default("pending"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("archive_job_items_job_path_unique").on(table.archiveJobId, table.archivePath),
+    index("archive_job_items_job_status_idx").on(table.archiveJobId, table.status),
+  ]
+);
+
+/** Durable batch deletion for large permanent folder deletes. */
+export const deletionJobs = pgTable(
+  "deletion_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: deletionJobStatusEnum("status").notNull().default("created"),
+    totalItems: integer("total_items").notNull().default(0),
+    processedItems: integer("processed_items").notNull().default(0),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("deletion_jobs_user_idempotency_unique").on(table.userId, table.idempotencyKey),
+    index("deletion_jobs_user_status_idx").on(table.userId, table.status),
+    index("deletion_jobs_expiry_idx").on(table.status, table.expiresAt),
+  ]
+);
+
+export const deletionJobItems = pgTable(
+  "deletion_job_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    deletionJobId: uuid("deletion_job_id")
+      .notNull()
+      .references(() => deletionJobs.id, { onDelete: "cascade" }),
+    fileId: uuid("file_id").references(() => files.id, { onDelete: "set null" }),
+    objectKey: text("object_key").notNull(),
+    thumbnailKey: text("thumbnail_key"),
+    status: deletionItemStatusEnum("status").notNull().default("pending"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("deletion_job_items_job_object_unique").on(table.deletionJobId, table.objectKey),
+    index("deletion_job_items_job_status_idx").on(table.deletionJobId, table.status),
   ]
 );
 
@@ -496,6 +739,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   folders: many(folders),
   files: many(files),
+  uploadSessions: many(uploadSessions),
   activityLogs: many(activityLogs),
 }));
 
@@ -509,8 +753,44 @@ export const filesRelations = relations(files, ({ one, many }) => ({
   user: one(users, { fields: [files.userId], references: [users.id] }),
   folder: one(folders, { fields: [files.folderId], references: [folders.id] }),
   content: one(fileContents),
+  uploadSessions: many(uploadSessions),
   shares: many(shares),
   changeHistory: many(changeHistory),
+}));
+
+export const uploadSessionsRelations = relations(uploadSessions, ({ one, many }) => ({
+  file: one(files, { fields: [uploadSessions.fileId], references: [files.id] }),
+  user: one(users, { fields: [uploadSessions.userId], references: [users.id] }),
+  parts: many(uploadParts),
+}));
+
+export const uploadPartsRelations = relations(uploadParts, ({ one }) => ({
+  uploadSession: one(uploadSessions, {
+    fields: [uploadParts.uploadSessionId],
+    references: [uploadSessions.id],
+  }),
+}));
+
+export const archiveJobsRelations = relations(archiveJobs, ({ one, many }) => ({
+  user: one(users, { fields: [archiveJobs.userId], references: [users.id] }),
+  folder: one(folders, { fields: [archiveJobs.folderId], references: [folders.id] }),
+  items: many(archiveJobItems),
+}));
+
+export const archiveJobItemsRelations = relations(archiveJobItems, ({ one }) => ({
+  archiveJob: one(archiveJobs, { fields: [archiveJobItems.archiveJobId], references: [archiveJobs.id] }),
+  file: one(files, { fields: [archiveJobItems.fileId], references: [files.id] }),
+}));
+
+export const deletionJobsRelations = relations(deletionJobs, ({ one, many }) => ({
+  user: one(users, { fields: [deletionJobs.userId], references: [users.id] }),
+  folder: one(folders, { fields: [deletionJobs.folderId], references: [folders.id] }),
+  items: many(deletionJobItems),
+}));
+
+export const deletionJobItemsRelations = relations(deletionJobItems, ({ one }) => ({
+  deletionJob: one(deletionJobs, { fields: [deletionJobItems.deletionJobId], references: [deletionJobs.id] }),
+  file: one(files, { fields: [deletionJobItems.fileId], references: [files.id] }),
 }));
 
 export type User = typeof users.$inferSelect;
@@ -518,6 +798,12 @@ export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type Folder = typeof folders.$inferSelect;
 export type File = typeof files.$inferSelect;
+export type UploadSession = typeof uploadSessions.$inferSelect;
+export type UploadPart = typeof uploadParts.$inferSelect;
+export type ArchiveJob = typeof archiveJobs.$inferSelect;
+export type ArchiveJobItem = typeof archiveJobItems.$inferSelect;
+export type DeletionJob = typeof deletionJobs.$inferSelect;
+export type DeletionJobItem = typeof deletionJobItems.$inferSelect;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type MailSender = typeof mailSenders.$inferSelect;
 export type NewMailSender = typeof mailSenders.$inferInsert;

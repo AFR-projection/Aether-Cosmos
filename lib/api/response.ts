@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { AuthError } from "@/lib/auth/session";
 import { SECURITY_HEADERS } from "@/lib/security";
+import { UploadServiceError } from "@/lib/storage/upload-service";
 
 export function apiSuccess<T>(data: T, status = 200) {
   return NextResponse.json({ success: true, data }, { status, headers: SECURITY_HEADERS });
@@ -28,6 +29,9 @@ function uniqueViolationMessage(constraint: string | undefined): string {
 }
 
 export function handleApiError(error: unknown) {
+  if (error instanceof UploadServiceError) {
+    return apiError(error.message, error.status, { code: error.code });
+  }
   if (error instanceof AuthError) {
     return apiError(error.message, error.status, {
       ...(error.code ? { code: error.code } : {}),
@@ -53,4 +57,3 @@ export function handleApiError(error: unknown) {
   console.error(error);
   return apiError("Internal server error", 500);
 }
-
