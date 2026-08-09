@@ -133,6 +133,7 @@ export async function POST(request: NextRequest) {
     const body = createNoteSchema.parse(await request.json());
     const ip = getClientIp(request);
 
+    const now = new Date();
     const [file] = await db
       .insert(files)
       .values({
@@ -143,6 +144,9 @@ export async function POST(request: NextRequest) {
         sizeBytes: 0,
         r2Key: `notes/${userId}/${crypto.randomUUID()}`,
         isNote: true,
+        status: "ready",
+        completedAt: now,
+        verifiedAt: now,
         // Plaintext of the note body feeds the full-text search vector.
         contentText: body.content ? tiptapToPlainText(body.content) : null,
       })
