@@ -11,5 +11,6 @@ RUN npm install tsx sharp drizzle-orm postgres @aws-sdk/client-s3 @neondatabase/
 COPY lib ./lib
 COPY workers ./workers
 COPY drizzle.config.ts ./
+COPY tsconfig.json ./
 
 CMD ["npx", "tsx", "workers/index.ts"]
