@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { eq, and, isNull, isNotNull, desc, lt } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, desc, lt, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       const conditions = [
         eq(files.folderId, params.folderId),
         isNull(files.deletedAt),
-        eq(files.status, "ready"),
+        inArray(files.status, ["ready", "legacy_unverified"]),
       ];
       if (params.cursor) {
         conditions.push(lt(files.createdAt, new Date(params.cursor)));
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
       conditions.push(isNotNull(files.deletedAt));
     } else {
       conditions.push(isNull(files.deletedAt));
-      conditions.push(eq(files.status, "ready"));
+      conditions.push(inArray(files.status, ["ready", "legacy_unverified"]));
     }
 
     if (params.favorites) {
@@ -250,7 +250,14 @@ export async function PATCH(request: NextRequest) {
 
         const newKey = buildR2Key(userId, newFile.id, copyName);
         await copyR2Object(file.r2Key, newKey);
-        await db.update(files).set({ r2Key: newKey }).where(eq(files.id, newFile.id));
+        const now = new Date();
+        await db.update(files).set({
+          r2Key: newKey,
+          status: "ready",
+          completedAt: now,
+          verifiedAt: now,
+          updatedAt: now,
+        }).where(eq(files.id, newFile.id));
         await logActivity(sessionUser, "copy", {
           resourceType: "file",
           resourceId: newFile.id,

@@ -77,9 +77,15 @@ export async function POST(request: NextRequest) {
       await logSuspiciousActivity(userId, "upload", suspicious.reason ?? "Unknown", ip);
     }
 
+    const now = new Date();
     const updates: Partial<typeof files.$inferInsert> = {
+      status: "ready",
       checksumSha256: checksumSha256 ?? null,
-      updatedAt: new Date(),
+      completedAt: now,
+      verifiedAt: now,
+      failureCode: null,
+      failureMessage: null,
+      updatedAt: now,
     };
     if (body.encrypted !== undefined) updates.encrypted = body.encrypted;
     if (body.encryptionMeta !== undefined) updates.encryptionMeta = body.encryptionMeta;
