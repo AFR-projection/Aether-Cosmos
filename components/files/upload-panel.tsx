@@ -136,7 +136,7 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
       setStats(newStats);
     };
     queue.on("change", onChange);
-    return () => { queue.on("change", () => {}); };
+    return () => { queue.off("change"); };
   }, [queue]);
 
   const allDone = stats.completed + stats.failed === stats.total && stats.total > 0;

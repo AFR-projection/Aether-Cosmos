@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { useCallback, useEffect, useState, useRef, useMemo, type ElementType } from "react";
 import { QUICK_ACTION_EVENT, type QuickAction } from "@/lib/system/quick-actions";
 import { useDropzone } from "react-dropzone";
 import {
@@ -78,6 +78,36 @@ interface FileBrowserProps {
   trash?: boolean;
   favorites?: boolean;
   selectedFileId?: string | null;
+}
+
+// ─── DockButton ─────────────────────────────────────────────────────────────
+
+function DockButton({
+  icon: Icon,
+  label,
+  onClick,
+  danger = false,
+}: {
+  icon: ElementType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={cn(
+        "flex h-8 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition-colors",
+        danger
+          ? "text-destructive hover:bg-destructive/10"
+          : "text-foreground/70 hover:bg-muted/70 hover:text-foreground",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -1017,80 +1047,88 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
         </div>
       )}
 
-      {/* ── Error ── */}
-      {error && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {error}
+      {/* ── Error toast ── */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="mb-4 flex items-center gap-2.5 rounded-xl border border-red-500/20 bg-red-500/8 px-4 py-2.5 text-sm text-red-500"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Page header ── */}
+      {!trash && !favorites && (
+        <div className="mb-6">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+              {folderId ? "Folder" : "My Files"}
+            </h1>
+            {!isLoading && allFiles.length > 0 && (
+              <span className="text-sm text-muted-foreground/50 font-normal">
+                {typeFilter !== "all"
+                  ? `${filteredFiles.length} of ${allFiles.length}`
+                  : `${allFiles.length} file${allFiles.length !== 1 ? "s" : ""}`}
+              </span>
+            )}
+          </div>
+          {search && (
+            <p className="mt-0.5 text-sm text-muted-foreground/60">
+              Results for <span className="font-medium text-foreground/80">&ldquo;{search}&rdquo;</span>
+            </p>
+          )}
+        </div>
+      )}
+      {(trash || favorites) && (
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            {trash ? "Recycle Bin" : "Favorites"}
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground/50">
+            {trash ? "Files moved to trash — restore or delete permanently" : "Files you've starred"}
+          </p>
         </div>
       )}
 
       {/* ── Toolbar ── */}
-      <div className="mb-4 flex flex-wrap items-start sm:items-center gap-3">
-        <div className="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-md w-full sm:w-auto order-1 sm:order-none">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="mb-4 flex items-center gap-2 flex-wrap">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[160px] max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50 pointer-events-none" />
           <Input
             ref={searchInputRef}
-            placeholder="Search files..."
+            placeholder="Search files…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-9 sm:h-10"
+            className="pl-9 h-9 bg-surface text-sm"
           />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/50 hover:text-foreground transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 order-2 sm:order-none flex-wrap">
-          <Button variant="secondary" size="sm" onClick={createFolder} disabled={trash || favorites} className="h-9 px-2 sm:px-3">
-            <FolderPlus className="h-4 w-4 sm:mr-1.5" />
-            <span className="hidden sm:inline">Folder</span>
-          </Button>
-          <Button variant="secondary" size="sm" onClick={createNote} disabled={trash || favorites} className="h-9 px-2 sm:px-3">
-            <FilePlus className="h-4 w-4 sm:mr-1.5" />
-            <span className="hidden sm:inline">Note</span>
-          </Button>
-          <Button variant="secondary" size="sm" onClick={pickAndUploadFolder} disabled={trash || favorites} className="h-9 px-2 sm:px-3">
-            <FolderUp className="h-4 w-4 sm:mr-1.5" />
-            <span className="hidden sm:inline">Upload Folder</span>
-          </Button>
-          <Button
-            variant={encryptUploads ? "default" : "secondary"}
-            size="sm"
-            disabled={trash || favorites}
-            className="h-9 px-2 sm:px-3"
-            title="Encrypt uploads client-side (AES-GCM)"
-            onClick={() => {
-              if (encryptUploads) {
-                setEncryptUploads(false);
-                setEncryptPassphrase("");
-                return;
-              }
-              setEncryptDialogOpen(true);
-            }}
-          >
-            <Lock className="h-4 w-4 sm:mr-1.5" />
-            <span className="hidden sm:inline">{encryptUploads ? "Encrypt On" : "Encrypt"}</span>
-          </Button>
-          <input
-            ref={folderInputRef}
-            type="file"
-            // @ts-expect-error — webkitdirectory is non-standard HTML attribute
-            webkitdirectory=""
-            multiple
-            className="hidden"
-            onChange={handleFolderUpload}
-          />
-          {trash ? (
-            <Button variant="default" size="sm" disabled className="h-9 px-2 sm:px-3 opacity-40 cursor-not-allowed">
-              <span className="flex items-center gap-1.5">
-                <Upload className="h-4 w-4 sm:mr-1.5" />
-                <span className="hidden sm:inline">Upload Files</span>
-              </span>
-            </Button>
-          ) : (
+        {/* Spacer */}
+        <div className="flex-1 hidden sm:block" />
+
+        {/* ─ Action group ─ */}
+        {!trash && !favorites && (
+          <div className="flex items-center gap-1.5">
+            {/* Upload files (primary) */}
             <label>
-              <Button variant="default" size="sm" asChild className="h-9 px-2 sm:px-3">
+              <Button variant="default" size="sm" asChild className="h-9 gap-1.5 px-3 cursor-pointer">
                 <span>
-                  <Upload className="h-4 w-4 sm:mr-1.5" />
-                  <span className="hidden sm:inline">Upload Files</span>
+                  <Upload className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Upload</span>
                 </span>
               </Button>
               <input
@@ -1107,33 +1145,83 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
                 }}
               />
             </label>
-          )}
 
-          {/* Paste — shown only when the clipboard has files (Explorer style) */}
-          {clipboard && !trash && !favorites && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-9 gap-1.5 px-2 sm:px-3 border border-accent/30 bg-accent/5"
-              onClick={pasteHere}
-              title={`Paste ${clipboard.count} ${clipboard.mode === "cut" ? "(move)" : "(copy)"}`}
-            >
-              <ClipboardPaste className="h-4 w-4 sm:mr-0.5" />
-              <span className="hidden sm:inline">Paste ({clipboard.count})</span>
+            {/* New item dropdown */}
+            <div className="relative">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-9 gap-1.5 px-3"
+                onClick={() => setSortMenuOpen(false) as unknown as void || void 0}
+                title="New…"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">New</span>
+              </Button>
+              {/* quick-access below */}
+              <div className="absolute right-0 top-full mt-1 hidden group-focus-within:flex flex-col" />
+            </div>
+
+            <Button variant="secondary" size="sm" onClick={createFolder} className="h-9 px-2.5 gap-1.5" title="New folder">
+              <FolderPlus className="h-3.5 w-3.5" />
+              <span className="hidden md:inline text-xs">Folder</span>
             </Button>
-          )}
+            <Button variant="secondary" size="sm" onClick={createNote} className="h-9 px-2.5 gap-1.5" title="New note">
+              <FilePlus className="h-3.5 w-3.5" />
+              <span className="hidden md:inline text-xs">Note</span>
+            </Button>
+            <Button variant="secondary" size="sm" onClick={pickAndUploadFolder} className="h-9 px-2.5 gap-1.5" title="Upload folder">
+              <FolderUp className="h-3.5 w-3.5" />
+              <span className="hidden lg:inline text-xs">Folder upload</span>
+            </Button>
 
-          {/* Sort dropdown — lets grid view sort too, not just list headers */}
+            {/* Encryption toggle */}
+            <Button
+              variant={encryptUploads ? "default" : "ghost"}
+              size="sm"
+              className={cn("h-9 px-2.5 gap-1.5", encryptUploads && "ring-1 ring-accent/40")}
+              title={encryptUploads ? "Encryption ON — click to disable" : "Enable client-side encryption"}
+              onClick={() => {
+                if (encryptUploads) { setEncryptUploads(false); setEncryptPassphrase(""); return; }
+                setEncryptDialogOpen(true);
+              }}
+            >
+              <Lock className={cn("h-3.5 w-3.5", encryptUploads && "fill-current")} />
+              {encryptUploads && <span className="hidden sm:inline text-xs font-semibold">Enc</span>}
+            </Button>
+
+            {/* Paste */}
+            {clipboard && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-9 gap-1.5 px-2.5 border border-accent/25 bg-accent/5 text-accent hover:bg-accent/10"
+                onClick={pasteHere}
+                title={`Paste ${clipboard.count} ${clipboard.mode === "cut" ? "(move)" : "(copy)"}`}
+              >
+                <ClipboardPaste className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline text-xs">{clipboard.count}</span>
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Separator */}
+        <div className="hidden sm:block h-5 w-px bg-border/40" />
+
+        {/* ─ View controls ─ */}
+        <div className="flex items-center gap-1.5">
+          {/* Sort dropdown */}
           <div className="relative">
             <Button
-              variant="secondary"
+              variant="ghost"
               size="sm"
-              className="h-9 gap-1.5 px-2 sm:px-3"
+              className="h-9 gap-1.5 px-2.5 text-muted-foreground hover:text-foreground"
               onClick={() => setSortMenuOpen((o) => !o)}
-              title="Sort files"
+              title="Sort"
             >
-              <ArrowDownUp className="h-4 w-4 sm:mr-0.5" />
-              <span className="hidden sm:inline">
+              <ArrowDownUp className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline text-xs">
                 {SORT_OPTIONS.find((o) => o.key === sortBy)?.label ?? "Sort"}
               </span>
             </Button>
@@ -1142,29 +1230,29 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
                   <motion.div
-                    initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                    initial={{ opacity: 0, y: -4, scale: 0.97 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                    transition={{ duration: 0.14 }}
-                    className="absolute right-0 z-50 mt-1.5 w-48 overflow-hidden rounded-xl border border-border/60 bg-surface-elevated/95 py-1 shadow-2xl backdrop-blur-xl"
+                    exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute right-0 z-50 mt-1.5 w-44 overflow-hidden rounded-xl border border-border/50 bg-surface-elevated/98 py-1 shadow-2xl shadow-black/15 backdrop-blur-xl"
                   >
                     {SORT_OPTIONS.map((opt) => (
                       <button
                         key={opt.key}
                         onClick={() => chooseSort(opt.key)}
                         className={cn(
-                          "flex w-full items-center justify-between px-3.5 py-2 text-[13px] font-medium transition-colors hover:bg-accent/10",
-                          sortBy === opt.key ? "text-accent" : "text-foreground"
+                          "flex w-full items-center justify-between px-3 py-2 text-[13px] transition-colors hover:bg-accent/8",
+                          sortBy === opt.key ? "text-accent font-medium" : "text-foreground/80"
                         )}
                       >
                         {opt.label}
-                        {sortBy === opt.key && <Check className="h-3.5 w-3.5" />}
+                        {sortBy === opt.key && <Check className="h-3 w-3" />}
                       </button>
                     ))}
-                    <div className="my-1 mx-2 border-t border-border/40" />
+                    <div className="my-1 mx-2.5 border-t border-border/30" />
                     <button
                       onClick={toggleSortOrder}
-                      className="flex w-full items-center gap-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-accent/10"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-foreground/80 transition-colors hover:bg-accent/8"
                     >
                       {sortOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
                       {sortOrder === "asc" ? "Ascending" : "Descending"}
@@ -1175,131 +1263,72 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
             </AnimatePresence>
           </div>
 
-          {/* View toggle */}
-          <div className="flex items-center border border-border/40 rounded-lg overflow-hidden ml-1">
-            <Button
-              variant="ghost"
-              size="icon-sm"
+          {/* Grid / List toggle */}
+          <div className="flex items-center gap-px rounded-lg border border-border/40 bg-muted/40 p-0.5">
+            <button
               className={cn(
-                "rounded-none h-8 w-8",
-                view === "grid" ? "bg-accent/10 text-accent" : ""
+                "flex h-7 w-7 items-center justify-center rounded-md transition-all",
+                view === "grid" ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground/60 hover:text-foreground"
               )}
               onClick={() => setViewPersisted("grid")}
+              title="Grid view (G)"
             >
               <Grid3X3 className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
+            </button>
+            <button
               className={cn(
-                "rounded-none h-8 w-8",
-                view === "list" ? "bg-accent/10 text-accent" : ""
+                "flex h-7 w-7 items-center justify-center rounded-md transition-all",
+                view === "list" ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground/60 hover:text-foreground"
               )}
               onClick={() => setViewPersisted("list")}
+              title="List view (L)"
             >
               <List className="h-3.5 w-3.5" />
-            </Button>
+            </button>
           </div>
         </div>
       </div>
 
+      {/* hidden webkitdirectory input */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        // @ts-expect-error — webkitdirectory is non-standard HTML attribute
+        webkitdirectory=""
+        multiple
+        className="hidden"
+        onChange={handleFolderUpload}
+      />
+
       {/* ── Filter chips ── */}
       {!trash && !favorites && !search && (
-        <div className="mb-4 flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:mx-0 sm:px-0">
-          {FILTERS.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => { setTypeFilter(key); setSelectedIds(new Set()); }}
-              className={cn(
-                "tap inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all border",
-                typeFilter === key
-                  ? "bg-accent text-white border-accent shadow-sm"
-                  : "bg-surface text-muted-foreground/70 border-border/50 hover:border-accent/30 hover:text-foreground"
-              )}
-            >
-              <Icon className="h-3 w-3" />
-              {label}
-              {key !== "all" && (
-                <span className="ml-0.5 opacity-60">
-                  {allFiles.filter((f) => matchesFilter(f, key)).length}
-                </span>
-              )}
-            </button>
-          ))}
+        <div className="mb-4 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+          {FILTERS.map(({ key, label, icon: Icon }) => {
+            const count = key !== "all" ? allFiles.filter((f) => matchesFilter(f, key)).length : allFiles.length;
+            return (
+              <button
+                key={key}
+                onClick={() => { setTypeFilter(key); setSelectedIds(new Set()); }}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
+                  typeFilter === key
+                    ? "bg-foreground/90 text-background shadow-sm"
+                    : "bg-muted/50 text-muted-foreground/70 hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <Icon className="h-3 w-3" />
+                {label}
+                {count > 0 && key !== "all" && (
+                  <span className={cn(
+                    "text-[10px] font-mono tabular-nums",
+                    typeFilter === key ? "opacity-60" : "opacity-40"
+                  )}>{count}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
-
-      {/* ── File count ── */}
-      {!isLoading && allFiles.length > 0 && (
-        <p className="mb-3 text-xs text-muted-foreground/50">
-          {typeFilter !== "all"
-            ? `${filteredFiles.length} of ${allFiles.length} files`
-            : `${allFiles.length} file${allFiles.length !== 1 ? "s" : ""}`
-          }
-        </p>
-      )}
-
-      {/* ── Batch action bar ── */}
-      <AnimatePresence>
-        {selectedIds.size > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="mb-4 flex items-center gap-3 rounded-2xl border border-accent/30 bg-accent/5 px-5 py-3"
-          >
-            <span className="text-sm font-medium shrink-0">{selectedIds.size} selected</span>
-            <Button variant="secondary" size="sm" className="gap-1.5" onClick={toggleSelectAll}>
-              {selectedIds.size === filteredFiles.length ? (
-                <CheckSquare className="h-3.5 w-3.5" />
-              ) : (
-                <Square className="h-3.5 w-3.5" />
-              )}
-              {selectedIds.size === filteredFiles.length ? "Deselect all" : "Select all"}
-            </Button>
-            <div className="flex-1" />
-            <Button variant="secondary" size="sm" className="gap-1.5" onClick={batchDownload}>
-              <Download className="h-3.5 w-3.5" />
-              Download
-            </Button>
-            {!trash && (
-              <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => copyToClipboard(Array.from(selectedIds))}>
-                <Copy className="h-3.5 w-3.5" />
-                Copy
-              </Button>
-            )}
-            {!trash && (
-              <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => cutToClipboard(Array.from(selectedIds))}>
-                <Scissors className="h-3.5 w-3.5" />
-                Cut
-              </Button>
-            )}
-            {!trash && (
-              <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => setMoveIds(Array.from(selectedIds))}>
-                <Move className="h-3.5 w-3.5" />
-                Move
-              </Button>
-            )}
-            {!trash && selectedIds.size >= 2 && (
-              <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => setBulkRenameIds(Array.from(selectedIds))}>
-                <PencilRuler className="h-3.5 w-3.5" />
-                Rename
-              </Button>
-            )}
-            <Button variant="secondary" size="sm" className="gap-1.5" onClick={batchFavorite}>
-              <Star className="h-3.5 w-3.5" />
-              Favorite
-            </Button>
-            <Button variant="destructive" size="sm" className="gap-1.5" onClick={batchDelete}>
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => setSelectedIds(new Set())}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* ── Folders ── */}
       {!search && folders.length > 0 && (
@@ -1392,6 +1421,48 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
 
       {dialogs}
     </div>
+
+    {/* ── Floating batch action dock ── */}
+    <AnimatePresence>
+      {selectedIds.size > 0 && (
+        <motion.div
+          initial={{ y: 20, opacity: 0, scale: 0.95 }}
+          animate={{ y: 0, opacity: 1, scale: 1 }}
+          exit={{ y: 20, opacity: 0, scale: 0.95 }}
+          transition={{ type: "spring", stiffness: 500, damping: 36 }}
+          className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2"
+        >
+          <div className="flex items-center gap-0.5 rounded-2xl border border-border/50 bg-surface-elevated/95 px-2 py-1.5 shadow-[0_8px_40px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+            {/* Count */}
+            <span className="px-2.5 py-1 text-sm font-semibold text-foreground/80 shrink-0 select-none">
+              {selectedIds.size}
+            </span>
+            <div className="h-5 w-px bg-border/40 mx-1" />
+
+            <DockButton icon={Download} label="Download" onClick={batchDownload} />
+            {!trash && <DockButton icon={Copy} label="Copy" onClick={() => copyToClipboard(Array.from(selectedIds))} />}
+            {!trash && <DockButton icon={Scissors} label="Cut" onClick={() => cutToClipboard(Array.from(selectedIds))} />}
+            {!trash && <DockButton icon={Move} label="Move" onClick={() => setMoveIds(Array.from(selectedIds))} />}
+            {!trash && selectedIds.size >= 2 && (
+              <DockButton icon={PencilRuler} label="Rename" onClick={() => setBulkRenameIds(Array.from(selectedIds))} />
+            )}
+            <DockButton icon={Star} label="Favorite" onClick={batchFavorite} />
+
+            <div className="h-5 w-px bg-border/40 mx-1" />
+            <DockButton icon={Trash2} label="Delete" onClick={batchDelete} danger />
+
+            <div className="h-5 w-px bg-border/40 mx-1" />
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground/60 transition-colors hover:bg-muted/60 hover:text-foreground"
+              title="Clear selection (Esc)"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
 
     {showUploadPanel && uploadQueue && (
       <AnimatePresence mode="wait">

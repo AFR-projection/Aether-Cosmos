@@ -5,6 +5,7 @@ import { History, RotateCcw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
 import { formatBytes, formatDate, cn } from "@/lib/utils";
+import { useDialogs } from "@/components/ui/dialog-prompts";
 
 type FileVersion = {
   id: string;
@@ -32,6 +33,7 @@ export function FileVersionsPanel({
   const [loading, setLoading] = useState(true);
   const [restoring, setRestoring] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { askConfirm, dialogs } = useDialogs();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,9 +58,12 @@ export function FileVersionsPanel({
   }, [load]);
 
   async function handleRestore(version: number) {
-    if (!confirm(`Restore version ${version}? Current content will be kept as a new version.`)) {
-      return;
-    }
+    const ok = await askConfirm({
+      title: `Restore version ${version}?`,
+      message: "Current content will be kept as a new version.",
+      confirmText: "Restore",
+    });
+    if (!ok) return;
     setRestoring(version);
     const res = await apiFetch(`/api/files/${fileId}/versions/restore`, {
       method: "POST",
@@ -128,6 +133,7 @@ export function FileVersionsPanel({
           </li>
         ))}
       </ul>
+      {dialogs}
     </div>
   );
 }

@@ -244,43 +244,46 @@ function SortHeader({ label, sortKey, current, order, onSort }: SortHeaderProps)
 
 // ─── Hover info card ────────────────────────────────────────────────────────
 
-function HoverInfoCard({ file, style }: { file: FileRecord; style?: React.CSSProperties }) {
+function HoverInfoCard({ file }: { file: FileRecord }) {
   return (
-    <div
-      style={style}
-      className="animate-fade-in-scale absolute z-40 left-1/2 -translate-x-1/2 top-full mt-2 w-72 rounded-2xl border border-border/60 bg-surface-elevated p-4 shadow-xl"
-    >
-      <div className="flex items-start gap-3 mb-3">
-        <div className={cn(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br",
-          getGradientFallback(file.mimeType)
-        )}>
-          <FileIcon mimeType={file.mimeType} className={cn("h-5 w-5", getAccentColor(file.mimeType))} />
+    <div className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] z-50 w-64 -translate-x-1/2">
+      <div className="rounded-xl border border-border/50 bg-surface-elevated/98 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+        {/* Type badge + name */}
+        <div className="flex items-start gap-2.5 mb-2.5">
+          <div className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br",
+            getGradientFallback(file.mimeType)
+          )}>
+            <FileIcon mimeType={file.mimeType} className={cn("h-4 w-4", getAccentColor(file.mimeType))} />
+          </div>
+          <div className="min-w-0 flex-1 pt-0.5">
+            <p className="text-[13px] font-semibold leading-tight truncate">{file.name}</p>
+            <span className={cn("inline-block mt-0.5 rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide", getAccentColor(file.mimeType), "bg-current/10")}>
+              {getTypeLabel(file.mimeType)}
+            </span>
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold truncate">{file.name}</p>
-          <p className="text-xs text-muted-foreground/70">{getTypeLabel(file.mimeType)}</p>
+        {/* Stats */}
+        <div className="space-y-1 text-[11px]">
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground/60">Size</span>
+            <span className="font-mono font-medium text-foreground/90">{formatBytes(file.sizeBytes)}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground/60">Modified</span>
+            <span className="text-foreground/70">{formatDate(file.updatedAt, "short")}</span>
+          </div>
+          {(file.isFavorite || file.encrypted) && (
+            <div className="flex items-center gap-2 pt-0.5">
+              {file.isFavorite && <span className="flex items-center gap-1 text-amber-500"><Star className="h-3 w-3 fill-current" />Favorite</span>}
+              {file.encrypted && <span className="flex items-center gap-1 text-accent"><Lock className="h-3 w-3" />Encrypted</span>}
+            </div>
+          )}
         </div>
       </div>
-      <div className="space-y-1.5 text-xs text-muted-foreground/60">
-        <div className="flex justify-between">
-          <span>Size</span>
-          <span className="font-mono font-medium text-foreground/80">{formatBytes(file.sizeBytes)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Modified</span>
-          <span>{formatDate(file.updatedAt)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Type</span>
-          <span>{file.mimeType}</span>
-        </div>
-        {file.isFavorite && (
-          <div className="flex justify-between">
-            <span>Favorite</span>
-            <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-          </div>
-        )}
+      {/* Arrow */}
+      <div className="absolute -top-1 left-1/2 -translate-x-1/2 h-2 w-4 overflow-hidden">
+        <div className="mx-auto h-2.5 w-2.5 rotate-45 border-l border-t border-border/50 bg-surface-elevated/98" />
       </div>
     </div>
   );
@@ -378,13 +381,22 @@ export function FileGrid({
   // ── Empty ──
   if (files.length === 0) {
     return (
-      <div className="animate-fade-in flex flex-col items-center justify-center py-24 text-muted-foreground">
-        <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/5 border border-accent/10">
-          <File className="h-10 w-10 text-accent/40" />
+      <div className="flex flex-col items-center justify-center py-28 select-none">
+        <div className="relative mb-5">
+          <div className="flex h-24 w-24 items-center justify-center rounded-3xl border border-border/40 bg-gradient-to-br from-surface to-muted/30 shadow-sm">
+            <File className="h-10 w-10 text-muted-foreground/20" />
+          </div>
+          {!trash && (
+            <div className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border border-border/40 bg-surface shadow-sm">
+              <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground/40" />
+            </div>
+          )}
         </div>
-        <p className="text-lg font-semibold">No files here</p>
-        <p className="mt-1 text-sm text-muted-foreground/70">
-          {trash ? "Recycle bin is empty" : "Upload files or create a note to get started"}
+        <p className="text-[15px] font-semibold text-foreground/80">
+          {trash ? "Recycle bin is empty" : "No files yet"}
+        </p>
+        <p className="mt-1.5 text-sm text-muted-foreground/50 text-center max-w-[240px]">
+          {trash ? "Files you delete will appear here" : "Drop files anywhere to upload, or use the toolbar above"}
         </p>
       </div>
     );
@@ -455,15 +467,15 @@ export function FileGrid({
   return (
     <div
       ref={listRef}
-      className="rounded-2xl border border-border/50 bg-surface overflow-auto"
-      style={{ maxHeight: "calc(100dvh - 16rem)" }}
+      className="overflow-auto rounded-2xl border border-border/40 bg-surface"
+      style={{ maxHeight: "calc(100dvh - 15rem)" }}
     >
       {/* Table header */}
-      <div className="sticky top-0 z-10 grid grid-cols-[28px_1fr_60px] sm:grid-cols-[28px_2fr_100px_44px] md:grid-cols-[28px_2fr_1fr_1fr_44px] lg:grid-cols-[28px_2fr_1fr_1fr_1fr_44px] border-b border-border/40 bg-muted/80 backdrop-blur-sm px-2 sm:px-4 py-2.5 text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">
-        <button onClick={onSelectAll} className="flex items-center justify-center">
+      <div className="sticky top-0 z-10 grid grid-cols-[32px_1fr_72px] sm:grid-cols-[32px_2fr_100px_44px] md:grid-cols-[32px_2fr_100px_1fr_44px] lg:grid-cols-[32px_2fr_100px_1fr_120px_44px] items-center border-b border-border/30 bg-muted/60 backdrop-blur-md px-3 sm:px-4 py-2 text-[11px] text-muted-foreground/50 uppercase tracking-widest font-semibold">
+        <button onClick={onSelectAll} className="flex items-center justify-center p-1 -m-1" aria-label="Select all">
           <div className={cn(
-            "flex h-4 w-4 items-center justify-center rounded border transition-colors",
-            allSelected ? "border-accent bg-accent text-white" : "border-border/50 hover:border-accent/50"
+            "flex h-4 w-4 items-center justify-center rounded-[4px] border transition-colors",
+            allSelected ? "border-accent bg-accent text-white" : "border-border/60 hover:border-accent/60"
           )}>
             {allSelected && <Check className="h-3 w-3" />}
           </div>
@@ -557,76 +569,79 @@ const GridCard = memo(function GridCard({
   const isAudio = cat === "audio";
 
   return (
-    // Hover lift and press feedback run on transform/opacity only — compositor
-    // work, no layout or paint — and there is no mount animation, because cards
-    // mount and unmount constantly while the virtualized grid scrolls.
+    // IMPORTANT: No overflow-hidden on root — badges need to overflow the card corner
+    // and HoverInfoCard needs to render below the card boundary.
+    // The thumbnail section has its own overflow-hidden + matching border-radius.
     <div
       className={cn(
-        "group relative rounded-2xl border bg-surface overflow-hidden cursor-pointer",
-        "transition-[transform,box-shadow,border-color] duration-200 ease-out",
-        "active:scale-[0.985] motion-reduce:transition-none motion-reduce:active:scale-100",
+        "group relative rounded-2xl bg-surface cursor-pointer",
+        "transition-[transform,box-shadow] duration-200 ease-out",
+        "active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
         selected
-          ? "border-accent/50 shadow-md shadow-accent/5 ring-1 ring-accent/20"
-          : "border-border/60 hover:-translate-y-1 hover:shadow-lg hover:border-accent/30 hover:shadow-accent/5"
+          ? "ring-2 ring-accent/50 ring-offset-2 ring-offset-background shadow-lg shadow-accent/8"
+          : "ring-1 ring-border/50 hover:-translate-y-0.5 hover:shadow-[0_6px_24px_rgba(0,0,0,0.10)] hover:ring-border/80"
       )}
       onClick={() => onFileClick(file)}
       onContextMenu={ctxMenu.onContextMenu}
       onMouseEnter={() => setHoverInfo(true)}
       onMouseLeave={() => setHoverInfo(false)}
     >
-      {/* Selection checkbox — always visible on mobile, hover on desktop */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onSelect(file.id, e.shiftKey); }}
-        className={cn(
-          "absolute top-1 left-1 z-30 flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-md border transition-all",
-          selected
-            ? "border-accent bg-accent text-white"
-            : "border-white/40 text-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:border-accent/70"
-        )}
-        aria-label={selected ? "Deselect file" : "Select file"}
-      >
-        {selected && <Check className="h-4 w-4 sm:h-3 sm:w-3" />}
-      </button>
-
+      {/* Corner badges — intentionally overflow the card */}
       {file.isFavorite && (
-        <div className="absolute -top-1 -right-1 z-30 flex h-6 w-6 items-center justify-center rounded-full bg-amber-400 shadow-md shadow-amber-400/20">
-          <Star className="h-3 w-3 fill-white text-white" />
+        <div className="absolute -top-1.5 -right-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 shadow-[0_2px_6px_rgba(251,191,36,0.4)] ring-2 ring-background">
+          <Star className="h-2.5 w-2.5 fill-white text-white" />
         </div>
       )}
-
       {file.encrypted && (
         <div
           className={cn(
-            "absolute -top-1 z-30 flex h-6 w-6 items-center justify-center rounded-full bg-accent shadow-md shadow-accent/20",
-            file.isFavorite ? "-right-1 translate-x-[-1.6rem]" : "-right-1"
+            "absolute -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-accent shadow-[0_2px_6px_rgba(99,102,241,0.4)] ring-2 ring-background",
+            file.isFavorite ? "-right-1.5 translate-x-[-20px]" : "-right-1.5"
           )}
           title="Encrypted (AES-256)"
         >
-          <Lock className="h-3 w-3 text-white" />
+          <Lock className="h-2.5 w-2.5 text-white" />
         </div>
       )}
+
+      {/* Selection checkbox — visible on mobile, hover on desktop */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onSelect(file.id, e.shiftKey); }}
+        className={cn(
+          "absolute top-2 left-2 z-30 flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-150",
+          selected
+            ? "bg-accent text-white shadow-md"
+            : "bg-black/35 backdrop-blur-sm text-transparent border border-white/25 opacity-100 md:opacity-0 md:group-hover:opacity-100"
+        )}
+        aria-label={selected ? "Deselect file" : "Select file"}
+      >
+        {selected && <Check className="h-3.5 w-3.5" />}
+      </button>
 
       <ThumbnailCard file={file}>
         {isVideo && <VideoOverlay file={file} hovered={hoverInfo} />}
         {isAudio && <AudioOverlay />}
-
         <div
-          className="absolute right-2 bottom-2 z-30 flex md:hidden md:group-hover:flex items-center"
+          className="absolute right-2 bottom-2 z-30 flex opacity-0 group-hover:opacity-100 transition-opacity duration-150 items-center"
           onClick={(e) => e.stopPropagation()}
         >
           <CardActions file={file} trash={trash} onAction={onFileAction} />
         </div>
       </ThumbnailCard>
 
-      <div className="px-3 py-2.5">
-        <p className="truncate text-sm font-semibold leading-tight">{file.name}</p>
+      {/* Meta */}
+      <div className="px-2.5 pt-2 pb-2.5">
+        <p className="truncate text-[13px] font-medium leading-snug text-foreground/90">{file.name}</p>
         <div className="mt-1 flex items-center justify-between">
-          <span className="font-mono text-[11px] text-muted-foreground/70">{formatBytes(file.sizeBytes)}</span>
-          <span className="text-[10px] text-muted-foreground/50">{formatDate(file.updatedAt, "short")}</span>
+          <span className="font-mono text-[10px] text-muted-foreground/55">{formatBytes(file.sizeBytes)}</span>
+          {file.isNote
+            ? <span className="rounded bg-accent/12 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-accent">Note</span>
+            : <span className="text-[10px] text-muted-foreground/40">{formatDate(file.updatedAt, "short")}</span>
+          }
         </div>
       </div>
 
-      {/* Hover info popover */}
+      {/* Hover info — renders below card, now visible since no overflow-hidden on root */}
       {hoverInfo && <HoverInfoCard file={file} />}
 
       {/* Right-click context menu */}
@@ -660,10 +675,9 @@ const ListRow = memo(function ListRow({
     <div
       style={style}
       className={cn(
-        "grid grid-cols-[28px_1fr_60px] sm:grid-cols-[28px_2fr_100px_44px] md:grid-cols-[28px_2fr_1fr_1fr_44px] lg:grid-cols-[28px_2fr_1fr_1fr_1fr_44px] items-center gap-0 px-2 sm:px-4 border-b border-border/20 transition-colors text-sm cursor-pointer",
-        selected
-          ? "bg-accent/5 border-accent/10"
-          : "hover:bg-accent/[0.03]"
+        "grid grid-cols-[32px_1fr_72px] sm:grid-cols-[32px_2fr_100px_44px] md:grid-cols-[32px_2fr_100px_1fr_44px] lg:grid-cols-[32px_2fr_100px_1fr_120px_44px]",
+        "items-center px-3 sm:px-4 border-b border-border/15 transition-colors cursor-pointer",
+        selected ? "bg-accent/5" : "hover:bg-muted/40"
       )}
       onClick={() => onFileClick(file)}
       onContextMenu={ctxMenu.onContextMenu}
@@ -671,33 +685,28 @@ const ListRow = memo(function ListRow({
       {/* Checkbox */}
       <button
         onClick={(e) => { e.stopPropagation(); onSelect(file.id, e.shiftKey); }}
-        className="flex items-center justify-center p-2 -m-2"
+        className="flex items-center justify-center"
         aria-label={selected ? "Deselect file" : "Select file"}
       >
         <div className={cn(
-          "flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded border transition-colors",
-          selected
-            ? "border-accent bg-accent text-white"
-            : "border-border/50 text-transparent hover:border-accent/50"
+          "flex h-4 w-4 items-center justify-center rounded-[4px] border transition-colors",
+          selected ? "border-accent bg-accent text-white" : "border-border/50 text-transparent hover:border-accent/50"
         )}>
-          {selected && <Check className="h-3.5 w-3.5 sm:h-3 sm:w-3" />}
+          {selected && <Check className="h-3 w-3" />}
         </div>
       </button>
 
-      {/* Name */}
-      <div className="flex items-center gap-2 sm:gap-3 min-w-0 pr-1 sm:pr-3">
-        <div className="shrink-0 w-8 h-8 rounded-lg overflow-hidden relative">
+      {/* Name + icon */}
+      <div className="flex items-center gap-2.5 min-w-0 py-2 pr-2 sm:pr-4">
+        <div className="shrink-0 h-9 w-9 rounded-lg overflow-hidden relative">
           {hasThumb ? (
             <img
-              // 32px box — 150 is the smallest size the endpoint serves. The old
-              // `size=80` was not a served size, so the server silently fell
-              // back to 300 for every row.
               src={`/api/files/${file.id}/thumbnail?size=150`}
               alt={file.name}
               loading="lazy"
               decoding="async"
-              width={32}
-              height={32}
+              width={36}
+              height={36}
               className="w-full h-full object-cover"
             />
           ) : (
@@ -707,31 +716,31 @@ const ListRow = memo(function ListRow({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <span className="truncate text-sm font-medium block">{file.name}</span>
-          <span className="text-[10px] text-muted-foreground/50 sm:hidden">
-            {formatBytes(file.sizeBytes)} &middot; {getTypeLabel(file.mimeType)}
+          <span className="truncate text-[13px] font-medium text-foreground/90 block leading-snug">{file.name}</span>
+          <span className="text-[11px] text-muted-foreground/50 sm:hidden">
+            {formatBytes(file.sizeBytes)} · {getTypeLabel(file.mimeType)}
           </span>
         </div>
-        {file.isFavorite && <Star className="h-3 w-3 fill-amber-400 text-amber-400 shrink-0 hidden sm:block" />}
-        {file.encrypted && <Lock className="h-3 w-3 text-accent shrink-0 hidden sm:block" aria-label="Encrypted" />}
-        {file.isNote && <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[9px] font-medium text-accent hidden sm:block">Note</span>}
+        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+          {file.isFavorite && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
+          {file.encrypted && <Lock className="h-3 w-3 text-accent/70" aria-label="Encrypted" />}
+          {file.isNote && <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-accent">Note</span>}
+        </div>
       </div>
 
-      {/* Size - hidden on smallest screens */}
-      <span className="font-mono text-xs text-muted-foreground/80 truncate hidden sm:block">{formatBytes(file.sizeBytes)}</span>
-
-      {/* Modified - hidden on sm and below */}
-      <span className="text-xs text-muted-foreground/70 truncate hidden sm:block md:text-left">{formatDate(file.updatedAt, "short")}</span>
-
-      {/* Type - hidden on md and below */}
-      <span className="text-xs text-muted-foreground/60 truncate hidden md:block">{getTypeLabel(file.mimeType)}</span>
+      {/* Size */}
+      <span className="font-mono text-[11px] text-muted-foreground/60 truncate hidden sm:block">{formatBytes(file.sizeBytes)}</span>
+      {/* Modified */}
+      <span className="text-[11px] text-muted-foreground/55 truncate hidden sm:block">{formatDate(file.updatedAt, "short")}</span>
+      {/* Type */}
+      <span className="text-[11px] text-muted-foreground/45 truncate hidden lg:block">{getTypeLabel(file.mimeType)}</span>
 
       {/* Actions */}
       <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
         <Button
           ref={menu.anchorRef}
           variant="ghost" size="icon"
-          className="h-10 w-10 sm:h-8 sm:w-8 rounded-lg text-muted-foreground/50 hover:text-foreground"
+          className="h-9 w-9 sm:h-8 sm:w-8 rounded-lg text-muted-foreground/40 hover:text-foreground"
           onClick={() => menu.toggle(file.id)}
           aria-label="More actions"
           aria-expanded={menu.isOpen(file.id)}
@@ -767,7 +776,9 @@ function ThumbnailCard({ file, children }: { file: FileRecord; children: React.R
   const { containerRef, currentSrc, loaded, setLoaded, error, setError } = useThumbnail(file.id, hasThumb);
 
   return (
-    <div ref={containerRef} className="relative w-full aspect-[4/3] overflow-hidden rounded-t-[14px]">
+    // overflow-hidden here clips the thumbnail to the card's top border-radius.
+    // The card root itself has no overflow-hidden so badges and HoverInfoCard can escape.
+    <div ref={containerRef} className="relative w-full aspect-[4/3] overflow-hidden rounded-t-2xl">
       {hasThumb && !loaded && !error && (
         <div className="absolute inset-0 bg-gradient-to-br from-muted/50 to-muted/80 animate-pulse" />
       )}

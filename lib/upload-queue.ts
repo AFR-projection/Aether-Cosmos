@@ -176,6 +176,10 @@ export class UploadQueue {
     this.listeners[event] = cb;
   }
 
+  off<K extends keyof UploadQueueEvents>(event: K) {
+    delete this.listeners[event];
+  }
+
   private emit(event: keyof UploadQueueEvents, ...args: unknown[]) {
     const cb = this.listeners[event] as ((...a: unknown[]) => void) | undefined;
     if (cb) cb(...args);
