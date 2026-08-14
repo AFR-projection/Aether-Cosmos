@@ -11,6 +11,7 @@ import {
   Type, Heading1, Heading2, Heading3, List, ListOrdered,
   ListChecks, Quote, Code2, Minus,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const ICONS = {
   Type, Heading1, Heading2, Heading3, List, ListOrdered,
@@ -38,7 +39,6 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(
   function SlashMenu({ items, command }, ref) {
     const [selected, setSelected] = useState(0);
 
-    // Reset highlight whenever the filtered list changes.
     useEffect(() => setSelected(0), [items]);
 
     useImperativeHandle(ref, () => ({
@@ -63,14 +63,20 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(
 
     if (items.length === 0) {
       return (
-        <div className="w-64 rounded-xl border border-border/60 bg-card/95 p-3 text-xs text-muted-foreground shadow-2xl backdrop-blur-xl">
-          Tidak ada blok yang cocok
+        <div className="note-slash-menu">
+          <p className="px-3 py-2 text-xs" style={{ color: "var(--muted-foreground)" }}>
+            Tidak ada blok yang cocok
+          </p>
         </div>
       );
     }
 
     return (
-      <div className="max-h-80 w-64 overflow-y-auto rounded-xl border border-border/60 bg-card/95 p-1.5 shadow-2xl backdrop-blur-xl">
+      <div className="note-slash-menu">
+        <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest"
+          style={{ color: "var(--accent)" }}>
+          Blok
+        </p>
         {items.map((item, i) => {
           const Icon = ICONS[item.icon];
           const active = i === selected;
@@ -79,26 +85,19 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(
               key={item.title}
               type="button"
               onMouseEnter={() => setSelected(i)}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                command(item);
-              }}
-              className={[
-                "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors",
-                active ? "bg-accent/15 text-foreground" : "text-muted-foreground hover:bg-muted/40",
-              ].join(" ")}
+              onMouseDown={(e) => { e.preventDefault(); command(item); }}
+              className={cn("note-slash-item", active && "note-slash-item--active")}
             >
-              <span
-                className={[
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border",
-                  active ? "border-accent/40 bg-accent/10 text-accent" : "border-border/50 bg-muted/30",
-                ].join(" ")}
-              >
-                <Icon className="h-4 w-4" />
+              <span className={cn("note-slash-icon", active && "note-slash-icon--active")}>
+                <Icon className="h-3.5 w-3.5" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-medium leading-tight text-foreground">{item.title}</span>
-                <span className="block truncate text-[11px] text-muted-foreground">{item.desc}</span>
+                <span className="block text-sm font-medium leading-tight" style={{ color: "var(--foreground)" }}>
+                  {item.title}
+                </span>
+                <span className="block truncate text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                  {item.desc}
+                </span>
               </span>
             </button>
           );

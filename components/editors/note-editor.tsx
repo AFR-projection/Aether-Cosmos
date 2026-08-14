@@ -9,9 +9,10 @@ import { TaskItem } from "@tiptap/extension-task-item";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { useEffect, useCallback, useRef, useState, useMemo } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Check, Loader2, Download, ListTree, FileText, FileDown, FileType,
+  ChevronRight, Hash,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
@@ -30,7 +31,6 @@ interface NoteEditorProps {
 type SaveState = "idle" | "saving" | "saved" | "error";
 type OutlineItem = { level: number; text: string; pos: number };
 
-/** Trigger a browser download of a text blob. */
 function downloadText(filename: string, text: string, mime: string) {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -48,7 +48,7 @@ const baseName = (name: string) => name.replace(/\.[^.]+$/, "") || "note";
 export function NoteEditor({ file, onClose }: NoteEditorProps) {
   const saveTimeout = useRef<NodeJS.Timeout | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [tick, setTick] = useState(0); // forces toolbar re-render on selection change
+  const [tick, setTick] = useState(0);
   const [showOutline, setShowOutline] = useState(false);
   const [showExport, setShowExport] = useState(false);
 
@@ -57,7 +57,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
     extensions: [
       StarterKit.configure({ link: { openOnClick: false } }),
       Placeholder.configure({
-        placeholder: "Tulis sesuatu, atau ketik '/' untuk perintah…",
+        placeholder: "Mulai menulis… atau ketik '/' untuk blok",
       }),
       Highlight.configure({ multicolor: true }),
       TaskList,
@@ -70,14 +70,13 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
     editorProps: {
       attributes: {
         class:
-          "prose prose-sm dark:prose-invert max-w-none min-h-[45vh] focus:outline-none px-1",
+          "note-prose prose prose-base dark:prose-invert max-w-none min-h-[55vh] focus:outline-none",
       },
     },
     onSelectionUpdate: () => setTick((t) => t + 1),
     onTransaction: () => setTick((t) => t + 1),
   });
 
-  // Load existing content.
   useEffect(() => {
     if (!editor) return;
     let cancelled = false;
@@ -89,9 +88,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
         editor.commands.setContent(res.data.content.contentJson as Record<string, unknown>);
       }
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [file.id, editor]);
 
   const save = useCallback(
@@ -111,22 +108,15 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
 
   useEffect(() => {
     if (!editor) return;
-    const handler = () => {
-      if (!editor.isDestroyed) save(editor.getJSON());
-    };
+    const handler = () => { if (!editor.isDestroyed) save(editor.getJSON()); };
     editor.on("update", handler);
-    return () => {
-      editor.off("update", handler);
-    };
+    return () => { editor.off("update", handler); };
   }, [editor, save]);
 
   useEffect(() => {
-    return () => {
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    };
+    return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current); };
   }, []);
 
-  // Word / character count (depends on tick so it stays live).
   const { words, chars } = useMemo(() => {
     if (!editor) return { words: 0, chars: 0 };
     const text = editor.getText().trim();
@@ -137,7 +127,6 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, tick]);
 
-  // Outline from headings.
   const outline = useMemo<OutlineItem[]>(() => {
     if (!editor) return [];
     const items: OutlineItem[] = [];
@@ -175,95 +164,159 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
     setShowExport(false);
   };
 
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="scrim fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-6 lg:p-10"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <motion.div
-        initial={{ scale: 0.97, opacity: 0, y: 8 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 380, damping: 32 }}
-        className="flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 6 }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
+        className="note-editor-shell relative flex w-full max-w-4xl flex-col overflow-hidden"
+        style={{ minHeight: "82vh" }}
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <FileText className="h-4 w-4 shrink-0 text-accent" />
+        {/* Chrome */}
+        <div className="note-editor-chrome flex shrink-0 items-center gap-3 px-4 py-2.5">
+          {/* Left: file icon + name */}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
             <h2 className="truncate text-sm font-semibold">{baseName(file.name)}</h2>
           </div>
-          <div className="flex items-center gap-1.5">
+
+          {/* Right: actions */}
+          <div className="flex items-center gap-1">
             <SaveBadge state={saveState} />
-            <Button variant="ghost" size="icon" className="h-8 w-8" title="Outline"
-              onClick={() => setShowOutline((v) => !v)}>
-              <ListTree className={cn("h-4 w-4", showOutline && "text-accent")} />
-            </Button>
-            <div className="relative">
-              <Button variant="ghost" size="icon" className="h-8 w-8" title="Export / Download"
-                onClick={() => setShowExport((v) => !v)}>
-                <Download className="h-4 w-4" />
-              </Button>
-              {showExport && (
-                <div
-                  className="absolute right-0 top-9 z-20 w-44 overflow-hidden rounded-xl border border-border/60 bg-card/95 p-1 shadow-2xl backdrop-blur-xl"
-                  onMouseLeave={() => setShowExport(false)}
-                >
-                  <ExportItem icon={FileType} label="Markdown (.md)" onClick={() => doExport("md")} />
-                  <ExportItem icon={FileText} label="Teks (.txt)" onClick={() => doExport("txt")} />
-                  <ExportItem icon={FileDown} label="PDF (print)" onClick={() => doExport("pdf")} />
-                </div>
+
+            <button
+              type="button"
+              title="Outline"
+              onClick={() => setShowOutline((v) => !v)}
+              className={cn(
+                "note-action-btn",
+                showOutline && "note-action-btn--active"
               )}
+            >
+              <ListTree className="h-4 w-4" />
+            </button>
+
+            <div className="relative">
+              <button
+                type="button"
+                title="Export"
+                onClick={() => setShowExport((v) => !v)}
+                className="note-action-btn"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+              <AnimatePresence>
+                {showExport && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.94, y: -6 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.94, y: -4 }}
+                    transition={{ duration: 0.14 }}
+                    className="note-export-menu"
+                    onMouseLeave={() => setShowExport(false)}
+                  >
+                    <ExportItem icon={FileType} label="Markdown (.md)" onClick={() => doExport("md")} />
+                    <ExportItem icon={FileText} label="Plain text (.txt)" onClick={() => doExport("txt")} />
+                    <ExportItem icon={FileDown} label="PDF (print)" onClick={() => doExport("pdf")} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8" title="Tutup (Esc)" onClick={onClose}>
+
+            <div className="mx-1 h-4 w-px" style={{ background: "var(--border)" }} />
+
+            <button
+              type="button"
+              title="Tutup (Esc)"
+              onClick={onClose}
+              className="note-action-btn note-action-btn--close"
+            >
               <X className="h-4 w-4" />
-            </Button>
+            </button>
           </div>
         </div>
 
         {/* Toolbar */}
         {editor && (
-          <div className="border-b border-border/40 px-3 py-2">
+          <div className="note-toolbar-wrap shrink-0 px-5 pb-2 pt-0">
             <NoteToolbar editor={editor} />
           </div>
         )}
 
-        {/* Body: editor + optional outline */}
+        {/* Body */}
         <div className="flex min-h-0 flex-1">
-          <div className="min-w-0 flex-1 overflow-y-auto px-5 py-4 sm:px-8">
+          {/* Editor area */}
+          <div className="min-w-0 flex-1 overflow-y-auto px-8 py-6 sm:px-12 sm:py-8">
             <EditorContent editor={editor} />
           </div>
-          {showOutline && (
-            <aside className="hidden w-56 shrink-0 overflow-y-auto border-l border-border/50 bg-muted/10 p-3 sm:block">
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Outline
-              </p>
-              {outline.length === 0 ? (
-                <p className="text-xs text-muted-foreground/60">Belum ada heading</p>
-              ) : (
-                <ul className="space-y-0.5">
-                  {outline.map((h, i) => (
-                    <li key={i}>
-                      <button
-                        type="button"
-                        onClick={() => jumpTo(h.pos)}
-                        className="block w-full truncate rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                        style={{ paddingLeft: `${(h.level - 1) * 10 + 8}px` }}
-                      >
-                        {h.text}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </aside>
-          )}
+
+          {/* Outline sidebar */}
+          <AnimatePresence>
+            {showOutline && (
+              <motion.aside
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 220, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 380, damping: 34 }}
+                className="note-outline shrink-0 overflow-hidden"
+              >
+                <div className="w-[220px] overflow-y-auto p-4">
+                  <p className="mb-3 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest"
+                    style={{ color: "var(--accent)" }}>
+                    <Hash className="h-3 w-3" /> Outline
+                  </p>
+                  {outline.length === 0 ? (
+                    <p className="text-xs" style={{ color: "var(--muted-foreground)", opacity: 0.5 }}>
+                      Belum ada heading
+                    </p>
+                  ) : (
+                    <ul className="space-y-0.5">
+                      {outline.map((h, i) => (
+                        <li key={i}>
+                          <button
+                            type="button"
+                            onClick={() => jumpTo(h.pos)}
+                            className="note-outline-item"
+                            style={{ paddingLeft: `${(h.level - 1) * 12 + 8}px` }}
+                          >
+                            {h.level === 1 && <ChevronRight className="mr-1 h-3 w-3 shrink-0 opacity-40" />}
+                            <span className="truncate">{h.text}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </motion.aside>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Footer: counts */}
-        <div className="flex items-center justify-between border-t border-border/60 px-4 py-1.5 text-[11px] text-muted-foreground">
-          <span>{words} kata · {chars} karakter</span>
-          <span className="hidden sm:inline">Ketik <kbd className="rounded bg-muted px-1">/</kbd> untuk menu blok</span>
+        {/* Footer */}
+        <div className="note-footer flex shrink-0 items-center justify-between px-5 py-2">
+          <span className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+            {words} kata · {chars} karakter
+          </span>
+          <span className="hidden text-[11px] sm:inline" style={{ color: "var(--muted-foreground)", opacity: 0.6 }}>
+            Ketik <kbd className="note-kbd">/</kbd> untuk menu blok
+          </span>
         </div>
       </motion.div>
     </motion.div>
@@ -272,49 +325,61 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
 
 function SaveBadge({ state }: { state: SaveState }) {
   if (state === "idle") return null;
-  const map = {
-    saving: { icon: <Loader2 className="h-3 w-3 animate-spin" />, text: "Menyimpan…", cls: "text-muted-foreground" },
-    saved: { icon: <Check className="h-3 w-3" />, text: "Tersimpan", cls: "text-emerald-500" },
-    error: { icon: <X className="h-3 w-3" />, text: "Gagal simpan", cls: "text-danger" },
-  } as const;
-  const m = map[state];
   return (
-    <span className={cn("mr-1 inline-flex items-center gap-1 text-[11px] font-medium", m.cls)}>
-      {m.icon} {m.text}
-    </span>
+    <AnimatePresence mode="wait">
+      <motion.span
+        key={state}
+        initial={{ opacity: 0, scale: 0.85 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.85 }}
+        transition={{ duration: 0.15 }}
+        className={cn(
+          "mr-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+          state === "saving" && "bg-muted/40 text-muted-foreground",
+          state === "saved" && "text-emerald-500",
+          state === "error" && "text-danger"
+        )}
+      >
+        {state === "saving" && <Loader2 className="h-3 w-3 animate-spin" />}
+        {state === "saved" && <Check className="h-3 w-3" />}
+        {state === "error" && <X className="h-3 w-3" />}
+        {state === "saving" ? "Menyimpan…" : state === "saved" ? "Tersimpan" : "Gagal simpan"}
+      </motion.span>
+    </AnimatePresence>
   );
 }
 
 function ExportItem({
   icon: Icon, label, onClick,
-}: {
-  icon: typeof FileText;
-  label: string;
-  onClick: () => void;
-}) {
+}: { icon: typeof FileText; label: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+      className="note-export-item"
     >
-      <Icon className="h-4 w-4" /> {label}
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      {label}
     </button>
   );
 }
 
-/** Export to PDF via a print window that inherits the rendered HTML. */
 function printPdf(name: string, editor: Editor) {
   const html = editor.getHTML();
   const win = window.open("", "_blank", "width=800,height=1000");
   if (!win) return;
   win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${name}</title>
     <style>
-      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.6}
-      h1,h2,h3{font-weight:600;margin:1.2em 0 .4em} pre{background:#f4f4f5;padding:12px;border-radius:8px;overflow:auto}
-      code{background:#f4f4f5;padding:2px 4px;border-radius:4px} blockquote{border-left:3px solid #ddd;margin:0;padding-left:16px;color:#555}
-      ul[data-type=taskList]{list-style:none;padding-left:0} ul[data-type=taskList] li{display:flex;gap:8px;align-items:flex-start}
-      mark{padding:0 2px;border-radius:2px} hr{border:none;border-top:1px solid #ddd;margin:24px 0}
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.7}
+      h1{font-size:2rem;font-weight:700;margin:1.5rem 0 .5rem;letter-spacing:-.03em}
+      h2{font-size:1.35rem;font-weight:600;margin:1.2rem 0 .4rem}
+      h3{font-size:1.1rem;font-weight:600;margin:1rem 0 .3rem}
+      pre{background:#f4f4f5;padding:14px 16px;border-radius:10px;overflow:auto;font-size:.85rem}
+      code{background:#f4f4f5;padding:2px 5px;border-radius:5px;font-size:.88em}
+      blockquote{border-left:3px solid #818cf8;margin:0;padding-left:16px;color:#555;font-style:italic}
+      ul[data-type=taskList]{list-style:none;padding-left:0}
+      ul[data-type=taskList] li{display:flex;gap:8px;align-items:flex-start}
+      mark{padding:1px 3px;border-radius:3px}hr{border:none;border-top:1px solid #e5e7eb;margin:28px 0}
     </style></head><body><h1>${name}</h1>${html}</body></html>`);
   win.document.close();
   win.focus();
