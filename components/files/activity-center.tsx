@@ -152,7 +152,7 @@ function UploadRow({
                   Retry
                 </button>
               )}
-              {(isQueued || isFailed) && (
+              {(isQueued || isFailed || isResumeNeeded) && (
                 <button onClick={onCancel} className="rounded p-1 hover:bg-red-500/10 text-muted-foreground/50 hover:text-red-500 transition-colors">
                   <X className="h-3 w-3" />
                 </button>

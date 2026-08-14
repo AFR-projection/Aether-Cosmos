@@ -102,7 +102,7 @@ function TimelineItem({ item }: { item: ActivityItem }) {
 }
 
 function LiveTransfers({ items, stats }: { items: UploadItem[]; stats: UploadStats }) {
-  const live = items.filter((item) => !["done", "cancelled"].includes(item.status));
+  const live = items.filter((item) => !["done", "cancelled", "resume_requires_file"].includes(item.status));
   if (live.length === 0) return null;
   return (
     <section className="mb-6 overflow-hidden rounded-2xl border border-accent/20 bg-accent/[0.045] shadow-[0_16px_50px_rgba(37,99,235,0.08)]">
@@ -170,7 +170,7 @@ export function ActivityPage({ scopeId }: { scopeId: string }) {
     [activities]
   );
   const sharedLiveUploads = useMemo(
-    () => sharedUploadActivities.filter((item) => !["done", "completed", "failed", "cancelled"].includes(item.status)).map(activityUploadItem),
+    () => sharedUploadActivities.filter((item) => !["done", "completed", "failed", "cancelled", "paused"].includes(item.status)).map(activityUploadItem),
     [sharedUploadActivities]
   );
   const visibleUploadItems = useMemo(() => {

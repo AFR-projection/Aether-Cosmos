@@ -285,8 +285,8 @@ export class UploadQueue {
         // The browser popup is a presentation surface. Its best-effort
         // recovery probe must not overwrite the opener's live transfer with a
         // local "resume requires file" snapshot.
-        if (isActivityPopupPresentation() && item.status === "resume_requires_file") continue;
-        const phase: ActivityStatus = item.status === "done" ? "completed" : item.status === "error" ? "failed" : item.status === "cancelled" ? "cancelled" : item.status === "resume_requires_file" ? "paused" : item.status;
+        if (item.status === "resume_requires_file") continue;
+        const phase: ActivityStatus = item.status === "done" ? "completed" : item.status === "error" ? "failed" : item.status === "cancelled" ? "cancelled" : item.status;
         syncTransferActivity({ id: item.id, type: "upload", name: item.file?.name ?? item.remotePath, phase, loaded: item.uploadedBytes, total: item.totalBytes, speed: item.speed, error: item.error, fileId: item.fileId });
       }
       this.emit("change", [...this.items], this.getStats());
@@ -296,7 +296,7 @@ export class UploadQueue {
   getStats(): UploadStats {
     const total = this.items.length;
     const completed = this.items.filter((item) => item.status === "done").length;
-    const failed = this.items.filter((item) => item.status === "error" || item.status === "resume_requires_file").length;
+    const failed = this.items.filter((item) => item.status === "error").length;
     const active = this.items.filter((item) => item.status === "preparing" || item.status === "uploading" || item.status === "verifying").length;
     const queued = this.items.filter((item) => item.status === "queued").length;
     const totalBytes = this.items.reduce((sum, item) => sum + item.totalBytes, 0);
