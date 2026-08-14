@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRealtimeEvents, rememberCurrentSessionId } from "@/hooks/use-realtime-events";
 import { notify } from "@/lib/system/notify-store";
 import { apiFetch } from "@/lib/api/client";
+import { OfflineOverlay } from "@/components/system/offline-overlay";
 import { useQueryClient } from "@tanstack/react-query";
 import { configureActivityScope } from "@/lib/activity/activity-store";
 import { configureDownloadScope } from "@/lib/download/download-store";
@@ -209,6 +210,8 @@ export function ClientShell({
       {/* Native-style bottom tab bar (mobile/tablet only). Its Menu button
           opens the same sidebar drawer used by the header hamburger. */}
       <BottomNav onOpenMenu={() => setMobileSidebarOpen(true)} />
+
+      <OfflineOverlay />
     </div>
   );
 }
