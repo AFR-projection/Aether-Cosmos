@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { RealtimeEvent } from "@/lib/realtime/types";
 import { notify, setConnectionStatus, showSystemToast } from "@/lib/system/notify-store";
 import { consumeLocalUpload } from "@/lib/system/local-upload-registry";
+import { syncTransferActivity } from "@/lib/activity/activity-store";
 
 const SESSION_ID_KEY = "storage_current_session_id";
 
@@ -163,6 +164,10 @@ export function useRealtimeEvents(enabled = true): void {
       es.onmessage = (msg) => {
         try {
           const event = JSON.parse(msg.data) as RealtimeEvent;
+          const localUploadComplete = event.type === "upload_complete" ? consumeLocalUpload(event.fileId) : false;
+          if (event.type === "upload_complete" && !localUploadComplete) {
+            syncTransferActivity({ id: event.fileId, type: "upload", name: event.name, phase: "completed", loaded: event.sizeBytes, total: event.sizeBytes, fileId: event.fileId });
+          }
           if (event.type === "session_revoked" && shouldForceLogout(event)) {
             const reason =
               event.reason === "ip_change"
@@ -173,7 +178,7 @@ export function useRealtimeEvents(enabled = true): void {
             forceLogout(reason);
             return;
           }
-          const text = toastForEvent(event);
+          const text = localUploadComplete ? null : toastForEvent(event);
           if (text) {
             notify({
               title: text.title,

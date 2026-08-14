@@ -21,6 +21,9 @@ import {
   Users,
   Mail,
   Search,
+  Clock,
+  Timer,
+  Info,
 } from "lucide-react";
 import type { AdminSettings } from "@/app/api/admin/settings/route";
 import { Button } from "@/components/ui/button";
@@ -149,6 +152,133 @@ const SETTING_SECTIONS: Section[] = [
     ],
   },
 ];
+
+// ─── Session Duration Picker ──────────────────────────────────────────────────
+
+interface SessionPreset {
+  label: string;
+  hours: number;
+  sublabel?: string;
+}
+
+const SESSION_PRESETS: SessionPreset[] = [
+  { label: "30 min", hours: 0.5 },
+  { label: "1 hour", hours: 1 },
+  { label: "4 hours", hours: 4 },
+  { label: "8 hours", hours: 8, sublabel: "work day" },
+  { label: "1 day", hours: 24 },
+  { label: "3 days", hours: 72 },
+  { label: "1 week", hours: 168, sublabel: "default" },
+  { label: "2 weeks", hours: 336 },
+  { label: "1 month", hours: 720 },
+  { label: "3 months", hours: 2160 },
+  { label: "1 year", hours: 8760 },
+];
+
+function formatSessionDuration(hours: number): string {
+  if (hours < 1) return `${Math.round(hours * 60)} minutes`;
+  if (hours < 24) return hours === 1 ? "1 hour" : `${hours} hours`;
+  if (hours < 168) {
+    const days = Math.round(hours / 24);
+    return days === 1 ? "1 day" : `${days} days`;
+  }
+  if (hours < 720) {
+    const weeks = Math.round(hours / 168);
+    return weeks === 1 ? "1 week" : `${weeks} weeks`;
+  }
+  const months = Math.round(hours / 720);
+  return months === 1 ? "1 month" : `${months} months`;
+}
+
+function SessionDurationPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [customMode, setCustomMode] = useState(false);
+  const activePreset = SESSION_PRESETS.find((p) => p.hours === value);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium">Session Duration</label>
+        <div className="flex items-center gap-1.5 rounded-lg bg-muted/40 p-0.5">
+          <button
+            type="button"
+            onClick={() => setCustomMode(false)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              !customMode ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Presets
+          </button>
+          <button
+            type="button"
+            onClick={() => setCustomMode(true)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              customMode ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Custom
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground/60">How long a session stays valid before the user must sign in again</p>
+
+      {!customMode ? (
+        <div className="flex flex-wrap gap-1.5">
+          {SESSION_PRESETS.map((preset) => {
+            const active = preset.hours === value;
+            return (
+              <button
+                key={preset.hours}
+                type="button"
+                onClick={() => onChange(preset.hours)}
+                className={cn(
+                  "flex flex-col items-center rounded-xl border px-3 py-2 text-xs font-medium transition-all",
+                  active
+                    ? "border-accent bg-accent/10 text-accent shadow-sm"
+                    : "border-border/40 text-muted-foreground hover:border-accent/30 hover:bg-accent/5 hover:text-foreground"
+                )}
+              >
+                <span>{preset.label}</span>
+                {preset.sublabel && (
+                  <span className={cn("text-[9px] font-normal mt-0.5 opacity-60")}>{preset.sublabel}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="relative max-w-[220px]">
+          <Input
+            type="number"
+            value={value}
+            min={0.5}
+            max={8760}
+            step={0.5}
+            onChange={(e) => onChange(Math.max(0.5, Math.min(8760, Number(e.target.value) || 0.5)))}
+            className="h-9 pr-14 text-sm"
+          />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/50 font-medium">hours</span>
+        </div>
+      )}
+
+      {/* Live readable display */}
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground/70">
+        <Clock className="h-3.5 w-3.5 shrink-0 text-accent/60" />
+        <span>
+          Users will be signed out after{" "}
+          <span className="font-semibold text-foreground/80">{formatSessionDuration(value)}</span>
+          {!activePreset && value >= 1 && (
+            <span className="ml-1 text-muted-foreground/50">
+              ({value} {value === 1 ? "hour" : "hours"})
+            </span>
+          )}
+          {" "}of inactivity or session age.
+        </span>
+      </div>
+    </div>
+  );
+}
 
 // ─── Tags Input ───────────────────────────────────────────────────────────────
 
@@ -348,9 +478,8 @@ function CleanupStatus({ cleanup }: { cleanup?: CleanupState | null }) {
 }
 
 /**
- * The idle cut-off is set via SESSION_INACTIVITY_MS and, when shorter than the
- * configured session duration, is what actually logs users out. Surfacing it
- * here stops "Session Duration" from looking like it does nothing.
+ * Security section info banner — always shown, explains how session duration
+ * interacts with the optional SESSION_INACTIVITY_MS override.
  */
 function SessionDurationNote({
   inactivityMs,
@@ -359,20 +488,55 @@ function SessionDurationNote({
   inactivityMs?: number | null;
   sessionDurationHours: number;
 }) {
-  if (!inactivityMs) return null;
   const durationMs = sessionDurationHours * 3600_000;
-  if (inactivityMs >= durationMs) return null;
+  const hasInactivity = !!inactivityMs;
+  const inactivityOverrides = hasInactivity && inactivityMs! < durationMs;
 
-  const minutes = Math.round(inactivityMs / 60000);
+  if (!hasInactivity) {
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-accent/15 bg-accent/[0.05] px-3 py-2.5 text-xs text-accent/80">
+        <Info className="mt-px h-3.5 w-3.5 shrink-0 text-accent/60" />
+        <span>
+          Sessions expire after <span className="font-semibold">{formatSessionDuration(sessionDurationHours)}</span> of absolute age.
+          No idle timeout is active — a session stays alive even if the user is inactive,
+          until the full duration runs out or they sign out manually.
+        </span>
+      </div>
+    );
+  }
+
+  const idleMinutes = Math.round(inactivityMs! / 60000);
+  const idleLabel = idleMinutes < 60
+    ? `${idleMinutes} minutes`
+    : idleMinutes % 60 === 0
+      ? `${idleMinutes / 60} ${idleMinutes / 60 === 1 ? "hour" : "hours"}`
+      : `${Math.floor(idleMinutes / 60)}h ${idleMinutes % 60}m`;
+
   return (
-    <p className="flex items-start gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-xs text-amber-600 dark:text-amber-400">
+    <div className={cn(
+      "flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs",
+      inactivityOverrides
+        ? "border-amber-500/20 bg-amber-500/[0.06] text-amber-700 dark:text-amber-400"
+        : "border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-700 dark:text-emerald-400"
+    )}>
       <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
       <span>
-        An idle timeout of {minutes} minutes is set via <code>SESSION_INACTIVITY_MS</code>,
-        so inactive users are signed out well before the {sessionDurationHours}h session
-        duration. Remove that variable to let this setting take full effect.
+        <code className="font-mono text-[10px] font-semibold">SESSION_INACTIVITY_MS</code> is set to{" "}
+        <span className="font-semibold">{idleLabel}</span> idle timeout.{" "}
+        {inactivityOverrides ? (
+          <>
+            This is <span className="font-semibold">shorter</span> than the {formatSessionDuration(sessionDurationHours)} session duration —
+            inactive users will be signed out after <span className="font-semibold">{idleLabel}</span>,
+            not the configured session duration. To make Session Duration take full effect, remove that env variable.
+          </>
+        ) : (
+          <>
+            The idle timeout is longer than the session duration, so the absolute {formatSessionDuration(sessionDurationHours)} expiry
+            still applies first. Both are in effect.
+          </>
+        )}
       </span>
-    </p>
+    </div>
   );
 }
 
@@ -678,26 +842,40 @@ export default function AdminSettingsPage() {
                   </div>
                   <div className="space-y-5 px-6 py-5">
                     {section.id === "security" && (
-                      <SessionDurationNote
-                        inactivityMs={meta?.sessionInactivityMs}
-                        sessionDurationHours={values.sessionDurationHours}
-                      />
-                    )}
-                    {section.fields.map((field) => (
-                      <div
-                        key={field.key as string}
-                        className={cn(
-                          "rounded-xl transition-colors",
-                          dirtyKeys.has(field.key as string) && "-mx-2 bg-amber-500/[0.04] px-2 py-2"
-                        )}
-                      >
-                        <SettingsField
-                          field={field}
-                          value={values[field.key]}
-                          onChange={(v) => handleChange(field.key, v)}
+                      <>
+                        <SessionDurationNote
+                          inactivityMs={meta?.sessionInactivityMs}
+                          sessionDurationHours={values.sessionDurationHours}
                         />
-                      </div>
-                    ))}
+                        <div className={cn(
+                          "rounded-xl transition-colors",
+                          dirtyKeys.has("sessionDurationHours") && "-mx-2 bg-amber-500/[0.04] px-2 py-2"
+                        )}>
+                          <SessionDurationPicker
+                            value={values.sessionDurationHours}
+                            onChange={(v) => handleChange("sessionDurationHours", v)}
+                          />
+                        </div>
+                      </>
+                    )}
+                    {section.fields.map((field) => {
+                      if (field.key === "sessionDurationHours") return null;
+                      return (
+                        <div
+                          key={field.key as string}
+                          className={cn(
+                            "rounded-xl transition-colors",
+                            dirtyKeys.has(field.key as string) && "-mx-2 bg-amber-500/[0.04] px-2 py-2"
+                          )}
+                        >
+                          <SettingsField
+                            field={field}
+                            value={values[field.key]}
+                            onChange={(v) => handleChange(field.key, v)}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                   {section.footer === "cleanup" && <CleanupStatus cleanup={meta?.cleanup} />}
                 </motion.div>

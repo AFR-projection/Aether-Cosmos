@@ -1,6 +1,7 @@
 "use client";
 
 import { notify } from "@/lib/system/notify-store";
+import { syncTransferActivity } from "@/lib/activity/activity-store";
 
 /**
  * Client-side download manager: a small external store (same pattern as
@@ -75,6 +76,7 @@ export function startDownload(name: string, total = 0): string {
     startedAt: Date.now(),
   };
   items = [item, ...items].slice(0, MAX_HISTORY);
+  syncTransferActivity({ id, type: "download", name, phase: "downloading", loaded: 0, total, speed: 0 });
   emit();
   notify({ title: "Download started", description: name, tone: "info", duration: 3000 });
   return id;
@@ -91,6 +93,7 @@ export function updateDownloadProgress(
   item.loaded = loaded;
   item.total = total;
   item.speed = speed;
+  syncTransferActivity({ id, type: "download", name: item.name, phase: "downloading", loaded, total, speed });
   emit();
 }
 
@@ -100,6 +103,7 @@ export function finishDownload(id: string) {
   item.status = "done";
   item.endedAt = Date.now();
   if (item.total === 0) item.total = item.loaded;
+  syncTransferActivity({ id, type: "download", name: item.name, phase: "completed", loaded: item.loaded, total: item.total, speed: item.speed });
   emit();
   notify({ title: "Download complete", description: item.name, tone: "success", duration: 3000 });
 }
@@ -110,6 +114,7 @@ export function failDownload(id: string, error: string) {
   item.status = "error";
   item.error = error;
   item.endedAt = Date.now();
+  syncTransferActivity({ id, type: "download", name: item.name, phase: "failed", loaded: item.loaded, total: item.total, speed: item.speed, error });
   emit();
   notify({ title: "Download failed", description: `${item.name} — ${error}`, tone: "error", duration: 5000 });
 }
@@ -119,6 +124,7 @@ export function cancelDownload(id: string) {
   if (!item || item.status !== "active") return;
   item.status = "canceled";
   item.endedAt = Date.now();
+  syncTransferActivity({ id, type: "download", name: item.name, phase: "cancelled", loaded: item.loaded, total: item.total, speed: item.speed });
   emit();
 }
 

@@ -55,7 +55,8 @@ export async function saveDecryptedFile(
     saveBlob(plaintext, fileName);
     finishDownload(id);
   } catch (error) {
-    failDownload(id, error instanceof Error ? error.message : "Gagal menyimpan file");
+    const msg = error instanceof Error ? error.message : "Gagal menyimpan file";
+    failDownload(id, msg);
     throw error;
   }
 }
@@ -88,11 +89,13 @@ export function downloadFile(fileId: string, fileName: string) {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    // Browser navigation owns the transfer; JavaScript cannot observe the R2
-    // response without buffering it. Keep the manager bounded and honest.
-    setTimeout(() => finishDownload(id), 800);
+    // Browser navigation owns the transfer; mark done optimistically.
+    setTimeout(() => {
+      finishDownload(id);
+    }, 800);
   } catch (error) {
-    failDownload(id, error instanceof Error ? error.message : "Failed to start download");
+    const msg = error instanceof Error ? error.message : "Failed to start download";
+    failDownload(id, msg);
   }
 }
 
@@ -112,7 +115,8 @@ export async function downloadZip(ids: string[], label = "download.zip") {
     });
     if (!response.ok) {
       const json = await response.json().catch(() => null) as { error?: string } | null;
-      failDownload(id, json?.error ?? `ZIP failed (${response.status})`);
+      const msg = json?.error ?? `ZIP failed (${response.status})`;
+      failDownload(id, msg);
       return;
     }
     const total = Number(response.headers.get("content-length") ?? 0);
@@ -120,7 +124,8 @@ export async function downloadZip(ids: string[], label = "download.zip") {
     saveBlob(blob, label);
     finishDownload(id);
   } catch (error) {
-    failDownload(id, error instanceof Error ? error.message : "ZIP download failed");
+    const msg = error instanceof Error ? error.message : "ZIP download failed";
+    failDownload(id, msg);
   }
 }
 
@@ -140,7 +145,8 @@ export async function requestFolderArchive(folderId: string, folderName: string)
       error?: string;
     } | null;
     if (!response.ok || !json?.data?.job) {
-      failDownload(downloadId, json?.error ?? `Archive failed (${response.status})`);
+      const msg = json?.error ?? `Archive failed (${response.status})`;
+      failDownload(downloadId, msg);
       return;
     }
 
@@ -174,14 +180,13 @@ export async function requestFolderArchive(folderId: string, folderName: string)
       const status = await getArchiveStatus(job.id);
       job = status.job;
       if (status.downloadUrl) {
-        // Keep the URL in the same polling result so the ready branch does not
-        // issue a second request or generate another signed URL.
         json.data.downloadUrl = status.downloadUrl;
       }
     }
     throw new Error("Archive terlalu lama diproses, silakan cek lagi nanti");
   } catch (error) {
-    failDownload(downloadId, error instanceof Error ? error.message : "Archive download failed");
+    const msg = error instanceof Error ? error.message : "Archive download failed";
+    failDownload(downloadId, msg);
   }
 }
 

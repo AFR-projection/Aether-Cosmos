@@ -334,9 +334,10 @@ export function FileGrid({
       setGridOffset(el.getBoundingClientRect().top + window.scrollY);
     };
     measure();
-    // Only fires on real layout changes (resize / sidebar collapse), not scroll.
     const observer = new ResizeObserver(measure);
     observer.observe(el);
+    // Also observe parent so offset updates when siblings above (e.g. folders) load
+    if (el.parentElement) observer.observe(el.parentElement);
     return () => observer.disconnect();
   }, [view]);
 

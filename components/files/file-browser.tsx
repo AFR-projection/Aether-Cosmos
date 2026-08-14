@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState, useRef, useMemo, type ElementType } from "react";
 import { QUICK_ACTION_EVENT, type QuickAction } from "@/lib/system/quick-actions";
-import { useDropzone } from "react-dropzone";
 import {
   Upload, FolderPlus, FilePlus, Grid3X3, List, Search, Trash2, AlertCircle, FolderUp,
   Image, Film, Music, FileText, FileArchive, Star, X, CheckSquare, Square,
@@ -19,7 +18,7 @@ import type { File as FileRecord, Folder as FolderRecord } from "@/lib/db/schema
 import dynamic from "next/dynamic";
 import { DndContext, DragEndEvent } from "@dnd-kit/core";
 import { FolderCard } from "@/components/folders/folder-card";
-import { UploadQueue, traverseDirectory } from "@/lib/upload-queue";
+import { getSharedUploadQueue, UploadQueue, traverseDirectory } from "@/lib/upload-queue";
 import { requestDownload, downloadZip, requestFolderArchive } from "@/lib/download/download-actions";
 import { EncryptionSetupDialog } from "./encryption-setup-dialog";
 import { MoveToFolderDialog } from "./move-to-folder-dialog";
@@ -35,10 +34,15 @@ import {
 } from "@/lib/files/clipboard";
 import { notify } from "@/lib/system/notify-store";
 import { motion, AnimatePresence } from "framer-motion";
+import { recordActivity } from "@/lib/activity/activity-store";
+
+const ActivityCenter = dynamic(
+  () => import("@/components/files/activity-center").then((m) => m.ActivityCenter),
+  { ssr: false }
+);
 
 const NoteEditor = dynamic(() => import("@/components/editors/note-editor").then((m) => m.NoteEditor), { ssr: false });
 const FilePreview = dynamic(() => import("@/components/files/file-preview").then((m) => m.FilePreview), { ssr: false });
-const UploadPanel = dynamic(() => import("@/components/files/upload-panel").then((m) => m.UploadPanel), { ssr: false });
 const ShareDialog = dynamic(() => import("@/components/files/share-dialog").then((m) => m.ShareDialog), { ssr: false });
 const FolderInviteDialog = dynamic(
   () => import("@/components/folders/folder-invite-dialog").then((m) => m.FolderInviteDialog),
@@ -145,7 +149,6 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
 
   // Upload
   const [error, setError] = useState("");
-  const [showUploadPanel, setShowUploadPanel] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadQueue | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -213,15 +216,23 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
 
   const getQueue = useCallback((): UploadQueue => {
     if (!uploadQueue) {
-      const q = new UploadQueue();
+      const q = getSharedUploadQueue();
       q.setEncryption(encryptUploads, encryptUploads ? encryptPassphrase : null);
-      q.on("change", (items, stats) => {
-        if (stats.total > 0) setShowUploadPanel(true);
-      });
+      let lastToastKey = "";
       q.on("allComplete", () => {
         queryClient.invalidateQueries({ queryKey: ["files"] });
         queryClient.invalidateQueries({ queryKey: ["folders"] });
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+        const stats = q.getStats();
+        const toastKey = `${stats.total}:${stats.completed}:${stats.failed}`;
+        if (toastKey !== lastToastKey && stats.total > 0) {
+          lastToastKey = toastKey;
+          if (stats.failed > 0) notify({ title: "Upload finished with errors", description: `${stats.failed} file${stats.failed === 1 ? "" : "s"} failed. Open Activity for details.`, tone: "error", duration: 5000 });
+          else if (stats.completed > 0) notify({ title: "Upload completed", description: `${stats.completed} file${stats.completed === 1 ? "" : "s"} uploaded successfully.`, tone: "success", duration: 4000 });
+        }
+      });
+      q.on("error", (item) => {
+        if (item.status === "error") notify({ title: "Upload failed", description: `${item.file?.name ?? item.remotePath} — ${item.error ?? "Transfer failed"}`, tone: "error", duration: 5000 });
       });
       setUploadQueue(q);
       return q;
@@ -283,15 +294,23 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
     return list;
   }, [allFiles, typeFilter]);
 
-  // ── Dropzone ──
-  const onDrop = useCallback(
-    async (acceptedFiles: File[]) => {
-      const queue = getQueue();
-      queue.addFiles(acceptedFiles, folderId);
-    },
-    [folderId, getQueue]
-  );
+  // ── Drag state (manual tracking replaces react-dropzone isDragActive) ──
+  const [isDragActive, setIsDragActive] = useState(false);
+  const dragCounter = useRef(0);
 
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current++;
+    setIsDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setIsDragActive(false);
+  }, []);
+
+  // ── Dropzone native handler ──
   const onDropNative = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
@@ -356,15 +375,11 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       }
 
       queue.addFolderStructure(allFilesArr);
+      dragCounter.current = 0;
+      setIsDragActive(false);
     },
-    [folderId, getQueue]
+    [folderId, getQueue, showError]
   );
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    noClick: true,
-    noKeyboard: true,
-  });
 
   // ── Clipboard: copy / cut (paste lives below, needs folderId handlers) ──
   const copyToClipboard = useCallback((ids: string[]) => {
@@ -420,6 +435,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
         if (action === "restore") {
           const res = await apiFetch("/api/files", { method: "PATCH", body: JSON.stringify({ id: file.id, action: "restore" }) });
           if (!res.success) { showError(res.error ?? "Failed to restore"); return; }
+          recordActivity("restore", file.name, "done");
         } else if (action === "delete") {
           const ok = await askConfirm({
             title: "Delete permanently?",
@@ -430,6 +446,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
           if (!ok) return;
           const res = await apiFetch("/api/files", { method: "DELETE", body: JSON.stringify({ id: file.id, permanent: true }) });
           if (!res.success) { showError(res.error ?? "Failed to delete permanently"); return; }
+          recordActivity("delete", file.name, "done");
         }
         queryClient.invalidateQueries({ queryKey: ["files"] });
         return;
@@ -437,6 +454,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       if (action === "delete") {
         const res = await apiFetch("/api/files", { method: "PATCH", body: JSON.stringify({ id: file.id, action: "delete" }) });
         if (!res.success) { showError(res.error ?? "Failed to delete"); return; }
+        recordActivity("delete", file.name, "done");
       } else if (action === "favorite") {
         const res = await apiFetch("/api/files", { method: "PATCH", body: JSON.stringify({ id: file.id, action: "favorite" }) });
         if (!res.success) { showError(res.error ?? "Failed"); return; }
@@ -451,6 +469,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
         if (!name || name === file.name) return;
         const res = await apiFetch("/api/files", { method: "PATCH", body: JSON.stringify({ id: file.id, action: "rename", name }) });
         if (!res.success) { showError(res.error ?? "Failed to rename"); return; }
+        recordActivity("rename", file.name, "done", { detail: `→ ${name}` });
       } else {
         const res = await apiFetch("/api/files", { method: "PATCH", body: JSON.stringify({ id: file.id, action }) });
         if (!res.success) { showError(res.error ?? "Failed"); return; }
@@ -474,6 +493,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
     try {
       const res = await apiFetch("/api/folders", { method: "POST", body: JSON.stringify({ name, parentId: folderId }) });
       if (!res.success) { showError(res.error ?? "Failed to create folder"); return; }
+      recordActivity("create_folder", name, "done");
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     } catch {
       showError("Connection failed");
@@ -492,6 +512,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
         if (!name || name === folder.name) return;
         const res = await apiFetch("/api/folders", { method: "PATCH", body: JSON.stringify({ id: folder.id, action: "rename", name }) });
         if (!res.success) { showError(res.error ?? "Failed to rename"); return; }
+        recordActivity("rename", folder.name, "done", { detail: `→ ${name}` });
       } else if (action === "delete") {
         const ok = await askConfirm({
           title: "Delete folder?",
@@ -502,6 +523,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
         if (!ok) return;
         const res = await apiFetch("/api/folders", { method: "PATCH", body: JSON.stringify({ id: folder.id, action: "delete" }) });
         if (!res.success) { showError(res.error ?? "Failed to delete"); return; }
+        recordActivity("delete", folder.name, "done", { detail: "Folder" });
       }
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["files"] });
@@ -701,6 +723,8 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
   const chooseSort = useCallback((key: string) => {
     setSortBy(key);
     saveSortBy(key);
+    setSortOrder("asc");
+    saveSortOrder("asc");
     setSortMenuOpen(false);
   }, []);
 
@@ -758,11 +782,15 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
   // ── Batch actions ──
   async function batchFavorite() {
     const ids = Array.from(selectedIds);
-    const res = await apiFetch("/api/files/batch", {
-      method: "PATCH",
-      body: JSON.stringify({ ids, action: "favorite" }),
-    });
-    if (!res.success) showError(res.error ?? "Favorite failed");
+    try {
+      const res = await apiFetch("/api/files/batch", {
+        method: "PATCH",
+        body: JSON.stringify({ ids, action: "favorite" }),
+      });
+      if (!res.success) showError(res.error ?? "Favorite failed");
+    } catch {
+      showError("Connection failed");
+    }
     setSelectedIds(new Set());
     queryClient.invalidateQueries({ queryKey: ["files"] });
   }
@@ -776,11 +804,19 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
     });
     if (!ok) return;
     const ids = Array.from(selectedIds);
-    const res = await apiFetch("/api/files/batch", {
-      method: "PATCH",
-      body: JSON.stringify({ ids, action: "delete" }),
-    });
-    if (!res.success) showError(res.error ?? "Delete failed");
+    try {
+      const res = await apiFetch("/api/files/batch", {
+        method: "PATCH",
+        body: JSON.stringify({ ids, action: "delete" }),
+      });
+      if (!res.success) showError(res.error ?? "Delete failed");
+      else {
+        const n = ids.length;
+        recordActivity("delete", `${n} file${n > 1 ? "s" : ""}`, "done");
+      }
+    } catch {
+      showError("Connection failed");
+    }
     setSelectedIds(new Set());
     queryClient.invalidateQueries({ queryKey: ["files"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -792,17 +828,20 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
     if (ids.length === 0) return;
     try {
       if (ids.length === 1) {
+        const file = allFiles.find((f) => f.id === ids[0]);
         const res = await apiFetch("/api/files", {
           method: "PATCH",
           body: JSON.stringify({ id: ids[0], action: "move", folderId: destinationFolderId }),
         });
         if (!res.success) { showError(res.error ?? "Failed to move"); return; }
+        if (file) recordActivity("move", file.name, "done");
       } else {
         const res = await apiFetch("/api/files/batch", {
           method: "PATCH",
           body: JSON.stringify({ ids, action: "move", folderId: destinationFolderId }),
         });
         if (!res.success) { showError(res.error ?? "Failed to move files"); return; }
+        recordActivity("move", `${ids.length} files`, "done");
       }
       setSelectedIds(new Set());
       queryClient.invalidateQueries({ queryKey: ["files"] });
@@ -829,6 +868,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       }
     }
     if (failed > 0) showError(`${failed} file${failed > 1 ? "s" : ""} could not be renamed`);
+    else recordActivity("rename", `${renames.length} file${renames.length > 1 ? "s" : ""}`, "done");
     setSelectedIds(new Set());
     queryClient.invalidateQueries({ queryKey: ["files"] });
   }
@@ -844,8 +884,8 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
           body: JSON.stringify({ ids: clip.ids, action: "move", folderId }),
         });
         if (!res.success) { showError(res.error ?? "Failed to move"); return; }
+        recordActivity("move", clip.label, "done");
       } else {
-        // Copy: duplicate each file into this folder (server copies the R2 object).
         let failed = 0;
         for (const id of clip.ids) {
           const res = await apiFetch("/api/files", {
@@ -855,6 +895,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
           if (!res.success) failed++;
         }
         if (failed > 0) showError(`${failed} file${failed > 1 ? "s" : ""} could not be copied`);
+        else recordActivity("copy", clip.label, "done");
       }
       // A cut is consumed on paste; a copy stays so it can be pasted again.
       if (clip.mode === "cut") clearClipboard();
@@ -875,13 +916,14 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       if (file) {
         requestDownload(file);
       } else {
-        downloadZip(ids, `download-1-file.zip`);
+        try {
+          await downloadZip(ids, `download-1-file.zip`);
+        } catch {
+          showError("Download failed");
+        }
       }
       return;
     }
-    // A ZIP is built server-side and cannot decrypt E2E-encrypted files, so any
-    // encrypted selection would land in the archive as ciphertext. Block that:
-    // steer the user to download encrypted files one-by-one (passphrase gated).
     const encryptedSelected = ids
       .map((id) => allFiles.find((f) => f.id === id))
       .filter((f): f is FileRecord => !!f && !!f.encrypted);
@@ -891,7 +933,11 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       );
       return;
     }
-    await downloadZip(ids, `download-${ids.length}-files.zip`);
+    try {
+      await downloadZip(ids, `download-${ids.length}-files.zip`);
+    } catch {
+      showError("Download failed");
+    }
   }
 
   // ── Select file from URL ──
@@ -1026,12 +1072,12 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
   return (
     <DndContext onDragEnd={handleDragEnd}>
     <div
-      {...getRootProps()}
       className="relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
       onDrop={onDropNative}
     >
-      <input {...getInputProps()} />
 
       {/* ── Drag overlay ── */}
       {isDragActive && (
@@ -1158,6 +1204,8 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
               <FolderUp className="h-3.5 w-3.5" />
               <span className="hidden lg:inline text-xs">Folder upload</span>
             </Button>
+
+            <ActivityCenter uploadQueue={uploadQueue} inline />
 
             {/* Encryption toggle */}
             <Button
@@ -1449,11 +1497,6 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       )}
     </AnimatePresence>
 
-    {showUploadPanel && uploadQueue && (
-      <AnimatePresence mode="wait">
-        <UploadPanel key="upload-panel" queue={uploadQueue} onDismiss={() => setShowUploadPanel(false)} />
-      </AnimatePresence>
-    )}
     </DndContext>
   );
 }

@@ -2,9 +2,11 @@
 
 import { encryptFile, type EncryptionMetaV1 } from "@/lib/crypto/client-encryption";
 import { markLocalUpload } from "@/lib/system/local-upload-registry";
+import { syncTransferActivity, type ActivityStatus } from "@/lib/activity/activity-store";
 
 export type UploadItemStatus =
   | "queued"
+  | "preparing"
   | "uploading"
   | "verifying"
   | "done"
@@ -91,6 +93,10 @@ const MAX_RETRIES = 3;
 const API_BATCH_PARTS = 50;
 const PROGRESS_THROTTLE_MS = 100;
 const LARGE_ENCRYPTION_LIMIT = 64 * 1024 * 1024;
+
+function isActivityPopupPresentation(): boolean {
+  return typeof window !== "undefined" && window.name === "FileActivityCenter";
+}
 
 let csrfToken: string | null = null;
 let counter = 0;
@@ -254,6 +260,14 @@ export class UploadQueue {
     this.notifyTimer = setTimeout(() => {
       this.notifyTimer = null;
       this.lastNotifyAt = Date.now();
+      for (const item of this.items) {
+        // The browser popup is a presentation surface. Its best-effort
+        // recovery probe must not overwrite the opener's live transfer with a
+        // local "resume requires file" snapshot.
+        if (isActivityPopupPresentation() && item.status === "resume_requires_file") continue;
+        const phase: ActivityStatus = item.status === "done" ? "completed" : item.status === "error" ? "failed" : item.status === "cancelled" ? "cancelled" : item.status === "resume_requires_file" ? "paused" : item.status;
+        syncTransferActivity({ id: item.id, type: "upload", name: item.file?.name ?? item.remotePath, phase, loaded: item.uploadedBytes, total: item.totalBytes, speed: item.speed, error: item.error, fileId: item.fileId });
+      }
       this.emit("change", [...this.items], this.getStats());
     }, delay);
   }
@@ -262,7 +276,7 @@ export class UploadQueue {
     const total = this.items.length;
     const completed = this.items.filter((item) => item.status === "done").length;
     const failed = this.items.filter((item) => item.status === "error" || item.status === "resume_requires_file").length;
-    const active = this.items.filter((item) => item.status === "uploading" || item.status === "verifying").length;
+    const active = this.items.filter((item) => item.status === "preparing" || item.status === "uploading" || item.status === "verifying").length;
     const queued = this.items.filter((item) => item.status === "queued").length;
     const totalBytes = this.items.reduce((sum, item) => sum + item.totalBytes, 0);
     const loadedBytes = this.items.reduce((sum, item) => sum + Math.min(item.uploadedBytes, item.totalBytes), 0);
@@ -333,7 +347,7 @@ export class UploadQueue {
 
   private async processItem(item: UploadItem) {
     if (!item.file || item.status === "cancelled") return;
-    item.status = "uploading";
+    item.status = "preparing";
     this.notify(true);
     try {
       let blob: Blob = item.file;
@@ -384,6 +398,8 @@ export class UploadQueue {
       const stateResponse = await apiGet<UploadSession>(`/api/uploads/${init.sessionId}`);
       if (!stateResponse.success || !stateResponse.data) throw new Error(stateResponse.error ?? "UPLOAD_STATE_FAILED");
       const state = stateResponse.data;
+      item.status = "uploading";
+      this.notify(true);
       const signal = { aborted: false, xhrs: [] as XMLHttpRequest[] };
       this.abortSignals.set(item.id, signal);
       if (init.uploadType === "single") {
@@ -436,7 +452,7 @@ export class UploadQueue {
               try {
                 const release = await transferLimiter.acquire();
                 try {
-                  const etag = await putPart(part.url, blob.slice((part.partNumber - 1) * init.partSizeBytes!, Math.min(part.partNumber * init.partSizeBytes!, blob.size)), (loaded, total) => {
+                  const etag = await putPart(part.url, blob.slice((part.partNumber - 1) * init.partSizeBytes!, Math.min(part.partNumber * init.partSizeBytes!, blob.size)), (loaded, _total) => {
                     inFlightProgress.set(part.partNumber, loaded);
                     item.uploadedBytes = committedBytes + [...inFlightProgress.values()].reduce((sum, value) => sum + value, 0);
                     item.progress = item.totalBytes > 0 ? (item.uploadedBytes / item.totalBytes) * 100 : 0;
@@ -530,6 +546,15 @@ export class UploadQueue {
   }
 
   getItems() { return [...this.items]; }
+}
+
+// One browser session must have one transfer engine. Keeping the queue at
+// module scope means route changes do not detach active uploads from Activity.
+let sharedUploadQueue: UploadQueue | null = null;
+
+export function getSharedUploadQueue(): UploadQueue {
+  if (!sharedUploadQueue) sharedUploadQueue = new UploadQueue();
+  return sharedUploadQueue;
 }
 
 export function formatSpeed(bytesPerSec: number): string {

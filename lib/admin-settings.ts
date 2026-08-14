@@ -86,7 +86,7 @@ function normalizeSettings(raw: Partial<AdminSettings> | null | undefined): Admi
       : [...DEFAULT_ADMIN_SETTINGS.blockedExtensions],
     sessionDurationHours: clamp(
       Number(cleaned.sessionDurationHours),
-      1,
+      0.5,
       8760,
       DEFAULT_ADMIN_SETTINGS.sessionDurationHours
     ),
