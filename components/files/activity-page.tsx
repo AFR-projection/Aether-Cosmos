@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
-  Activity, ChevronDown, Clock3, Copy, Download, Edit3, FolderInput,
-  FolderPlus, LoaderCircle, RotateCcw, Search, Trash2, Upload,
+  Activity, ArrowRight, ChevronDown, Clock3, Copy, Download, Edit3, FolderIcon,
+  FolderInput, FolderPlus, LoaderCircle, RotateCcw, Search, Trash2, Upload,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { cn, formatBytes } from "@/lib/utils";
@@ -73,10 +73,62 @@ function ActivityIcon({ type }: { type: string }) {
   return <Icon className="h-4 w-4" aria-hidden="true" />;
 }
 
+function TimelineDetail({ item }: { item: ActivityItem }) {
+  const { type, detail, source, destination, error, status, loaded, total } = item;
+
+  if (error) return <p className="mt-1 text-xs text-red-400">{error}</p>;
+
+  if (type === "rename") {
+    const newName = detail?.startsWith("→") ? detail.slice(1).trim() : detail;
+    if (newName) {
+      return (
+        <p className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="max-w-[180px] truncate font-mono opacity-60">{item.name}</span>
+          <ArrowRight className="h-3 w-3 shrink-0 opacity-40" />
+          <span className="max-w-[200px] truncate font-mono font-medium text-foreground/80">{newName}</span>
+        </p>
+      );
+    }
+  }
+
+  if (type === "move" || type === "copy") {
+    if (source || destination) {
+      return (
+        <p className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+          {source && (
+            <>
+              <FolderIcon className="h-3 w-3 shrink-0" />
+              <span className="max-w-[140px] truncate">{source}</span>
+            </>
+          )}
+          {source && destination && <ArrowRight className="h-3 w-3 shrink-0 opacity-40" />}
+          {destination && (
+            <>
+              <FolderIcon className="h-3 w-3 shrink-0 text-accent/70" />
+              <span className="max-w-[140px] truncate font-medium text-foreground/80">{destination}</span>
+            </>
+          )}
+        </p>
+      );
+    }
+  }
+
+  if ((type === "upload" || type === "download") && total && total > 0) {
+    return <p className="mt-1 text-[11px] text-muted-foreground/70">{formatBytes(loaded ?? 0)} / {formatBytes(total)}</p>;
+  }
+
+  return <p className="mt-1 text-xs text-muted-foreground">{detail ?? labelStatus(status)}</p>;
+}
+
 function TimelineItem({ item }: { item: ActivityItem }) {
   const failed = item.status === "failed";
   const cancelled = item.status === "cancelled";
   const active = !failed && !cancelled && !["done", "completed"].includes(item.status);
+
+  const titleName = item.type === "rename" && item.detail?.startsWith("→")
+    ? item.detail.slice(1).trim()
+    : item.name;
+
   return (
     <article className="relative grid grid-cols-[40px_minmax(0,1fr)_auto] gap-3 border-b border-border/40 px-4 py-4 last:border-0 sm:px-6">
       <div className={cn(
@@ -87,12 +139,10 @@ function TimelineItem({ item }: { item: ActivityItem }) {
       </div>
       <div className="min-w-0 pt-0.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-sm font-medium text-foreground">{item.name}</h3>
+          <h3 className="truncate text-sm font-medium text-foreground">{titleName}</h3>
           <span className="rounded-full border border-border/50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{item.type}</span>
         </div>
-        <p className={cn("mt-1 text-xs", failed ? "text-red-400" : "text-muted-foreground")}>{item.error ?? item.detail ?? labelStatus(item.status)}</p>
-        {(item.source || item.destination) && <p className="mt-1 truncate text-xs text-muted-foreground/70">{item.source ?? ""}{item.source && item.destination ? " -> " : ""}{item.destination ?? ""}</p>}
-        {item.total && item.total > 0 && <p className="mt-1 text-[11px] text-muted-foreground/70">{formatBytes(item.loaded ?? 0)} / {formatBytes(item.total)}</p>}
+        <TimelineDetail item={item} />
       </div>
       <time className="pt-1 text-right text-[11px] text-muted-foreground/60" dateTime={new Date(item.startedAt).toISOString()}>
         {new Date(item.endedAt ?? item.startedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}

@@ -823,9 +823,11 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
   }
 
   // Move one or many files into a destination folder (null = root).
-  async function executeMove(ids: string[], destinationFolderId: string | null) {
+  async function executeMove(ids: string[], destinationFolderId: string | null, destinationFolderName?: string) {
     setMoveIds(null);
     if (ids.length === 0) return;
+    const sourceName = folderId === null ? "My Files" : undefined;
+    const destName = destinationFolderName ?? (destinationFolderId === null ? "My Files" : undefined);
     try {
       if (ids.length === 1) {
         const file = allFiles.find((f) => f.id === ids[0]);
@@ -834,14 +836,14 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
           body: JSON.stringify({ id: ids[0], action: "move", folderId: destinationFolderId }),
         });
         if (!res.success) { showError(res.error ?? "Failed to move"); return; }
-        if (file) recordActivity("move", file.name, "done");
+        if (file) recordActivity("move", file.name, "done", { source: sourceName, destination: destName });
       } else {
         const res = await apiFetch("/api/files/batch", {
           method: "PATCH",
           body: JSON.stringify({ ids, action: "move", folderId: destinationFolderId }),
         });
         if (!res.success) { showError(res.error ?? "Failed to move files"); return; }
-        recordActivity("move", `${ids.length} files`, "done");
+        recordActivity("move", `${ids.length} files`, "done", { source: sourceName, destination: destName });
       }
       setSelectedIds(new Set());
       queryClient.invalidateQueries({ queryKey: ["files"] });
@@ -884,7 +886,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
           body: JSON.stringify({ ids: clip.ids, action: "move", folderId }),
         });
         if (!res.success) { showError(res.error ?? "Failed to move"); return; }
-        recordActivity("move", clip.label, "done");
+        recordActivity("move", clip.label, "done", { destination: folderId === null ? "My Files" : undefined });
       } else {
         let failed = 0;
         for (const id of clip.ids) {
@@ -1438,7 +1440,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
           count={moveIds.length}
           disabledFolderIds={folderId ? [folderId] : []}
           onCancel={() => setMoveIds(null)}
-          onConfirm={(dest) => executeMove(moveIds, dest)}
+          onConfirm={(dest) => executeMove(moveIds, dest.folderId, dest.folderName)}
         />
       )}
 

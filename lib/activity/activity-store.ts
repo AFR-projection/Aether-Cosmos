@@ -291,13 +291,14 @@ export function recordActivity(
   type: ActivityType,
   name: string,
   status: "done" | "failed" | "cancelled",
-  opts: { detail?: string; error?: string; total?: number } = {}
+  opts: { detail?: string; error?: string; total?: number; source?: string; destination?: string } = {}
 ): string {
   const id = uid();
   if (!activeScopeId) return id;
   const now = Date.now();
   items = [
       { id, scopeId: activeScopeId, type, status, phase: status, name, detail: opts.detail, error: opts.error,
+      source: opts.source, destination: opts.destination,
       total: opts.total ?? 0, progress: status === "done" ? 100 : 0,
       startedAt: now, endedAt: now },
     ...items,

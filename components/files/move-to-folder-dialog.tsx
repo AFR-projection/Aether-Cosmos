@@ -14,7 +14,7 @@ type MoveToFolderDialogProps = {
   /** Folder ids that must be disabled (e.g. moving a folder into itself). */
   disabledFolderIds?: string[];
   onCancel: () => void;
-  onConfirm: (destinationFolderId: string | null) => void;
+  onConfirm: (dest: { folderId: string | null; folderName: string }) => void;
 };
 
 type Crumb = { id: string | null; name: string };
@@ -164,7 +164,7 @@ export function MoveToFolderDialog({
                 size="sm"
                 className="gap-1.5"
                 disabled={current.id !== null && disabled.has(current.id)}
-                onClick={() => onConfirm(current.id)}
+                onClick={() => onConfirm({ folderId: current.id, folderName: current.name })}
               >
                 <Move className="h-3.5 w-3.5" /> Move here
               </Button>
