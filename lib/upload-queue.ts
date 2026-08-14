@@ -2,7 +2,7 @@
 
 import { encryptFile, type EncryptionMetaV1 } from "@/lib/crypto/client-encryption";
 import { markLocalUpload } from "@/lib/system/local-upload-registry";
-import { syncTransferActivity, type ActivityStatus } from "@/lib/activity/activity-store";
+import { getActivityScopeId, syncTransferActivity, type ActivityStatus } from "@/lib/activity/activity-store";
 
 export type UploadItemStatus =
   | "queued"
@@ -220,6 +220,8 @@ function putPart(
 }
 
 export class UploadQueue {
+  private readonly scopeId: string | null;
+  private disposed = false;
   private items: UploadItem[] = [];
   private listeners: Partial<UploadQueueEvents> = {};
   private processing = false;
@@ -231,8 +233,26 @@ export class UploadQueue {
   private encryptPassphrase: string | null = null;
   private abortSignals = new Map<string, { aborted: boolean; xhr?: XMLHttpRequest; xhrs: XMLHttpRequest[] }>();
 
-  constructor() {
-    void this.recoverActive();
+  constructor(scopeId: string | null = getActivityScopeId()) {
+    this.scopeId = scopeId;
+    if (scopeId) void this.recoverActive();
+  }
+
+  getScopeId(): string | null { return this.scopeId; }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.notifyTimer) clearTimeout(this.notifyTimer);
+    this.notifyTimer = null;
+    for (const signal of this.abortSignals.values()) {
+      signal.aborted = true;
+      signal.xhr?.abort();
+      for (const xhr of signal.xhrs) xhr.abort();
+    }
+    this.abortSignals.clear();
+    this.listeners = {};
+    this.items = [];
   }
 
   setEncryption(enabled: boolean, passphrase: string | null) {
@@ -254,6 +274,7 @@ export class UploadQueue {
   }
 
   private notify(immediate = false) {
+    if (this.disposed || this.scopeId !== getActivityScopeId()) return;
     const now = Date.now();
     const delay = immediate ? 0 : Math.max(0, PROGRESS_THROTTLE_MS - (now - this.lastNotifyAt));
     if (this.notifyTimer) return;
@@ -316,10 +337,12 @@ export class UploadQueue {
   }
 
   private async recoverActive() {
+    if (this.disposed || this.scopeId !== getActivityScopeId()) return;
     try {
       const response = await apiGet<{ uploads: UploadSession[] }>("/api/uploads/active");
       if (!response.success || !response.data) return;
       for (const upload of response.data.uploads) {
+        if (this.disposed || this.scopeId !== getActivityScopeId()) return;
         if (this.items.some((item) => item.sessionId === upload.sessionId)) continue;
         this.items.push({ id: `recovered_${upload.sessionId}`, file: null, folderId: null, remotePath: upload.name, status: "resume_requires_file", progress: 0, uploadedBytes: upload.parts.filter((part) => part.status === "uploaded").reduce((sum, part) => sum + part.sizeBytes, 0), totalBytes: upload.totalSizeBytes, speed: 0, retries: upload.retryCount, error: "RESUME_REQUIRES_FILE", sessionId: upload.sessionId, fileId: upload.fileId, uploadId: upload.uploadId ?? undefined, mimeType: upload.mimeType });
       }
@@ -330,7 +353,7 @@ export class UploadQueue {
   }
 
   private async processNext() {
-    if (this.processing || this.paused) return;
+    if (this.disposed || this.scopeId !== getActivityScopeId() || this.processing || this.paused) return;
     const queued = this.items.filter((item) => item.status === "queued");
     if (queued.length === 0) {
       if (this.getStats().active === 0 && this.items.length > 0) this.emit("allComplete");
@@ -346,7 +369,7 @@ export class UploadQueue {
   }
 
   private async processItem(item: UploadItem) {
-    if (!item.file || item.status === "cancelled") return;
+    if (this.disposed || this.scopeId !== getActivityScopeId() || !item.file || item.status === "cancelled") return;
     item.status = "preparing";
     this.notify(true);
     try {
@@ -537,15 +560,15 @@ export class UploadQueue {
     this.items.filter((item) => item.status === "queued" || item.status === "uploading" || item.status === "verifying").forEach((item) => this.cancelItem(item.id));
   }
 
-  pause() { this.paused = true; }
-  resume() { this.paused = false; void this.processNext(); }
+  pause() { if (!this.disposed) this.paused = true; }
+  resume() { if (!this.disposed) { this.paused = false; void this.processNext(); } }
 
   clearCompleted() {
     this.items = this.items.filter((item) => item.status !== "done" && item.status !== "cancelled");
     this.notify(true);
   }
 
-  getItems() { return [...this.items]; }
+  getItems() { return this.disposed || this.scopeId !== getActivityScopeId() ? [] : [...this.items]; }
 }
 
 // One browser session must have one transfer engine. Keeping the queue at
@@ -553,7 +576,11 @@ export class UploadQueue {
 let sharedUploadQueue: UploadQueue | null = null;
 
 export function getSharedUploadQueue(): UploadQueue {
-  if (!sharedUploadQueue) sharedUploadQueue = new UploadQueue();
+  const scopeId = getActivityScopeId();
+  if (!sharedUploadQueue || sharedUploadQueue.getScopeId() !== scopeId) {
+    sharedUploadQueue?.dispose();
+    sharedUploadQueue = new UploadQueue(scopeId);
+  }
   return sharedUploadQueue;
 }
 

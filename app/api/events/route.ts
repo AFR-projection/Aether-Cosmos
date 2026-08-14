@@ -1,4 +1,5 @@
 import { requireAuth, AuthError } from "@/lib/auth/session";
+import { getEffectiveUserId } from "@/lib/auth/permissions";
 import { subscribeUser, type RealtimeEvent } from "@/lib/realtime/events";
 import { apiError, handleApiError } from "@/lib/api/response";
 import { SECURITY_HEADERS } from "@/lib/security";
@@ -47,7 +48,7 @@ export async function GET() {
           }
         };
 
-        unsubscribe = subscribeUser(user.id, send);
+        unsubscribe = subscribeUser(getEffectiveUserId(user), send);
 
         send({ type: "heartbeat", at: Date.now() });
 

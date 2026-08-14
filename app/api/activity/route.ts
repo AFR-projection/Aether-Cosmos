@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { activityLogs, activityActionEnum, files, folders } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth/session";
 import { getEffectiveUserId } from "@/lib/auth/permissions";
+import { getOrCreateActivityScope, getOwnedActivityScope } from "@/lib/activity/activity-scope-server";
 import { validateCsrf } from "@/lib/security";
 import { apiError, apiSuccess, handleApiError } from "@/lib/api/response";
 
@@ -16,6 +17,7 @@ const querySchema = z.object({
   to: z.coerce.date().optional(),
   sort: z.enum(["newest", "oldest"]).default("newest"),
   limit: z.coerce.number().int().min(1).max(500).default(200),
+  scopeId: z.string().uuid().optional(),
 });
 
 const TYPE_MAP: Record<string, string> = {
@@ -35,7 +37,11 @@ export async function GET(request: NextRequest) {
     const sessionUser = await requireAuth();
     const userId = getEffectiveUserId(sessionUser);
     const query = querySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
-    const conditions = [eq(activityLogs.userId, userId)];
+    const scope = query.scopeId
+      ? await getOwnedActivityScope(query.scopeId, userId)
+      : await getOrCreateActivityScope(userId);
+    if (!scope) return apiError("Activity scope not found", 404, { code: "ACTIVITY_SCOPE_NOT_FOUND" });
+    const conditions = [eq(activityLogs.userId, userId), eq(activityLogs.activityScopeId, scope.id)];
 
     if (query.action && query.action !== "all" && query.action !== "processing" && query.action !== "success" && query.action !== "failed" && query.action !== "cancelled") {
       const action = query.action === "delete" ? ["delete", "delete_folder"] : [query.action];
@@ -59,8 +65,8 @@ export async function GET(request: NextRequest) {
     const fileIds = rows.filter((row) => row.resourceType === "file" && row.resourceId && z.string().uuid().safeParse(row.resourceId).success).map((row) => row.resourceId as string);
     const folderIds = rows.filter((row) => row.resourceType === "folder" && row.resourceId && z.string().uuid().safeParse(row.resourceId).success).map((row) => row.resourceId as string);
     const [fileRows, folderRows] = await Promise.all([
-      fileIds.length > 0 ? db.select({ id: files.id, name: files.name }).from(files).where(inArray(files.id, fileIds)) : Promise.resolve([]),
-      folderIds.length > 0 ? db.select({ id: folders.id, name: folders.name }).from(folders).where(inArray(folders.id, folderIds)) : Promise.resolve([]),
+      fileIds.length > 0 ? db.select({ id: files.id, name: files.name }).from(files).where(and(inArray(files.id, fileIds), eq(files.userId, userId))) : Promise.resolve([]),
+      folderIds.length > 0 ? db.select({ id: folders.id, name: folders.name }).from(folders).where(and(inArray(folders.id, folderIds), eq(folders.userId, userId))) : Promise.resolve([]),
     ]);
     const names = new Map([...fileRows, ...folderRows].map((row) => [row.id, row.name]));
 
@@ -85,7 +91,8 @@ export async function GET(request: NextRequest) {
           endedAt: row.createdAt.getTime(),
           total: Number(metadataValue(metadata, "sizeBytes") ?? 0),
           loaded: Number(metadataValue(metadata, "sizeBytes") ?? 0),
-          progress: status === "failed" || status === "cancelled" ? 0 : 100,
+           progress: status === "failed" || status === "cancelled" ? 0 : 100,
+          scopeId: scope.id,
         };
       })
       .filter((item) => {
@@ -100,7 +107,7 @@ export async function GET(request: NextRequest) {
         return true;
       });
 
-    return apiSuccess({ items });
+    return apiSuccess({ scopeId: scope.id, items }, 200, { "Cache-Control": "private, no-store" });
   } catch (error) {
     return handleApiError(error);
   }
@@ -111,8 +118,11 @@ export async function DELETE(request: NextRequest) {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     const sessionUser = await requireAuth();
     const userId = getEffectiveUserId(sessionUser);
-    await db.delete(activityLogs).where(eq(activityLogs.userId, userId));
-    return apiSuccess({ cleared: true });
+    const scopeId = z.string().uuid().parse(request.nextUrl.searchParams.get("scopeId"));
+    const scope = await getOwnedActivityScope(scopeId, userId);
+    if (!scope) return apiError("Activity scope not found", 404, { code: "ACTIVITY_SCOPE_NOT_FOUND" });
+    await db.delete(activityLogs).where(and(eq(activityLogs.userId, userId), eq(activityLogs.activityScopeId, scope.id)));
+    return apiSuccess({ cleared: true }, 200, { "Cache-Control": "private, no-store" });
   } catch (error) {
     return handleApiError(error);
   }

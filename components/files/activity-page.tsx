@@ -7,7 +7,10 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { cn, formatBytes } from "@/lib/utils";
-import { EMPTY_ACTIVITIES, getActivities, hydrateActivities, subscribeActivities, clearActivityHistory, type ActivityItem } from "@/lib/activity/activity-store";
+import { configureActivityScope, EMPTY_ACTIVITIES, getActivities, hydrateActivities, subscribeActivities, clearActivityHistory, type ActivityItem } from "@/lib/activity/activity-store";
+import { subscribeActivityIdentity } from "@/lib/activity/activity-identity";
+import { configureDownloadScope } from "@/lib/download/download-store";
+import { configureEncryptedDownloadScope } from "@/lib/download/encrypted-download-store";
 import { getSharedUploadQueue, formatETA, formatSpeed, type UploadItem, type UploadStats } from "@/lib/upload-queue";
 
 const TYPES = ["all", "upload", "download", "move", "copy", "rename", "delete", "restore"] as const;
@@ -120,7 +123,10 @@ function LiveTransfers({ items, stats }: { items: UploadItem[]; stats: UploadSta
   );
 }
 
-export function ActivityPage() {
+export function ActivityPage({ scopeId }: { scopeId: string }) {
+  configureActivityScope(scopeId);
+  configureDownloadScope(scopeId);
+  configureEncryptedDownloadScope(scopeId);
   const [type, setType] = useState<TypeFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
@@ -141,15 +147,23 @@ export function ActivityPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void apiFetch<{ items: ActivityItem[] }>("/api/activity?limit=500").then((response) => {
-      if (!cancelled && response.success && response.data?.items) hydrateActivities(response.data.items);
+    void apiFetch<{ scopeId: string; items: ActivityItem[] }>(`/api/activity?scopeId=${encodeURIComponent(scopeId)}&limit=500`).then((response) => {
+      if (!cancelled && response.success && response.data?.items) hydrateActivities(response.data.items, response.data.scopeId);
     });
     const onChange = (items: UploadItem[], stats: UploadStats) => { setUploadItems(items); setUploadStats(stats); };
     queue.on("change", onChange);
     setUploadItems(queue.getItems());
     setUploadStats(queue.getStats());
     return () => { cancelled = true; queue.off("change"); };
-  }, [queue]);
+  }, [queue, scopeId]);
+
+  useEffect(() => subscribeActivityIdentity((message) => {
+    if (!message.previousScopeId || message.previousScopeId !== scopeId) return;
+    configureActivityScope(null);
+    configureDownloadScope(null);
+    configureEncryptedDownloadScope(null);
+    window.location.href = "/login";
+  }), [scopeId]);
 
   const sharedUploadActivities = useMemo(
     () => activities.filter((item) => item.id.startsWith("transfer-") && item.type === "upload"),

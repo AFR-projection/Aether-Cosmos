@@ -4,6 +4,10 @@ import { storeSecurityAlert } from "@/components/auth/security-alert";
 
 let csrfToken: string | null = null;
 
+export function resetCsrfToken(): void {
+  csrfToken = null;
+}
+
 export async function getCsrfToken(): Promise<string> {
   if (csrfToken) return csrfToken;
   const res = await fetch("/api/auth/csrf");

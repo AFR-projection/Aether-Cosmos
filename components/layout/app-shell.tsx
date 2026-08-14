@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { CommandPalette } from "./command-palette";
 import { ClientShell } from "./client-shell";
+import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
+import { getEffectiveUserId } from "@/lib/auth/permissions";
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const user = await getSessionUserForPage();
@@ -23,6 +25,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     redirect("/maintenance");
   }
 
+  const activityScope = await getOrCreateActivityScope(getEffectiveUserId(user));
+
   return (
     <ClientShell
       user={{
@@ -32,6 +36,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         usedBytes: user.usedBytes,
         isImpersonating: user.isImpersonating,
       }}
+      activityScopeId={activityScope.id}
     >
       <CommandPalette />
       {user.isImpersonating && <ImpersonationBanner />}

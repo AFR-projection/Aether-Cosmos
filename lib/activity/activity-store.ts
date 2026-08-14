@@ -48,6 +48,8 @@ export interface ActivityItem {
   phase?: ActivityStatus;
   /** Backend activity id when the entry came from activity_logs. */
   activityId?: string;
+  /** Account-owned Activity Scope that produced this item. */
+  scopeId?: string;
   /** Bytes transferred (upload / proxied download) */
   loaded?: number;
   /** Total bytes if known */
@@ -64,17 +66,17 @@ export interface ActivityItem {
 type Listener = () => void;
 
 const MAX_ITEMS = 200;
-const STORAGE_KEY = "sbyafr_activity_v1";
-const CHANNEL_NAME = "sbyafr_activity_channel_v1";
+const STORAGE_KEY_PREFIX = "sbyafr_activity_v2:";
+const LEGACY_STORAGE_KEY = "sbyafr_activity_v1";
+const CHANNEL_NAME_PREFIX = "sbyafr_activity_channel_v2:";
 
 // ─── Module-level state ──────────────────────────────────────────────────────
 
 let items: ActivityItem[] = [];
 const listeners = new Set<Listener>();
 export const EMPTY_ACTIVITIES: readonly ActivityItem[] = Object.freeze([]);
-const activityChannel: BroadcastChannel | null = typeof window !== "undefined" && typeof BroadcastChannel !== "undefined"
-  ? new BroadcastChannel(CHANNEL_NAME)
-  : null;
+let activeScopeId: string | null = null;
+let activityChannel: BroadcastChannel | null = null;
 
 function emit() { listeners.forEach((l) => l()); }
 function uid() { return `act-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
@@ -84,38 +86,70 @@ function isFinished(status: ActivityStatus): boolean {
 }
 
 type ActivityChannelMessage =
-  | { kind: "request_snapshot" }
-  | { kind: "snapshot"; items: ActivityItem[] }
-  | { kind: "activity"; item: ActivityItem };
+  | { kind: "request_snapshot"; scopeId: string }
+  | { kind: "snapshot"; scopeId: string; items: ActivityItem[] }
+  | { kind: "activity"; scopeId: string; item: ActivityItem };
 
 function broadcast(message: ActivityChannelMessage) {
   try { activityChannel?.postMessage(message); } catch { /* another window may be closing */ }
 }
 
+function storageKey(scopeId: string): string {
+  return `${STORAGE_KEY_PREFIX}${scopeId}`;
+}
+
+function closeActivityChannel() {
+  activityChannel?.close();
+  activityChannel = null;
+}
+
+function validScopeId(scopeId: string | null): scopeId is string {
+  return !!scopeId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(scopeId);
+}
+
+/** Switch the client store to an authenticated account-owned scope. */
+export function configureActivityScope(scopeId: string | null): void {
+  const nextScopeId = validScopeId(scopeId) ? scopeId : null;
+  if (activeScopeId === nextScopeId) return;
+
+  closeActivityChannel();
+  activeScopeId = nextScopeId;
+  items = nextScopeId ? loadHistory(nextScopeId) : [];
+
+  if (typeof window !== "undefined") {
+    try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch { /* ignore legacy cleanup failures */ }
+  }
+
+  if (nextScopeId && typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
+    activityChannel = new BroadcastChannel(`${CHANNEL_NAME_PREFIX}${nextScopeId}`);
+    activityChannel.onmessage = (event: MessageEvent<ActivityChannelMessage>) => {
+      const message = event.data;
+      if (!message || message.scopeId !== activeScopeId) return;
+      if (message.kind === "request_snapshot") {
+        broadcast({ kind: "snapshot", scopeId: nextScopeId, items });
+      } else if (message.kind === "activity") {
+        mergeExternalItem(message.item);
+      } else if (message.kind === "snapshot") {
+        for (const item of message.items) mergeExternalItem(item);
+      }
+    };
+    broadcast({ kind: "request_snapshot", scopeId: nextScopeId });
+  }
+}
+
+export function getActivityScopeId(): string | null {
+  return activeScopeId;
+}
+
 function mergeExternalItem(incoming: ActivityItem) {
+  if (!activeScopeId || (incoming.scopeId && incoming.scopeId !== activeScopeId)) return;
+  incoming = { ...incoming, scopeId: activeScopeId };
   const existing = items.find((item) => item.id === incoming.id)
     ?? (incoming.fileId ? items.find((item) => item.fileId === incoming.fileId && item.type === incoming.type) : undefined);
   const id = existing?.id ?? incoming.id;
   items = [{ ...existing, ...incoming, id }, ...items.filter((item) => item.id !== id)].slice(0, MAX_ITEMS);
   emit();
   if (isFinished(incoming.status)) saveHistory();
-}
-
-if (activityChannel) {
-  activityChannel.onmessage = (event: MessageEvent<ActivityChannelMessage>) => {
-    const message = event.data;
-    if (!message || typeof message.kind !== "string") return;
-    if (message.kind === "request_snapshot") {
-      broadcast({ kind: "snapshot", items });
-    } else if (message.kind === "activity") {
-      mergeExternalItem(message.item);
-    } else if (message.kind === "snapshot") {
-      for (const item of message.items) mergeExternalItem(item);
-    }
-  };
-  // A popup opened after a transfer started can request the current in-memory
-  // snapshot instead of waiting for the next progress event.
-  broadcast({ kind: "request_snapshot" });
 }
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
@@ -126,14 +160,14 @@ function saveHistory() {
     const finished = items.filter(
       (a) => isFinished(a.status)
     );
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(finished.slice(0, MAX_ITEMS)));
+    if (activeScopeId) localStorage.setItem(storageKey(activeScopeId), JSON.stringify(finished.slice(0, MAX_ITEMS)));
   } catch { /* quota exceeded — silently ignore */ }
 }
 
-function loadHistory(): ActivityItem[] {
+function loadHistory(scopeId: string): ActivityItem[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey(scopeId));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ActivityItem[];
     return parsed.filter(
@@ -142,14 +176,9 @@ function loadHistory(): ActivityItem[] {
   } catch { return []; }
 }
 
-// Hydrate from storage on first client import
-if (typeof window !== "undefined") {
-  items = loadHistory();
-}
-
 // ─── Public read API ──────────────────────────────────────────────────────────
 
-export function getActivities(): readonly ActivityItem[] { return items; }
+export function getActivities(): readonly ActivityItem[] { return activeScopeId ? items : EMPTY_ACTIVITIES; }
 
 export function subscribeActivities(listener: Listener): () => void {
   listeners.add(listener);
@@ -157,7 +186,7 @@ export function subscribeActivities(listener: Listener): () => void {
 }
 
 export function getActiveActivityCount(): number {
-  return items.filter((a) => !isFinished(a.status)).length;
+  return getActivities().filter((a) => !isFinished(a.status)).length;
 }
 
 // ─── Write API ────────────────────────────────────────────────────────────────
@@ -169,12 +198,13 @@ export function startActivity(
   opts: { detail?: string; total?: number } = {}
 ): string {
   const id = uid();
+  if (!activeScopeId) return id;
   items = [
-    { id, type, status: "active" as const, phase: "preparing" as const, name, detail: opts.detail, total: opts.total ?? 0,
+    { id, scopeId: activeScopeId, type, status: "active" as const, phase: "preparing" as const, name, detail: opts.detail, total: opts.total ?? 0,
       loaded: 0, speed: 0, progress: 0, startedAt: Date.now() },
     ...items,
   ].slice(0, MAX_ITEMS);
-  broadcast({ kind: "activity", item: items[0] });
+  broadcast({ kind: "activity", scopeId: activeScopeId, item: items[0] });
   emit();
   return id;
 }
@@ -192,6 +222,7 @@ export function syncTransferActivity(input: {
   detail?: string;
   fileId?: string;
 }) {
+  if (!activeScopeId) return;
   const id = `transfer-${input.id}`;
   const existing = items.find((item) => item.id === id) ?? (input.fileId ? items.find((item) => item.fileId === input.fileId && item.type === input.type) : undefined);
   const resolvedId = existing?.id ?? id;
@@ -199,6 +230,7 @@ export function syncTransferActivity(input: {
   const next: ActivityItem = {
     ...(existing ?? { id: resolvedId, type: input.type, name: input.name, startedAt: Date.now() }),
     type: input.type,
+    scopeId: activeScopeId,
     name: input.name,
     status,
     phase: input.phase,
@@ -214,7 +246,7 @@ export function syncTransferActivity(input: {
     endedAt: isFinished(status) ? existing?.endedAt ?? Date.now() : undefined,
   };
   items = [next, ...items.filter((item) => item.id !== resolvedId)].slice(0, MAX_ITEMS);
-  broadcast({ kind: "activity", item: next });
+  broadcast({ kind: "activity", scopeId: activeScopeId, item: next });
   emit();
   if (isFinished(status)) saveHistory();
 }
@@ -262,14 +294,15 @@ export function recordActivity(
   opts: { detail?: string; error?: string; total?: number } = {}
 ): string {
   const id = uid();
+  if (!activeScopeId) return id;
   const now = Date.now();
   items = [
-      { id, type, status, phase: status, name, detail: opts.detail, error: opts.error,
+      { id, scopeId: activeScopeId, type, status, phase: status, name, detail: opts.detail, error: opts.error,
       total: opts.total ?? 0, progress: status === "done" ? 100 : 0,
       startedAt: now, endedAt: now },
     ...items,
   ].slice(0, MAX_ITEMS);
-  broadcast({ kind: "activity", item: items[0] });
+  broadcast({ kind: "activity", scopeId: activeScopeId, item: items[0] });
   emit();
   saveHistory();
   return id;
@@ -277,11 +310,12 @@ export function recordActivity(
 
 /** Remove finished entries, keep active/queued ones. */
 export function clearActivityHistory() {
+  if (!activeScopeId) return;
   items = items.filter((a) => !isFinished(a.status));
   saveHistory();
   emit();
   void getCsrfToken()
-    .then((token) => fetch("/api/activity", { method: "DELETE", headers: { "x-csrf-token": token } }))
+    .then((token) => fetch(`/api/activity?scopeId=${encodeURIComponent(activeScopeId!)}`, { method: "DELETE", headers: { "x-csrf-token": token } }))
     .catch(() => {});
 }
 
@@ -293,7 +327,9 @@ export function removeActivity(id: string) {
 }
 
 /** Merge backend history without replacing live client-side transfers. */
-export function hydrateActivities(remoteItems: ActivityItem[]) {
+export function hydrateActivities(remoteItems: ActivityItem[], scopeId = activeScopeId) {
+  if (!activeScopeId || scopeId !== activeScopeId) return;
+  remoteItems = remoteItems.map((item) => ({ ...item, scopeId: activeScopeId! }));
   const existingIds = new Set(items.map((item) => item.activityId ?? item.id));
   const incoming = remoteItems.filter((item) => {
     if (existingIds.has(item.activityId ?? item.id)) return false;

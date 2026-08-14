@@ -10,6 +10,10 @@
 const localUploads = new Map<string, number>();
 const TTL_MS = 60_000;
 
+export function clearLocalUploads(): void {
+  localUploads.clear();
+}
+
 function sweep() {
   const now = Date.now();
   for (const [id, ts] of localUploads) {

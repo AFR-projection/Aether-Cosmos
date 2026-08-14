@@ -39,6 +39,7 @@ export const EMPTY_DOWNLOADS: readonly DownloadItem[] = Object.freeze([]);
 
 let items: DownloadItem[] = [];
 const listeners = new Set<Listener>();
+let activeScopeId: string | null = null;
 
 function emit() {
   listeners.forEach((l) => l());
@@ -49,7 +50,13 @@ function uid() {
 }
 
 export function getDownloads(): readonly DownloadItem[] {
-  return items;
+  return activeScopeId || typeof window === "undefined" ? items : EMPTY_DOWNLOADS;
+}
+
+export function configureDownloadScope(scopeId: string | null): void {
+  if (activeScopeId === scopeId) return;
+  activeScopeId = scopeId;
+  items = [];
 }
 
 export function subscribeDownloads(listener: Listener) {
@@ -66,6 +73,7 @@ export function getActiveDownloadCount(): number {
 
 export function startDownload(name: string, total = 0): string {
   const id = uid();
+  if (!activeScopeId && typeof window !== "undefined") return id;
   const item: DownloadItem = {
     id,
     name,

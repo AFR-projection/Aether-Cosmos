@@ -4,8 +4,8 @@ import { AuthError } from "@/lib/auth/session";
 import { SECURITY_HEADERS } from "@/lib/security";
 import { UploadServiceError } from "@/lib/storage/upload-service";
 
-export function apiSuccess<T>(data: T, status = 200) {
-  return NextResponse.json({ success: true, data }, { status, headers: SECURITY_HEADERS });
+export function apiSuccess<T>(data: T, status = 200, extraHeaders?: HeadersInit) {
+  return NextResponse.json({ success: true, data }, { status, headers: { ...SECURITY_HEADERS, ...extraHeaders } });
 }
 
 export function apiError(

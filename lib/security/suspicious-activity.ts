@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { activityLogs, activityActionEnum } from "@/lib/db/schema";
+import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
 import { desc, eq, and, gte, count } from "drizzle-orm";
 
 export interface SuspiciousActivityResult {
@@ -123,8 +124,10 @@ export async function logSuspiciousActivity(
   ip: string
 ): Promise<void> {
   try {
+    const scope = await getOrCreateActivityScope(userId);
     await db.insert(activityLogs).values({
       userId,
+      activityScopeId: scope.id,
       action: action as (typeof activityActionEnum.enumValues)[number],
       resourceType: "security",
       metadata: {

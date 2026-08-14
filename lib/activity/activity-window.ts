@@ -20,16 +20,18 @@ export function canUseActivityPopup(): boolean {
 }
 
 /** Open or focus the single named desktop Activity Center window. */
-export function openActivityPopup(): boolean {
+export function openActivityPopup(scopeId?: string | null): boolean {
   if (typeof window === "undefined" || !canUseActivityPopup()) return false;
 
   try {
+    const path = scopeId ? `/files/activity/${encodeURIComponent(scopeId)}` : "/files/activity";
     if (activityWindow && !activityWindow.closed) {
+      if (activityWindow.location.pathname !== path) activityWindow.location.href = path;
       activityWindow.focus();
       return true;
     }
 
-    const next = window.open("/files/activity", ACTIVITY_WINDOW_NAME, ACTIVITY_WINDOW_FEATURES);
+    const next = window.open(path, ACTIVITY_WINDOW_NAME, ACTIVITY_WINDOW_FEATURES);
     if (!next) return false;
     activityWindow = next;
     next.focus();

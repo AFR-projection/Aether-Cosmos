@@ -25,6 +25,9 @@ import { useTheme } from "@/components/theme-provider";
 import { cn, formatBytes } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
+import { publishActivityIdentity } from "@/lib/activity/activity-identity";
+import { getActivityScopeId } from "@/lib/activity/activity-store";
+import { resetCsrfToken } from "@/lib/api/client";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useSyncExternalStore } from "react";
 
@@ -93,6 +96,8 @@ function SidebarInner({
 
   async function handleLogout() {
     setLoggingOut(true);
+    publishActivityIdentity(null, getActivityScopeId());
+    resetCsrfToken();
     try {
       await apiFetch("/api/auth/login", { method: "DELETE" });
       router.push("/login");

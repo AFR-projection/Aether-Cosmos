@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { activityLogs, type User } from "@/lib/db/schema";
+import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
 import type { SessionUser } from "./session";
 
 type ActivityAction = typeof activityLogs.$inferInsert["action"];
@@ -14,8 +15,11 @@ export async function logActivity(
     ip?: string;
   }
 ): Promise<void> {
+  const ownerUserId = "effectiveUserId" in user ? user.effectiveUserId : user.id;
+  const scope = await getOrCreateActivityScope(ownerUserId);
   await db.insert(activityLogs).values({
-    userId: user.id,
+    userId: ownerUserId,
+    activityScopeId: scope.id,
     action,
     resourceType: options?.resourceType,
     resourceId: options?.resourceId,

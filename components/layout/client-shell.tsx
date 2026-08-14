@@ -2,7 +2,7 @@
 
 import { Sidebar } from "./sidebar";
 import { BottomNav } from "./bottom-nav";
-import { useSyncExternalStore, useState, useEffect, useRef } from "react";
+import { startTransition, useSyncExternalStore, useState, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { Menu, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,13 @@ import Link from "next/link";
 import { useRealtimeEvents, rememberCurrentSessionId } from "@/hooks/use-realtime-events";
 import { notify } from "@/lib/system/notify-store";
 import { apiFetch } from "@/lib/api/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { configureActivityScope } from "@/lib/activity/activity-store";
+import { configureDownloadScope } from "@/lib/download/download-store";
+import { configureEncryptedDownloadScope } from "@/lib/download/encrypted-download-store";
+import { clearLocalUploads } from "@/lib/system/local-upload-registry";
+import { publishActivityIdentity } from "@/lib/activity/activity-identity";
+import { resetCsrfToken } from "@/lib/api/client";
 
 const STORAGE_KEY = "sidebar_collapsed";
 
@@ -45,6 +52,7 @@ function subscribeCollapsed(callback: () => void) {
 export function ClientShell({
   user,
   children,
+  activityScopeId,
 }: {
   user: {
     username: string;
@@ -54,13 +62,31 @@ export function ClientShell({
     isImpersonating?: boolean;
   };
   children: React.ReactNode;
+  activityScopeId: string;
 }) {
+  configureActivityScope(activityScopeId);
+  configureDownloadScope(activityScopeId);
+  configureEncryptedDownloadScope(activityScopeId);
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarTransition, setSidebarTransition] = useState(false);
   const initialCollapsed = useRef(true);
+  const identityRef = useRef<string | null>(null);
+  const [identityReady, setIdentityReady] = useState<string | null>(null);
 
-  useRealtimeEvents(true);
+  useRealtimeEvents(identityReady === activityScopeId);
+
+  useEffect(() => {
+    if (identityReady === activityScopeId) return;
+    const previousScopeId = identityRef.current;
+    identityRef.current = activityScopeId;
+    clearLocalUploads();
+    resetCsrfToken();
+    queryClient.clear();
+    if (previousScopeId) publishActivityIdentity(activityScopeId, previousScopeId);
+    startTransition(() => setIdentityReady(activityScopeId));
+  }, [activityScopeId, identityReady, queryClient]);
 
   useEffect(() => {
     void (async () => {
@@ -127,6 +153,10 @@ export function ClientShell({
     }
     return () => { document.body.style.overflow = ""; };
   }, [mobileSidebarOpen]);
+
+  if (identityReady !== activityScopeId) {
+    return <div className="min-h-dvh bg-background" aria-busy="true" />;
+  }
 
   const title = getPageTitle(pathname);
 

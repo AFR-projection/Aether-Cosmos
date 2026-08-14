@@ -25,13 +25,20 @@ type Listener = () => void;
 
 let pending: PendingEncryptedDownload | null = null;
 const listeners = new Set<Listener>();
+let activeScopeId: string | null = null;
 
 function emit() {
   listeners.forEach((l) => l());
 }
 
 export function getPendingEncryptedDownload(): PendingEncryptedDownload | null {
-  return pending;
+  return activeScopeId || typeof window === "undefined" ? pending : null;
+}
+
+export function configureEncryptedDownloadScope(scopeId: string | null): void {
+  if (activeScopeId === scopeId) return;
+  activeScopeId = scopeId;
+  pending = null;
 }
 
 export function subscribePendingEncryptedDownload(listener: Listener) {
@@ -42,6 +49,7 @@ export function subscribePendingEncryptedDownload(listener: Listener) {
 }
 
 export function setPendingEncryptedDownload(item: PendingEncryptedDownload) {
+  if (!activeScopeId && typeof window !== "undefined") return;
   pending = item;
   emit();
 }

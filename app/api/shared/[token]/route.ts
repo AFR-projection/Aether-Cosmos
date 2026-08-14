@@ -6,6 +6,7 @@ import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { getClientIpFromRequest, parseUserAgent, getIpLocation } from "@/lib/access-tracking";
 import { publishToUser } from "@/lib/realtime/events";
 import { tiptapToPlainText } from "@/lib/search/tiptap-text";
+import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
 
 export async function GET(
   request: NextRequest,
@@ -65,8 +66,9 @@ export async function GET(
 
     // Fire-and-forget geolocation (non-blocking)
     getIpLocation(ip).then((location) => {
-      db.insert(activityLogs).values({
+      getOrCreateActivityScope(share.sharedBy).then((scope) => db.insert(activityLogs).values({
         userId: share.sharedBy,
+        activityScopeId: scope.id,
         action: "download",
         resourceType: "share",
         resourceId: share.id,
@@ -82,7 +84,7 @@ export async function GET(
           location,
         },
         ip,
-      }).catch(() => {});
+      })).catch(() => {});
     });
 
     void publishToUser(share.sharedBy, {

@@ -5,6 +5,8 @@ import type { RealtimeEvent } from "@/lib/realtime/types";
 import { notify, setConnectionStatus, showSystemToast } from "@/lib/system/notify-store";
 import { consumeLocalUpload } from "@/lib/system/local-upload-registry";
 import { syncTransferActivity } from "@/lib/activity/activity-store";
+import { publishActivityIdentity } from "@/lib/activity/activity-identity";
+import { getActivityScopeId } from "@/lib/activity/activity-store";
 
 const SESSION_ID_KEY = "storage_current_session_id";
 
@@ -30,6 +32,7 @@ export function readRememberedSessionId(): string | null {
 }
 
 function forceLogout(reason: string): void {
+  publishActivityIdentity(null, getActivityScopeId());
   try {
     sessionStorage.removeItem(SESSION_ID_KEY);
   } catch {

@@ -478,6 +478,25 @@ export const shares = pgTable(
   ]
 );
 
+export const activityScopeStatusEnum = pgEnum("activity_scope_status", ["active", "revoked"]);
+
+export const activityScopes = pgTable(
+  "activity_scopes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: activityScopeStatusEnum("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("activity_scopes_owner_unique").on(table.ownerUserId),
+    index("activity_scopes_last_active_idx").on(table.lastActiveAt),
+  ]
+);
+
 export const activityLogs = pgTable(
   "activity_logs",
   {
@@ -485,6 +504,9 @@ export const activityLogs = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    activityScopeId: uuid("activity_scope_id")
+      .notNull()
+      .references(() => activityScopes.id, { onDelete: "cascade" }),
     action: activityActionEnum("action").notNull(),
     resourceType: text("resource_type"),
     resourceId: text("resource_id"),
@@ -494,6 +516,7 @@ export const activityLogs = pgTable(
   },
   (table) => [
     index("activity_logs_user_time_idx").on(table.userId, table.createdAt),
+    index("activity_logs_scope_time_idx").on(table.activityScopeId, table.createdAt),
     index("activity_logs_action_idx").on(table.action),
     index("activity_logs_created_at_idx").on(table.createdAt),
   ]

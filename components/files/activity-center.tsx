@@ -14,6 +14,7 @@ import { cn, formatBytes } from "@/lib/utils";
 import {
   getActivities, subscribeActivities, clearActivityHistory, removeActivity,
   EMPTY_ACTIVITIES, hydrateActivities, type ActivityItem, type ActivityType, type ActivityStatus,
+  getActivityScopeId,
 } from "@/lib/activity/activity-store";
 import { apiFetch } from "@/lib/api/client";
 import { canUseActivityPopup, openActivityPopup } from "@/lib/activity/activity-window";
@@ -652,6 +653,7 @@ interface ActivityCenterProps {
 
 export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = false }: ActivityCenterProps) {
   const uploadQueue = providedUploadQueue ?? getSharedUploadQueue();
+  const activityScopeId = getActivityScopeId();
   const [open, setOpen] = useState(false);
   const [windowOpen, setWindowOpen] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -662,11 +664,12 @@ export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = fals
 
   useEffect(() => {
     let cancelled = false;
-    void apiFetch<{ items: ActivityItem[] }>("/api/activity?limit=200").then((response) => {
-      if (!cancelled && response.success && response.data?.items) hydrateActivities(response.data.items);
+    if (!activityScopeId) return () => { cancelled = true; };
+    void apiFetch<{ scopeId: string; items: ActivityItem[] }>(`/api/activity?scopeId=${encodeURIComponent(activityScopeId)}&limit=200`).then((response) => {
+      if (!cancelled && response.success && response.data?.items) hydrateActivities(response.data.items, response.data.scopeId);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [activityScopeId]);
 
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [uploadStats, setUploadStats] = useState<UploadStats>({
@@ -762,7 +765,7 @@ export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = fals
     if (canUseActivityPopup()) {
       setOpen(false);
       setWindowOpen(false);
-      if (openActivityPopup()) return;
+       if (openActivityPopup(getActivityScopeId())) return;
       // Popup blockers must not strand the user. Use the same navigation as a
       // normal link when a desktop popup cannot be created.
       window.location.href = "/files/activity";
