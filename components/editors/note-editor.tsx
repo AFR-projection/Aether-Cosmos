@@ -8,6 +8,7 @@ import { TaskList } from "@tiptap/extension-task-list";
 import { TaskItem } from "@tiptap/extension-task-item";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
+import Underline from "@tiptap/extension-underline";
 import { useEffect, useCallback, useRef, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -64,6 +65,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
       TaskItem.configure({ nested: true }),
       TextStyle,
       Color,
+      Underline,
       SlashCommand,
     ],
     content: "",

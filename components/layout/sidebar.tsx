@@ -13,6 +13,7 @@ import {
   Cloud,
   LogOut,
   Moon,
+  Sun,
   ChevronLeft,
   ChevronRight,
   Command,
@@ -140,7 +141,7 @@ function SidebarInner({
           <Link
             href="/files"
             onClick={handleNav}
-            className="flex items-center gap-2 rounded-lg border border-border/50 bg-black/5 dark:bg-white/5 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-accent/30 hover:text-foreground"
+            className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-accent/30 hover:text-foreground"
           >
             <Search className="h-3.5 w-3.5" />
             <span>Quick search...</span>
@@ -304,7 +305,7 @@ function SidebarInner({
           onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
           aria-label="Toggle theme"
         >
-          <Moon className="h-4 w-4" />
+          {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
         {!isMobile && (
           <Button

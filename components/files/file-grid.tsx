@@ -237,7 +237,7 @@ function SortHeader({ label, sortKey, current, order, onSort }: SortHeaderProps)
 function HoverInfoCard({ file }: { file: FileRecord }) {
   return (
     <div className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] z-50 w-64 -translate-x-1/2">
-      <div className="rounded-xl border border-border/50 bg-surface-elevated/98 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+      <div className="rounded-xl border border-border p-3 shadow-[0_8px_32px_rgba(0,0,0,0.18)]" style={{ background: "var(--surface)" }}>
         {/* Type badge + name */}
         <div className="flex items-start gap-2.5 mb-2.5">
           <div className={cn(
@@ -273,7 +273,7 @@ function HoverInfoCard({ file }: { file: FileRecord }) {
       </div>
       {/* Arrow */}
       <div className="absolute -top-1 left-1/2 -translate-x-1/2 h-2 w-4 overflow-hidden">
-        <div className="mx-auto h-2.5 w-2.5 rotate-45 border-l border-t border-border/50 bg-surface-elevated/98" />
+        <div className="mx-auto h-2.5 w-2.5 rotate-45 border-l border-t border-border" style={{ background: "var(--surface)" }} />
       </div>
     </div>
   );
@@ -465,7 +465,7 @@ export function FileGrid({
       style={{ maxHeight: "calc(100dvh - 15rem)" }}
     >
       {/* Table header */}
-      <div className="sticky top-0 z-10 grid grid-cols-[32px_1fr_72px] sm:grid-cols-[32px_2fr_100px_44px] md:grid-cols-[32px_2fr_100px_1fr_44px] lg:grid-cols-[32px_2fr_100px_1fr_120px_44px] items-center border-b border-border/30 bg-muted/60 backdrop-blur-md px-3 sm:px-4 py-2 text-[11px] text-muted-foreground/50 uppercase tracking-widest font-semibold">
+      <div className="sticky top-0 z-10 grid grid-cols-[32px_1fr_72px] sm:grid-cols-[32px_2fr_100px_44px] md:grid-cols-[32px_2fr_100px_1fr_44px] lg:grid-cols-[32px_2fr_100px_1fr_120px_44px] items-center border-b border-border/30 bg-muted px-3 sm:px-4 py-2 text-[11px] text-muted-foreground/50 uppercase tracking-widest font-semibold">
         <button onClick={onSelectAll} className="flex items-center justify-center p-1 -m-1" aria-label="Select all">
           <div className={cn(
             "flex h-4 w-4 items-center justify-center rounded-[4px] border transition-colors",

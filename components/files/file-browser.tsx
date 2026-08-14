@@ -1266,7 +1266,7 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -4, scale: 0.97 }}
                     transition={{ duration: 0.12 }}
-                    className="absolute right-0 z-50 mt-1.5 w-44 overflow-hidden rounded-xl border border-border/50 bg-surface-elevated/98 py-1 shadow-2xl shadow-black/15 backdrop-blur-xl"
+                    className="absolute right-0 z-50 mt-1.5 w-44 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
                   >
                     {SORT_OPTIONS.map((opt) => (
                       <button
