@@ -3,12 +3,13 @@
 import { useRef, useState, useEffect, useMemo, memo, useSyncExternalStore } from "react";
 import { useVirtualizer, useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
-  FileText, Image, Film, Music, FileArchive, File,
+  File as FileIcon2,
   Star, Trash2, Copy, CopyPlus, Scissors, RotateCcw, Pencil, MoreHorizontal, Download,
-  Play, Share2, Check, Lock, FolderInput,
+  Play, Share2, Check, Lock, FolderInput, Music,
   ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react";
 import { cn, formatBytes, formatDate, getMimeCategory } from "@/lib/utils";
+import { FileTypeIcon, getAccentColor, getGradientFallback, getTypeLabel } from "@/lib/file-type-utils";
 import { sortFiles } from "@/lib/files/sort";
 import { Button } from "@/components/ui/button";
 import { FloatingActionMenu, useFloatingMenu, type FloatingMenuItem } from "@/components/ui/floating-action-menu";
@@ -81,48 +82,7 @@ function useContextMenu() {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
-  const cat = getMimeCategory(mimeType);
-  const icons: Record<string, typeof File> = {
-    image: Image, video: Film, audio: Music, pdf: FileText,
-    document: FileText, spreadsheet: FileText, presentation: FileText,
-    archive: FileArchive, text: FileText,
-  };
-  const Icon = icons[cat] ?? File;
-  return <Icon className={className} />;
-}
-
-function getAccentColor(mimeType: string): string {
-  const c: Record<string, string> = {
-    image: "text-violet-500", video: "text-blue-500", audio: "text-emerald-500",
-    pdf: "text-red-500", document: "text-sky-500", spreadsheet: "text-green-500",
-    presentation: "text-orange-500", archive: "text-amber-500", text: "text-gray-500",
-  };
-  return c[getMimeCategory(mimeType)] ?? "text-gray-400";
-}
-
-function getGradientFallback(mimeType: string): string {
-  const g: Record<string, string> = {
-    image: "from-violet-500/20 to-fuchsia-500/10",
-    video: "from-blue-500/20 to-cyan-500/10",
-    audio: "from-emerald-500/20 to-teal-500/10",
-    pdf: "from-red-500/20 to-orange-500/10",
-    document: "from-sky-500/20 to-indigo-500/10",
-    spreadsheet: "from-green-500/20 to-lime-500/10",
-    presentation: "from-orange-500/20 to-amber-500/10",
-    archive: "from-amber-500/20 to-yellow-500/10",
-    text: "from-gray-500/15 to-zinc-500/10",
-  };
-  return g[getMimeCategory(mimeType)] ?? "from-gray-500/10 to-zinc-500/5";
-}
-
-function getTypeLabel(mimeType: string): string {
-  const cat = getMimeCategory(mimeType);
-  const labels: Record<string, string> = {
-    image: "Image", video: "Video", audio: "Audio", pdf: "PDF",
-    document: "Document", spreadsheet: "Sheet", presentation: "Slides",
-    archive: "Archive", text: "Text",
-  };
-  return labels[cat] ?? "File";
+  return <FileTypeIcon mimeType={mimeType} className={className} />;
 }
 
 // ─── Thumbnail lazy loader ──────────────────────────────────────────────────
@@ -375,7 +335,7 @@ export function FileGrid({
       <div className="flex flex-col items-center justify-center py-28 select-none">
         <div className="relative mb-5">
           <div className="flex h-24 w-24 items-center justify-center rounded-3xl border border-border/40 bg-gradient-to-br from-surface to-muted/30 shadow-sm">
-            <File className="h-10 w-10 text-muted-foreground/20" />
+            <FileIcon2 className="h-10 w-10 text-muted-foreground/20" />
           </div>
           {!trash && (
             <div className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border border-border/40 bg-surface shadow-sm">

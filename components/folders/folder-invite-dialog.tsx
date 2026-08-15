@@ -66,6 +66,11 @@ export function FolderInviteDialog({ folderId, folderName, onClose }: FolderInvi
       return;
     }
     setUsername("");
+    setError(null);
+    // Show success message
+    const successMsg = (res.data as any)?.message ?? "Invitation sent";
+    setError(`✓ ${successMsg} — User will receive notification`);
+    setTimeout(() => setError(null), 3000);
     await load();
   }
 

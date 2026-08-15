@@ -5,11 +5,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiFetch } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
-import { cn, formatBytes, getMimeCategory } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
+import { getAccentColor, getGradientFallback, getFileTypeIcon } from "@/lib/file-type-utils";
 import type { File as FileRecord, Folder } from "@/lib/db/schema";
 import {
-  Trash2, RotateCcw, Search, Folder as FolderIcon, File, FileText, Image, Film,
-  Music, FileArchive, CheckSquare, Square, AlertTriangle,
+  Trash2, RotateCcw, Search, Folder as FolderIcon,
+  CheckSquare, Square, AlertTriangle,
   Clock, Loader2, ChevronDown, ChevronRight,
   Eraser, Info,
 } from "lucide-react";
@@ -45,37 +46,15 @@ function getTimeGroup(timestamp: number): string {
 }
 
 function getFileIcon(mimeType: string) {
-  const cat = getMimeCategory(mimeType);
-  const icons: Record<string, typeof File> = {
-    image: Image, video: Film, audio: Music, pdf: FileText,
-    document: FileText, spreadsheet: FileText, presentation: FileText,
-    archive: FileArchive, text: FileText,
-  };
-  return icons[cat] ?? File;
+  return getFileTypeIcon(mimeType);
 }
 
 function getFileAccent(mimeType: string): string {
-  const c: Record<string, string> = {
-    image: "text-violet-500", video: "text-blue-500", audio: "text-emerald-500",
-    pdf: "text-red-500", document: "text-sky-500", spreadsheet: "text-green-500",
-    presentation: "text-orange-500", archive: "text-amber-500", text: "text-gray-500",
-  };
-  return c[getMimeCategory(mimeType)] ?? "text-muted-foreground";
+  return getAccentColor(mimeType);
 }
 
 function getFileGradient(mimeType: string): string {
-  const g: Record<string, string> = {
-    image: "from-violet-500/20 to-fuchsia-500/10",
-    video: "from-blue-500/20 to-cyan-500/10",
-    audio: "from-emerald-500/20 to-teal-500/10",
-    pdf: "from-red-500/20 to-orange-500/10",
-    document: "from-sky-500/20 to-indigo-500/10",
-    spreadsheet: "from-green-500/20 to-lime-500/10",
-    presentation: "from-orange-500/20 to-amber-500/10",
-    archive: "from-amber-500/20 to-yellow-500/10",
-    text: "from-gray-500/15 to-zinc-500/10",
-  };
-  return g[getMimeCategory(mimeType)] ?? "from-muted/30 to-muted/10";
+  return getGradientFallback(mimeType);
 }
 
 export default function RecycleBinPage() {

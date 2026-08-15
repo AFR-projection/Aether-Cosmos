@@ -6,7 +6,7 @@ import {
   Upload, FolderPlus, FilePlus, Grid3X3, List, Search, Trash2, AlertCircle, FolderUp,
   Image, Film, Music, FileText, FileArchive, Star, X, CheckSquare, Square,
   Download, File, Lock, Move, ArrowDownUp, ArrowUp, ArrowDown, Check, PencilRuler,
-  Copy, Scissors, ClipboardPaste,
+  Copy, Scissors, ClipboardPaste, ArrowLeft, FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +82,8 @@ interface FileBrowserProps {
   trash?: boolean;
   favorites?: boolean;
   selectedFileId?: string | null;
+  isSharedContext?: boolean;
+  sharedFolderName?: string;
 }
 
 // ─── DockButton ─────────────────────────────────────────────────────────────
@@ -116,7 +118,14 @@ function DockButton({
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function FileBrowser({ folderId = null, trash = false, favorites = false, selectedFileId = null }: FileBrowserProps) {
+export function FileBrowser({
+  folderId = null,
+  trash = false,
+  favorites = false,
+  selectedFileId = null,
+  isSharedContext = false,
+  sharedFolderName = "",
+}: FileBrowserProps) {
   const queryClient = useQueryClient();
   const { askPrompt, askConfirm, dialogs } = useDialogs();
 
@@ -1058,6 +1067,13 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       if (e.key === "m" && !trash) {
         e.preventDefault();
         setMoveIds(Array.from(selectedIds));
+        return;
+      }
+      // Ctrl/Cmd+D downloads the selection (single file or bulk ZIP).
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        void batchDownload();
+        return;
       }
     };
     window.addEventListener("keydown", handler);
@@ -1111,7 +1127,36 @@ export function FileBrowser({ folderId = null, trash = false, favorites = false,
       </AnimatePresence>
 
       {/* ── Page header ── */}
-      {!trash && !favorites && (
+      {isSharedContext && (
+        <div className="mb-8">
+          <a
+            href="/shared-with-me"
+            className="group mb-4 inline-flex items-center gap-2 rounded-xl border border-border/50 bg-card/60 px-4 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-all hover:border-accent/40 hover:bg-accent/5 hover:text-foreground hover:shadow-md"
+          >
+            <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
+            <span>Back to Shared with me</span>
+          </a>
+          <div className="flex items-end gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 ring-1 ring-accent/20">
+              <FolderOpen className="h-6 w-6 text-accent" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-foreground">
+                {sharedFolderName || "Shared Folder"}
+              </h1>
+              {!isLoading && allFiles.length > 0 && (
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {typeFilter !== "all"
+                    ? `${filteredFiles.length} of ${allFiles.length} files`
+                    : `${allFiles.length} file${allFiles.length !== 1 ? "s" : ""}`}
+                  {search && <> — results for <span className="font-medium text-foreground/80">&ldquo;{search}&rdquo;</span></>}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {!trash && !favorites && !isSharedContext && (
         <div className="mb-6">
           <div className="flex items-baseline gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-foreground">

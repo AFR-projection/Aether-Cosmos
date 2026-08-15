@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { folderMembers, users } from "@/lib/db/schema";
+import { folderMembers, folderInvitations, users } from "@/lib/db/schema";
 import { requireAuth, getClientIp } from "@/lib/auth/session";
 import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions";
 import { validateCsrf } from "@/lib/security";
@@ -77,32 +77,58 @@ export async function POST(
       return apiError("Cannot invite yourself", 400);
     }
 
-    const [existing] = await db
+    // Check if already a member
+    const [existingMember] = await db
       .select()
       .from(folderMembers)
       .where(and(eq(folderMembers.folderId, id), eq(folderMembers.userId, invitee.id)))
       .limit(1);
 
-    if (existing) {
-      const [updated] = await db
-        .update(folderMembers)
-        .set({ role: body.role })
-        .where(eq(folderMembers.id, existing.id))
-        .returning();
-      return apiSuccess({ member: { ...updated, username: invitee.username } });
+    if (existingMember) {
+      return apiError("User is already a member of this folder", 400);
     }
 
-    const [member] = await db
-      .insert(folderMembers)
+    // Check if invitation already exists
+    const [existingInvitation] = await db
+      .select()
+      .from(folderInvitations)
+      .where(
+        and(
+          eq(folderInvitations.folderId, id),
+          eq(folderInvitations.invitedUserId, invitee.id),
+          eq(folderInvitations.status, "pending")
+        )
+      )
+      .limit(1);
+
+    if (existingInvitation) {
+      // Update existing pending invitation with new role
+      const [updated] = await db
+        .update(folderInvitations)
+        .set({ role: body.role })
+        .where(eq(folderInvitations.id, existingInvitation.id))
+        .returning();
+      return apiSuccess({
+        invitation: { ...updated, username: invitee.username },
+        message: "Invitation updated"
+      });
+    }
+
+    // Create new invitation
+    const [invitation] = await db
+      .insert(folderInvitations)
       .values({
         folderId: id,
-        userId: invitee.id,
+        invitedUserId: invitee.id,
         role: body.role,
         invitedBy: getEffectiveUserId(sessionUser),
       })
       .returning();
 
-    return apiSuccess({ member: { ...member, username: invitee.username } });
+    return apiSuccess({
+      invitation: { ...invitation, username: invitee.username },
+      message: "Invitation sent"
+    });
   } catch (error) {
     return handleApiError(error);
   }

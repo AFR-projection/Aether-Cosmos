@@ -571,6 +571,33 @@ export const folderMembers = pgTable(
   ]
 );
 
+export const invitationStatusEnum = pgEnum("invitation_status", ["pending", "accepted", "rejected"]);
+
+export const folderInvitations = pgTable(
+  "folder_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    folderId: uuid("folder_id")
+      .notNull()
+      .references(() => folders.id, { onDelete: "cascade" }),
+    invitedUserId: uuid("invited_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: folderMemberRoleEnum("role").notNull().default("view"),
+    status: invitationStatusEnum("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("folder_invitations_unique").on(table.folderId, table.invitedUserId),
+    index("folder_invitations_user_idx").on(table.invitedUserId),
+    index("folder_invitations_status_idx").on(table.invitedUserId, table.status),
+  ]
+);
+
 export const apiKeys = pgTable(
   "api_keys",
   {

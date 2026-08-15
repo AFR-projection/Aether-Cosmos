@@ -11,16 +11,11 @@ import {
   ArrowUpRight,
   Cloud,
   Download,
-  File,
-  FileArchive,
   FileText,
-  Film,
   FolderOpen,
   Gauge,
   HardDrive,
-  Image,
   LayoutGrid,
-  Music,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -30,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
+import { getAccentColor, getGradientFallback, getFileTypeIcon } from "@/lib/file-type-utils";
 
 const activityIcons: Record<string, LucideIcon> = {
   upload: Cloud,
@@ -40,20 +36,13 @@ const activityIcons: Record<string, LucideIcon> = {
   restore: RefreshCw,
 };
 
-const fileTypeIcons: Array<{ match: string; icon: LucideIcon; label: string }> = [
-  { match: "application/pdf", icon: FileText, label: "PDF" },
-  { match: "image/", icon: Image, label: "Image" },
-  { match: "video/", icon: Film, label: "Video" },
-  { match: "audio/", icon: Music, label: "Audio" },
-  { match: "application/zip", icon: FileArchive, label: "Archive" },
-  { match: "application/x-rar", icon: FileArchive, label: "Archive" },
-  { match: "application/x-7z", icon: FileArchive, label: "Archive" },
-  { match: "text/", icon: FileText, label: "Text" },
-  { match: "application/json", icon: FileText, label: "Data" },
-  { match: "application/msword", icon: FileText, label: "Document" },
-  { match: "application/vnd.openxmlformats-officedocument", icon: FileText, label: "Document" },
-  { match: "application/vnd.ms-excel", icon: FileText, label: "Spreadsheet" },
-];
+function filePresentation(file: FileItem): { icon: React.ElementType; label: string; tone: string } {
+  if (file.isNote) return { icon: Activity, label: "Note", tone: "note" };
+  const Icon = getFileTypeIcon(file.mimeType ?? "");
+  const accentClass = getAccentColor(file.mimeType ?? "");
+  const tone = accentClass.replace("text-", "").replace("-500", "").replace("-400", "");
+  return { icon: Icon, label: file.mimeType?.split("/")[0] ?? "File", tone };
+}
 
 interface DashboardStats {
   totalFiles: number;
@@ -91,13 +80,6 @@ interface DashboardData {
   } | null;
 }
 
-function filePresentation(file: FileItem): { icon: LucideIcon; label: string; tone: string } {
-  if (file.isNote) return { icon: FileText, label: "Note", tone: "note" };
-  const found = fileTypeIcons.find((type) => file.mimeType?.startsWith(type.match));
-  return found
-    ? { ...found, tone: found.label.toLowerCase() }
-    : { icon: File, label: "File", tone: "file" };
-}
 
 function actionCopy(action: string) {
   const copy: Record<string, string> = {

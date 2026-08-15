@@ -21,6 +21,8 @@ import {
   X,
   Loader2,
   Settings,
+  Users,
+  Mail,
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { cn, formatBytes } from "@/lib/utils";
@@ -50,6 +52,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/files", label: "Files", icon: FolderOpen },
   { href: "/favorites", label: "Favorites", icon: Star },
+  { href: "/shared-with-me", label: "Shared with me", icon: Users },
   { href: "/shares", label: "Shared", icon: Share2 },
   { href: "/recycle-bin", label: "Recycle Bin", icon: Trash2 },
 ];
