@@ -21,7 +21,7 @@ function escapeLike(value: string): string {
 function archiveSegment(value: string): string {
   const cleaned = value
     .replace(/[\\/]/g, "_")
-    // eslint-disable-next-line no-control-regex
+     
     .replace(/[\u0000-\u001f\u007f]/g, "_")
     .trim();
   return cleaned === "." || cleaned === ".." || cleaned.length === 0 ? "_" : cleaned;

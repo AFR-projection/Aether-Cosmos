@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState, useRef, useMemo, type ElementType } from "react";
 import { QUICK_ACTION_EVENT, type QuickAction } from "@/lib/system/quick-actions";
 import {
@@ -1129,13 +1130,13 @@ export function FileBrowser({
       {/* ── Page header ── */}
       {isSharedContext && (
         <div className="mb-8">
-          <a
+          <Link
             href="/shared-with-me"
             className="group mb-4 inline-flex items-center gap-2 rounded-xl border border-border/50 bg-card/60 px-4 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-all hover:border-accent/40 hover:bg-accent/5 hover:text-foreground hover:shadow-md"
           >
             <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
             <span>Back to Shared with me</span>
-          </a>
+          </Link>
           <div className="flex items-end gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 ring-1 ring-accent/20">
               <FolderOpen className="h-6 w-6 text-accent" />

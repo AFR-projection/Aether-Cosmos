@@ -22,7 +22,6 @@ import {
   Mail,
   Search,
   Clock,
-  Timer,
   Info,
 } from "lucide-react";
 import type { AdminSettings } from "@/app/api/admin/settings/route";

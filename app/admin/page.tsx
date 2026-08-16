@@ -9,7 +9,7 @@ import { AdminStatCard } from "@/components/admin/admin-stat-card";
 import { formatBytes, formatDate } from "@/lib/utils";
 import {
   Users, FileText, HardDrive, Share2, Activity, Upload,
-  Download, FolderOpen, Clock, Shield, TrendingUp, AlertCircle,
+  Download, Shield, TrendingUp,
   CheckCircle, XCircle, BarChart3, Zap, Database, Server, Cpu,
 } from "lucide-react";
 import {

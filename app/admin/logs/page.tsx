@@ -9,7 +9,7 @@ import { apiFetch } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
-import { ScrollText, Search, RefreshCw, Activity, Upload, Download, Trash2, Loader2, FileDown, ChevronDown, ChevronRight, LogIn, LogOut, Share2, Edit3, FolderPlus, FolderMinus, UserPlus, UserMinus, Shield, Star, Clock, Globe, FileText, HardDrive, X, Users, Layers } from "lucide-react";
+import { ScrollText, Search, RefreshCw, Activity, Upload, Download, Trash2, Loader2, FileDown, ChevronDown, LogIn, LogOut, Share2, Edit3, FolderPlus, FolderMinus, UserPlus, UserMinus, Shield, Star, Clock, Globe, FileText, HardDrive, X, Users, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const actionConfig: Record<string, { icon: typeof Upload; color: string; bg: string; label: string; description: string }> = {
