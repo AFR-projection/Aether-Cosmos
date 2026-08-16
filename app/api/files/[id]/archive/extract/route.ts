@@ -4,19 +4,20 @@ import { getAccessibleFile } from "@/lib/auth/permissions";
 import { downloadFromR2Stream } from "@/lib/storage/r2";
 import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
 import { apiError, handleApiError } from "@/lib/api/response";
+import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
 import JSZip from "jszip";
 
 const TEXT_TYPES = new Set([
-  "txt", "md", "mdx", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",
-  "js", "jsx", "ts", "tsx", "mjs", "cjs", "py", "rb", "go", "rs", "java", "kt",
-  "swift", "c", "cpp", "h", "hpp", "cs", "php", "html", "htm", "css", "scss",
-  "less", "sass", "sql", "sh", "bash", "zsh", "fish", "ps1", "bat", "vue",
-  "svelte", "astro", "env", "gitignore", "dockerignore", "log", "csv", "tsv",
+  "txt", "md", "mdx", "json", "yaml", "yml", "toml", "cfg", "conf",
+  "ts", "tsx", "mjs", "cjs", "kt",
+  "swift", "c", "cpp", "h", "hpp", "cs",
+  "css", "scss", "less", "sass", "sql",
+  "vue", "svelte", "astro", "gitignore", "dockerignore", "log", "csv", "tsv",
 ]);
 
 const MIME_MAP: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-  webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon",
+  webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon",
   pdf: "application/pdf",
   mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
   mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac",
@@ -78,7 +79,9 @@ export async function GET(
 
     const content = await entry.async("uint8array");
     const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
-    const mime = getMime(ext);
+    const rawMime = getMime(ext);
+    const safeMime = getSafeMimeType(rawMime, entry.name);
+    const forceDownload = shouldForceDownload(entry.name);
 
     try {
       await recordBandwidth(file.userId, content.length);
@@ -90,11 +93,16 @@ export async function GET(
     }
 
     const headers = new Headers();
-    headers.set("Content-Type", mime);
+    headers.set("Content-Type", safeMime);
     headers.set("Content-Length", String(content.length));
     headers.set("Cache-Control", "private, max-age=3600");
     headers.set("X-Content-Type-Options", "nosniff");
-    headers.set("Content-Disposition", `inline; filename="${encodeURIComponent(entry.name)}"`);
+    headers.set(
+      "Content-Disposition",
+      forceDownload
+        ? `attachment; filename="${encodeURIComponent(entry.name)}"`
+        : `inline; filename="${encodeURIComponent(entry.name)}"`
+    );
 
     return new Response(new Uint8Array(content), { status: 200, headers });
   } catch (error) {

@@ -101,7 +101,7 @@ export default function OAuthConsentClient() {
     setGranted(new Set(requestedScopes));
   }
 
-  const appLabel = oauth.client_name?.trim() || "An external MCP client";
+  const appLabel = oauth.client_name?.trim() || "An external application";
   let redirectHost = oauth.redirect_uri;
   try {
     redirectHost = new URL(oauth.redirect_uri).host || oauth.redirect_uri;
@@ -261,7 +261,7 @@ export default function OAuthConsentClient() {
         </div>
         <p className="text-[10px] text-muted-foreground">
           After allowing access, you&apos;ll be redirected back to the connector app. OAuth tokens are
-          used for MCP — your sk_ API keys are never shared with the app.
+          used for API access — your sk_ API keys are never shared with the app.
         </p>
       </Card>
     </div>

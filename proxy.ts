@@ -30,8 +30,8 @@ const PUBLIC_API_PREFIXES = [
   "/.well-known/",
 ];
 
-/** Route handlers perform their own auth (e.g. MCP OAuth WWW-Authenticate) */
-const HANDLER_AUTH_API_PREFIXES = ["/api/mcp"];
+/** Route handlers perform their own auth */
+const HANDLER_AUTH_API_PREFIXES: string[] = [];
 
 /** Obvious automated scrapers — never block browsers or health checks on pages. */
 const BOT_PATTERNS = [

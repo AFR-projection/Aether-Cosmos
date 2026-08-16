@@ -1,5 +1,5 @@
 import { appPublicUrl, isInternalHostname } from "@/lib/env/runtime";
-import { ALL_OAUTH_SCOPES, oauthBaseUrl, mcpResourceUrl } from "@/lib/oauth/constants";
+import { ALL_OAUTH_SCOPES, oauthBaseUrl } from "@/lib/oauth/constants";
 
 export function getOAuthIssuer(fallbackOrigin?: string): string {
   const env = appPublicUrl();
@@ -36,18 +36,7 @@ export function buildAuthorizationServerMetadata(fallbackOrigin?: string) {
   };
 }
 
-export function buildProtectedResourceMetadata(fallbackOrigin?: string) {
-  const base = getOAuthIssuer(fallbackOrigin);
-  return {
-    resource: mcpResourceUrl(base),
-    authorization_servers: [base],
-    scopes_supported: [...ALL_OAUTH_SCOPES],
-    bearer_methods_supported: ["header"],
-  };
-}
-
 export function buildWwwAuthenticateHeader(fallbackOrigin?: string): string {
   const base = getOAuthIssuer(fallbackOrigin);
-  const resourceMeta = `${base}/.well-known/oauth-protected-resource/api/mcp`;
-  return `Bearer realm="Storage ByAFR", resource_metadata="${resourceMeta}"`;
+  return `Bearer realm="Storage ByAFR"`;
 }

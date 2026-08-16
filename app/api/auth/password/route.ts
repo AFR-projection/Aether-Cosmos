@@ -8,7 +8,7 @@ import { requireAuth, destroyAllUserSessions } from "@/lib/auth/session";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { logActivity } from "@/lib/auth/audit";
 import { validatePasswordStrength } from "@/lib/security/password-policy";
-import { validateCsrf } from "@/lib/security";
+import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
 import { notifyUser } from "@/lib/email/notify-user";
 
 const passwordSchema = z.object({
@@ -22,6 +22,15 @@ export async function PUT(request: NextRequest) {
   try {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     const user = await requireAuth();
+
+    // Rate limit: 5 attempts per 15 minutes per user
+    const rateLimitCheck = await checkUserApiRateLimit(user.id, 5, {
+      bucket: "password_change",
+      multiplier: 0.25, // 5 per 15min = 5 * 0.25 = 1.25, rounded to max(1, 1.25) per minute window
+    });
+    if (!rateLimitCheck.allowed) {
+      return apiError("Too many password change attempts. Try again later.", 429);
+    }
 
     const body = await request.json();
     const { currentPassword, newPassword, forceReset } = passwordSchema.parse(body);

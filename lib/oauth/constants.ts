@@ -38,7 +38,7 @@ export const ACCESS_TOKEN_TTL_SEC = 3600;
 export const REFRESH_TOKEN_TTL_SEC = 30 * 24 * 3600;
 export const AUTH_CODE_TTL_SEC = 600;
 
-/** Loopback hosts — allowed over http per RFC 8252 (native/desktop MCP clients). */
+/** Loopback hosts — allowed over http per RFC 8252 (native/desktop clients). */
 export const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]", "::1"];
 
 /**
@@ -52,10 +52,6 @@ export function oauthBaseUrl(fallbackOrigin?: string): string {
   if (fromEnv) return fromEnv.replace(/\/$/, "");
   if (fallbackOrigin) return fallbackOrigin.replace(/\/$/, "");
   return "http://localhost:3000";
-}
-
-export function mcpResourceUrl(baseUrl: string): string {
-  return `${baseUrl.replace(/\/$/, "")}/api/mcp`;
 }
 
 export function hashSecret(value: string): string {
@@ -109,8 +105,8 @@ export function clampScopesToRole(
 }
 
 /**
- * Standard MCP redirect policy — platform-agnostic. Accepts any callback a
- * spec-compliant MCP/OAuth client would use, and rejects known exfiltration vectors.
+ * Standard OAuth redirect policy — platform-agnostic. Accepts any callback a
+ * spec-compliant OAuth client would use, and rejects known exfiltration vectors.
  *
  * Allowed:
  *  - Any HTTPS URL (ChatGPT, Claude, hosted web connectors)
@@ -136,7 +132,7 @@ export function isAllowedRedirectUri(uri: string): boolean {
   // Hosted web callbacks must be HTTPS.
   if (scheme === "https:") return true;
 
-  // Loopback may use http on any port (desktop/native MCP clients).
+  // Loopback may use http on any port (desktop/native clients).
   if (scheme === "http:") {
     return LOOPBACK_HOSTS.includes(url.hostname.toLowerCase());
   }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/storage/r2";
 import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
 import { apiSuccess, apiError } from "@/lib/api/response";
+import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
 
 function parseRangeHeader(
   rangeHeader: string,
@@ -122,12 +123,23 @@ export async function GET(
     const stream = toReadableStream(r2.body);
     const isPartial = parsedRange !== null && r2.statusCode === 206;
 
+    const safeMimeType = getSafeMimeType(
+      file.mimeType || meta.contentType || "application/octet-stream",
+      file.name
+    );
+    const forceDownload = shouldForceDownload(file.name);
+
     const headers = new Headers();
-    headers.set("Content-Type", file.mimeType || meta.contentType || "application/octet-stream");
+    headers.set("Content-Type", safeMimeType);
     headers.set("Cache-Control", "private, max-age=300");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Accept-Ranges", "bytes");
-    headers.set("Content-Disposition", `inline; filename="${encodeURIComponent(file.name)}"`);
+    headers.set(
+      "Content-Disposition",
+      forceDownload
+        ? `attachment; filename="${encodeURIComponent(file.name)}"`
+        : `inline; filename="${encodeURIComponent(file.name)}"`
+    );
 
     if (isPartial && parsedRange) {
       const chunkSize = parsedRange.end - parsedRange.start + 1;

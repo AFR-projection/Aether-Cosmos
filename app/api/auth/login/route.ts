@@ -307,11 +307,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (user.status === "suspended") {
-      const reason = user.suspendReason?.trim();
+      // Don't expose internal admin notes — just show generic message
       return apiError(
-        reason
-          ? `Your account has been suspended. Reason: ${reason}`
-          : "Your account has been suspended. Contact an administrator.",
+        "Your account has been suspended. Contact an administrator for details.",
         403,
         { code: "ACCOUNT_SUSPENDED" }
       );

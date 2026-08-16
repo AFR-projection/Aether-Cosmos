@@ -47,8 +47,6 @@ export async function GET(request: NextRequest) {
         : null,
       baseUrl: appPublicUrl() || request.nextUrl.origin,
       docsUrl: `${appPublicUrl() || request.nextUrl.origin}/api/v1/docs`,
-      connectUrl: `${appPublicUrl() || request.nextUrl.origin}/api/v1/connect`,
-      mcpUrl: `${appPublicUrl() || request.nextUrl.origin}/api/mcp`,
     });
   } catch (error) {
     return handleApiError(error);

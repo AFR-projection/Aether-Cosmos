@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { shares, files } from "@/lib/db/schema";
 import { downloadFromR2Stream } from "@/lib/storage/r2";
 import { apiError, handleApiError } from "@/lib/api/response";
+import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
 
 export async function GET(
   _request: NextRequest,
@@ -56,12 +57,21 @@ export async function GET(
       stream = r2.body as unknown as ReadableStream;
     }
 
+    const safeMimeType = getSafeMimeType(file.mimeType, file.name);
+    const forceDownload = shouldForceDownload(file.name);
+
     const headers = new Headers();
-    headers.set("Content-Type", file.mimeType);
+    headers.set("Content-Type", safeMimeType);
     headers.set("Content-Length", String(r2.contentLength ?? 0));
     headers.set("Cache-Control", "private, max-age=300");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Accept-Ranges", "bytes");
+    headers.set(
+      "Content-Disposition",
+      forceDownload
+        ? `attachment; filename="${encodeURIComponent(file.name)}"`
+        : `inline; filename="${encodeURIComponent(file.name)}"`
+    );
 
     return new Response(stream, { status: 200, headers });
   } catch (error) {

@@ -551,7 +551,7 @@ export async function requireMasterOrApiKey(
     return user;
   }
 
-  // OAuth access tokens (oat_) — master users may reach admin APIs via MCP/OAuth.
+  // OAuth access tokens (oat_) — master users may reach admin APIs via OAuth.
   // Defense in depth: the account role is re-read from the DB inside
   // authenticateOAuthAccessToken, so a token that somehow carries an admin scope
   // is still rejected unless the underlying user is actually a master.

@@ -7,6 +7,7 @@ import { getClientIpFromRequest, parseUserAgent, getIpLocation } from "@/lib/acc
 import { publishToUser } from "@/lib/realtime/events";
 import { tiptapToPlainText } from "@/lib/search/tiptap-text";
 import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
+import { checkRateLimit } from "@/lib/security";
 
 export async function GET(
   request: NextRequest,
@@ -128,6 +129,12 @@ export async function PUT(
 ) {
   try {
     const { token } = await params;
+
+    // Rate limit: 60 edits per minute per share token (prevents spam writes)
+    const rateLimitCheck = await checkRateLimit(`share_edit:${token}`, 60, 60_000);
+    if (!rateLimitCheck.allowed) {
+      return apiError("Too many edit requests. Slow down.", 429);
+    }
 
     const body = (await request.json()) as { content?: unknown };
     if (body.content == null || typeof body.content !== "object") {

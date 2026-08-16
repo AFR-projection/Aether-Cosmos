@@ -92,12 +92,22 @@ export function resetIpRateLimit(ip: string): void {
 }
 
 import type { NextRequest } from "next/server";
+import { timingSafeEqual } from "crypto";
+
+function safeStringEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+  } catch {
+    return false;
+  }
+}
 
 export async function validateCsrf(request: NextRequest): Promise<boolean> {
   // Skip CSRF for programmatic Bearer credentials (sk_/skm_ API keys and oat_
   // OAuth access tokens). These are never sent automatically by a browser, so
   // they carry no CSRF risk — and requiring a CSRF cookie would break every
-  // headless API/MCP client that writes (upload, edit, delete).
+  // headless API client that writes (upload, edit, delete).
   const auth = request.headers.get("authorization");
   if (auth?.startsWith("Bearer ")) {
     const token = auth.slice(7).trim();
@@ -114,7 +124,7 @@ export async function validateCsrf(request: NextRequest): Promise<boolean> {
   const cookieToken = request.cookies.get("csrf_token")?.value;
 
   if (!headerToken || !cookieToken) return false;
-  return headerToken === cookieToken;
+  return safeStringEqual(headerToken, cookieToken);
 }
 
 export function generateCsrfToken(): string {

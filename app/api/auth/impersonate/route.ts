@@ -42,10 +42,18 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
   try {
     const master = await requireMaster();
-    const ip = getClientIp(new Request("http://localhost"));
+    const ip = getClientIp(request);
+
+    await logActivity(master, "impersonate", {
+      resourceType: "user",
+      resourceId: master.id,
+      metadata: { action: "end" },
+      ip,
+    });
+
     await destroySession();
     await createSession(master.id, ip);
     return apiSuccess({ message: "Impersonation ended" });
