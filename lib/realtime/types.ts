@@ -13,7 +13,31 @@ export type RealtimeEvent =
       reason?: string;
       wasCurrent?: boolean;
     }
-  | { type: "heartbeat"; at: number };
+  | { type: "heartbeat"; at: number }
+  | { type: "brain_memory_created"; brainId: string; memoryId: string; title: string }
+  | { type: "brain_memory_updated"; brainId: string; memoryId: string }
+  | { type: "brain_memory_deleted"; brainId: string; memoryId: string }
+  | {
+      type: "brain_memory_linked";
+      brainId: string;
+      memoryId: string;
+      linkId: string;
+      targetType: "memory" | "entity";
+    }
+  | { type: "brain_entity_created"; brainId: string; entityId: string; name: string }
+  | {
+      type: "brain_relationship_created";
+      brainId: string;
+      relationshipId: string;
+      relationshipType: string;
+    }
+  | {
+      type: "brain_conflict_detected";
+      brainId: string;
+      memoryId: string;
+      conflictsWith: string;
+      reason: string;
+    };
 
 export type RealtimeEventHandler = (event: RealtimeEvent) => void;
 

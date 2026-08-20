@@ -36,7 +36,34 @@ export function buildAuthorizationServerMetadata(fallbackOrigin?: string) {
   };
 }
 
-export function buildWwwAuthenticateHeader(fallbackOrigin?: string): string {
+/**
+ * RFC 9728 protected-resource metadata, served from
+ * /.well-known/oauth-protected-resource.
+ *
+ * Restored after the MCP removal in 6973110 dropped it while leaving both
+ * .well-known route handlers importing it — which broke `next build` outright
+ * (tsc misses it because TypeScript's `**` globs skip dot-directories, so
+ * app/.well-known is never type-checked). `resource` now points at this app's own
+ * API root rather than the removed MCP endpoint.
+ */
+export function buildProtectedResourceMetadata(fallbackOrigin?: string) {
   const base = getOAuthIssuer(fallbackOrigin);
+  return {
+    resource: `${base}/api`,
+    authorization_servers: [base],
+    scopes_supported: [...ALL_OAUTH_SCOPES],
+    bearer_methods_supported: ["header"],
+  };
+}
+
+/**
+ * The `WWW-Authenticate` challenge for an unauthenticated API call.
+ *
+ * Takes no origin any more: the MCP removal in 6973110 dropped the
+ * `resource_metadata="…"` parameter that was built from it, leaving the argument
+ * dead. Nothing in the repo calls this today — the Brain MCP handler builds its
+ * own challenge — so it is kept only as the canonical realm string.
+ */
+export function buildWwwAuthenticateHeader(): string {
   return `Bearer realm="Storage ByAFR"`;
 }

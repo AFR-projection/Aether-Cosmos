@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, FileText, FolderOpen, LayoutDashboard, Star, Command, ArrowRight } from "lucide-react";
+import { Search, FileText, FolderOpen, LayoutDashboard, Star, Command, ArrowRight, Brain, Network, Bot } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 
 
@@ -42,6 +42,10 @@ export function CommandPalette() {
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, desc: "Overview & stats" },
     { href: "/files", label: "Files", icon: FolderOpen, desc: "Browse and manage files" },
     { href: "/favorites", label: "Favorites", icon: Star, desc: "Starred items" },
+    { href: "/brain", label: "Second Brain", icon: Brain, desc: "Memories, projects & agents" },
+    { href: "/brain/memories?new=1", label: "New memory", icon: Brain, desc: "Write something worth keeping" },
+    { href: "/brain/graph", label: "Knowledge graph", icon: Network, desc: "Entities and relationships" },
+    { href: "/brain/agents", label: "Brain agents", icon: Bot, desc: "Connect or revoke an MCP agent" },
   ];
 
   return (

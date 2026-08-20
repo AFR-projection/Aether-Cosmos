@@ -1,0 +1,39 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerBrainMcpTools } from "./tools";
+import type { McpPrincipal } from "./principal";
+
+export const BRAIN_MCP_SERVER_NAME = "storage-byafr-brain";
+export const BRAIN_MCP_SERVER_VERSION = "1.0.0";
+
+/**
+ * A server instance scoped to ONE authenticated principal.
+ *
+ * The principal is captured in the tool closures rather than read per call, so a
+ * tool physically cannot be invoked without an authorization context. Combined
+ * with the stateless transport (a fresh server per HTTP request) this removes the
+ * shared-session state that the previous MCP implementation kept in a module-level
+ * Map — which could not survive more than one Node process.
+ */
+export function createBrainMcpServer(principal: McpPrincipal): McpServer {
+  const server = new McpServer(
+    { name: BRAIN_MCP_SERVER_NAME, version: BRAIN_MCP_SERVER_VERSION },
+    {
+      instructions: [
+        "This is the user's Second Brain: their permanent, portable long-term memory.",
+        "",
+        "Protocol:",
+        "1. Call brain_recall once at the start of a task to load standing instructions and relevant context.",
+        "2. Use brain_search / brain_read while working to look things up.",
+        "3. Call brain_remember only for knowledge worth keeping permanently — facts, decisions,",
+        "   preferences, procedures, project context. Not transient conversation.",
+        "4. Use brain_update to correct an existing memory instead of writing a contradicting one.",
+        "5. Use brain_link to record relationships between things the brain knows about.",
+        "",
+        "You are a guest here. The brain outlives you: keep it valuable, not exhaustive.",
+      ].join("\n"),
+    }
+  );
+
+  registerBrainMcpTools(server, principal);
+  return server;
+}

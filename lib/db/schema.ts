@@ -11,6 +11,9 @@ import {
   uniqueIndex,
   pgEnum,
   customType,
+  real,
+  primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { relations, sql, type SQL } from "drizzle-orm";
 
@@ -858,3 +861,419 @@ export type ActivityLog = typeof activityLogs.$inferSelect;
 export type MailSender = typeof mailSenders.$inferSelect;
 export type NewMailSender = typeof mailSenders.$inferInsert;
 export type OtpToken = typeof otpTokens.$inferSelect;
+
+// ── Second Brain ────────────────────────────────────────────────────────────
+
+export const brainStatusEnum = pgEnum("brain_status", ["active", "archived"]);
+export const brainAgentStatusEnum = pgEnum("brain_agent_status", ["active", "revoked"]);
+export const brainPrincipalTypeEnum = pgEnum("brain_principal_type", ["user", "agent"]);
+export const brainAccessRoleEnum = pgEnum("brain_access_role", ["owner", "editor", "viewer", "agent"]);
+export const memoryTypeEnum = pgEnum("memory_type", [
+  "fact", "preference", "decision", "instruction", "project",
+  "person", "concept", "experience", "procedure", "event",
+  "observation", "conversation", "knowledge",
+]);
+export const memorySourceTypeEnum = pgEnum("memory_source_type", [
+  "user", "agent", "conversation", "imported_document", "manual_note", "api", "system",
+]);
+export const brainEntityTypeEnum = pgEnum("brain_entity_type", [
+  "person", "project", "organization", "technology", "location",
+  "concept", "product", "agent", "document", "other",
+]);
+
+export const brains = pgTable(
+  "brains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isDefault: boolean("is_default").notNull().default(false),
+    status: brainStatusEnum("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brains_owner_idx").on(table.ownerUserId),
+    // Partial unique index: at most ONE default brain per user. Without it two
+    // concurrent getOrCreateDefaultBrain() calls both see "none" and insert.
+    uniqueIndex("brains_owner_default_unique")
+      .on(table.ownerUserId)
+      .where(sql`is_default`),
+  ]
+);
+
+export const brainAgents = pgTable(
+  "brain_agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    type: text("type").notNull().default("agent"),
+    status: brainAgentStatusEnum("status").notNull().default("active"),
+    apiKeyId: uuid("api_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brain_agents_owner_idx").on(table.ownerUserId),
+    index("brain_agents_status_idx").on(table.ownerUserId, table.status),
+  ]
+);
+
+export const brainAccess = pgTable(
+  "brain_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    principalType: brainPrincipalTypeEnum("principal_type").notNull(),
+    principalId: uuid("principal_id").notNull(),
+    role: brainAccessRoleEnum("role").notNull().default("viewer"),
+    scopes: jsonb("scopes").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("brain_access_unique").on(table.brainId, table.principalType, table.principalId),
+    index("brain_access_principal_idx").on(table.principalType, table.principalId),
+    index("brain_access_brain_idx").on(table.brainId),
+  ]
+);
+
+export const memories = pgTable(
+  "memories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    type: memoryTypeEnum("type").notNull().default("fact"),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    summary: text("summary"),
+    importance: real("importance").notNull().default(0.5),
+    confidence: real("confidence").notNull().default(0.9),
+    sourceType: memorySourceTypeEnum("source_type").notNull().default("user"),
+    sourceId: text("source_id"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdByAgent: uuid("created_by_agent").references(() => brainAgents.id, { onDelete: "set null" }),
+    // Deleting a project must not delete the knowledge gathered under it.
+    projectId: uuid("project_id").references(() => brainProjects.id, { onDelete: "set null" }),
+    metadata: jsonb("metadata"),
+    version: integer("version").notNull().default(1),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    searchVector: tsvector("search_vector").generatedAlwaysAs(
+      (): SQL =>
+        sql`setweight(to_tsvector('simple', coalesce(${memories.title}, '')), 'A') || setweight(to_tsvector('simple', coalesce(${memories.content}, '')), 'B')`
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("memories_brain_idx").on(table.brainId),
+    index("memories_brain_type_idx").on(table.brainId, table.type),
+    index("memories_brain_created_idx").on(table.brainId, table.createdAt),
+    index("memories_brain_importance_idx").on(table.brainId, table.importance),
+    index("memories_brain_deleted_idx").on(table.brainId, table.deletedAt),
+    // Matches the (created_at, id) keyset order used by listMemories().
+    index("memories_brain_keyset_idx").on(table.brainId, table.createdAt, table.id),
+    index("memories_project_idx").on(table.projectId),
+    index("memories_search_vector_idx").using("gin", table.searchVector),
+  ]
+);
+
+export const memoryVersions = pgTable(
+  "memory_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memoryId: uuid("memory_id").notNull().references(() => memories.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    summary: text("summary"),
+    changedBy: uuid("changed_by").references(() => users.id, { onDelete: "set null" }),
+    changedByAgent: uuid("changed_by_agent").references(() => brainAgents.id, { onDelete: "set null" }),
+    changeReason: text("change_reason"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("memory_versions_unique").on(table.memoryId, table.versionNumber),
+    index("memory_versions_memory_idx").on(table.memoryId),
+  ]
+);
+
+export const memoryTags = pgTable(
+  "memory_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("memory_tags_brain_name_unique").on(table.brainId, table.name),
+    index("memory_tags_brain_idx").on(table.brainId),
+  ]
+);
+
+export const memoryTagMap = pgTable(
+  "memory_tag_map",
+  {
+    memoryId: uuid("memory_id").notNull().references(() => memories.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id").notNull().references(() => memoryTags.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.memoryId, table.tagId] }),
+  ]
+);
+
+export const brainProjectStatusEnum = pgEnum("brain_project_status", [
+  "active",
+  "paused",
+  "done",
+  "archived",
+]);
+
+export const brainProjects = pgTable(
+  "brain_projects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    status: brainProjectStatusEnum("status").notNull().default("active"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brain_projects_brain_idx").on(table.brainId),
+    index("brain_projects_brain_status_idx").on(table.brainId, table.status),
+    uniqueIndex("brain_projects_brain_name_unique").on(table.brainId, table.name),
+  ]
+);
+
+export const brainEntities = pgTable(
+  "brain_entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    type: brainEntityTypeEnum("type").notNull().default("other"),
+    description: text("description"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brain_entities_brain_idx").on(table.brainId),
+    index("brain_entities_brain_type_idx").on(table.brainId, table.type),
+    // One node per (name, type) inside a brain so repeated extraction upserts
+    // instead of piling up near-duplicate nodes.
+    uniqueIndex("brain_entities_brain_name_type_unique").on(
+      table.brainId,
+      table.name,
+      table.type
+    ),
+  ]
+);
+
+export const brainRelationships = pgTable(
+  "brain_relationships",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    sourceEntityId: uuid("source_entity_id").notNull().references(() => brainEntities.id, { onDelete: "cascade" }),
+    targetEntityId: uuid("target_entity_id").notNull().references(() => brainEntities.id, { onDelete: "cascade" }),
+    relationshipType: text("relationship_type").notNull(),
+    confidence: real("confidence").notNull().default(0.9),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brain_relationships_brain_idx").on(table.brainId),
+    index("brain_relationships_source_idx").on(table.sourceEntityId),
+    index("brain_relationships_target_idx").on(table.targetEntityId),
+    uniqueIndex("brain_relationships_unique").on(
+      table.sourceEntityId,
+      table.targetEntityId,
+      table.relationshipType
+    ),
+  ]
+);
+
+/**
+ * A link that starts at a memory. Two shapes in one table:
+ *  - memory -> memory  ("this decision supersedes that one")
+ *  - memory -> entity  ("this memory mentions Cloudflare R2")
+ *
+ * brain_relationships stays entity->entity; backlinks for a memory need the other
+ * two directions, and keeping them here means "referenced by" is one indexed
+ * lookup instead of a client-side scan of every memory body (§41).
+ */
+export const memoryLinkTargetEnum = pgEnum("memory_link_target", ["memory", "entity"]);
+
+export const memoryLinks = pgTable(
+  "memory_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    sourceMemoryId: uuid("source_memory_id").notNull().references(() => memories.id, { onDelete: "cascade" }),
+    targetType: memoryLinkTargetEnum("target_type").notNull(),
+    targetMemoryId: uuid("target_memory_id").references(() => memories.id, { onDelete: "cascade" }),
+    targetEntityId: uuid("target_entity_id").references(() => brainEntities.id, { onDelete: "cascade" }),
+    linkType: text("link_type").notNull().default("relates_to"),
+    metadata: jsonb("metadata"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdByAgent: uuid("created_by_agent").references(() => brainAgents.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("memory_links_brain_idx").on(table.brainId),
+    index("memory_links_source_idx").on(table.sourceMemoryId),
+    index("memory_links_target_memory_idx").on(table.targetMemoryId),
+    index("memory_links_target_entity_idx").on(table.targetEntityId),
+    // Partial uniques: re-linking the same pair with the same verb updates rather
+    // than piling up duplicates. Two indexes because only one target is ever set.
+    uniqueIndex("memory_links_memory_unique")
+      .on(table.sourceMemoryId, table.targetMemoryId, table.linkType)
+      .where(sql`target_memory_id is not null`),
+    uniqueIndex("memory_links_entity_unique")
+      .on(table.sourceMemoryId, table.targetEntityId, table.linkType)
+      .where(sql`target_entity_id is not null`),
+    // Integrity in the database, not just in the service (§48): exactly one target,
+    // matching target_type, and never a memory linked to itself.
+    check(
+      "memory_links_one_target",
+      sql`(("target_memory_id" IS NOT NULL)::int + ("target_entity_id" IS NOT NULL)::int) = 1`
+    ),
+    check(
+      "memory_links_target_type_matches",
+      sql`("target_type" = 'memory' AND "target_memory_id" IS NOT NULL) OR ("target_type" = 'entity' AND "target_entity_id" IS NOT NULL)`
+    ),
+    check(
+      "memory_links_no_self_link",
+      sql`"target_memory_id" IS NULL OR "target_memory_id" <> "source_memory_id"`
+    ),
+  ]
+);
+
+export const brainAuditLogs = pgTable(
+  "brain_audit_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    principalType: brainPrincipalTypeEnum("principal_type").notNull(),
+    principalId: uuid("principal_id").notNull(),
+    operation: text("operation").notNull(),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brain_audit_logs_brain_time_idx").on(table.brainId, table.createdAt),
+    index("brain_audit_logs_principal_idx").on(table.principalType, table.principalId),
+  ]
+);
+
+// Relations
+export const brainsRelations = relations(brains, ({ one, many }) => ({
+  owner: one(users, { fields: [brains.ownerUserId], references: [users.id] }),
+  memories: many(memories),
+  access: many(brainAccess),
+  projects: many(brainProjects),
+  entities: many(brainEntities),
+  relationships: many(brainRelationships),
+  auditLogs: many(brainAuditLogs),
+}));
+
+export const brainAgentsRelations = relations(brainAgents, ({ one }) => ({
+  owner: one(users, { fields: [brainAgents.ownerUserId], references: [users.id] }),
+  apiKey: one(apiKeys, { fields: [brainAgents.apiKeyId], references: [apiKeys.id] }),
+}));
+
+export const brainProjectsRelations = relations(brainProjects, ({ one, many }) => ({
+  brain: one(brains, { fields: [brainProjects.brainId], references: [brains.id] }),
+  memories: many(memories),
+}));
+
+export const memoriesRelations = relations(memories, ({ one, many }) => ({
+  brain: one(brains, { fields: [memories.brainId], references: [brains.id] }),
+  project: one(brainProjects, { fields: [memories.projectId], references: [brainProjects.id] }),
+  createdByUser: one(users, { fields: [memories.createdBy], references: [users.id] }),
+  createdByAgentRel: one(brainAgents, { fields: [memories.createdByAgent], references: [brainAgents.id] }),
+  versions: many(memoryVersions),
+  tags: many(memoryTagMap),
+}));
+
+export const memoryVersionsRelations = relations(memoryVersions, ({ one }) => ({
+  memory: one(memories, { fields: [memoryVersions.memoryId], references: [memories.id] }),
+}));
+
+export const memoryTagsRelations = relations(memoryTags, ({ one, many }) => ({
+  brain: one(brains, { fields: [memoryTags.brainId], references: [brains.id] }),
+  memories: many(memoryTagMap),
+}));
+
+export const memoryTagMapRelations = relations(memoryTagMap, ({ one }) => ({
+  memory: one(memories, { fields: [memoryTagMap.memoryId], references: [memories.id] }),
+  tag: one(memoryTags, { fields: [memoryTagMap.tagId], references: [memoryTags.id] }),
+}));
+
+export const brainEntitiesRelations = relations(brainEntities, ({ one, many }) => ({
+  brain: one(brains, { fields: [brainEntities.brainId], references: [brains.id] }),
+  outgoing: many(brainRelationships, { relationName: "source" }),
+  incoming: many(brainRelationships, { relationName: "target" }),
+}));
+
+export const brainRelationshipsRelations = relations(brainRelationships, ({ one }) => ({
+  brain: one(brains, { fields: [brainRelationships.brainId], references: [brains.id] }),
+  source: one(brainEntities, { fields: [brainRelationships.sourceEntityId], references: [brainEntities.id], relationName: "source" }),
+  target: one(brainEntities, { fields: [brainRelationships.targetEntityId], references: [brainEntities.id], relationName: "target" }),
+}));
+
+export const brainAuditLogsRelations = relations(brainAuditLogs, ({ one }) => ({
+  brain: one(brains, { fields: [brainAuditLogs.brainId], references: [brains.id] }),
+}));
+
+export type Brain = typeof brains.$inferSelect;
+export type NewBrain = typeof brains.$inferInsert;
+export type BrainAgent = typeof brainAgents.$inferSelect;
+export type NewBrainAgent = typeof brainAgents.$inferInsert;
+export type Memory = typeof memories.$inferSelect;
+export type NewMemory = typeof memories.$inferInsert;
+export type MemoryVersion = typeof memoryVersions.$inferSelect;
+export type MemoryTag = typeof memoryTags.$inferSelect;
+export type BrainProject = typeof brainProjects.$inferSelect;
+export type NewBrainProject = typeof brainProjects.$inferInsert;
+export type BrainEntity = typeof brainEntities.$inferSelect;
+export type NewBrainEntity = typeof brainEntities.$inferInsert;
+export type BrainRelationship = typeof brainRelationships.$inferSelect;
+export type NewBrainRelationship = typeof brainRelationships.$inferInsert;
+export type BrainAuditLog = typeof brainAuditLogs.$inferSelect;
+export type MemoryTagMap = typeof memoryTagMap.$inferSelect;
+
+export const memoryLinksRelations = relations(memoryLinks, ({ one }) => ({
+  brain: one(brains, { fields: [memoryLinks.brainId], references: [brains.id] }),
+  sourceMemory: one(memories, {
+    fields: [memoryLinks.sourceMemoryId],
+    references: [memories.id],
+    relationName: "linkSource",
+  }),
+  targetMemory: one(memories, {
+    fields: [memoryLinks.targetMemoryId],
+    references: [memories.id],
+    relationName: "linkTarget",
+  }),
+  targetEntity: one(brainEntities, {
+    fields: [memoryLinks.targetEntityId],
+    references: [brainEntities.id],
+  }),
+}));
+
+export type MemoryLink = typeof memoryLinks.$inferSelect;
+export type NewMemoryLink = typeof memoryLinks.$inferInsert;

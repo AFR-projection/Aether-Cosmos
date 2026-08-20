@@ -1,0 +1,836 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { logBrainAudit } from "@/lib/brain/audit";
+import { publishToUser } from "@/lib/realtime/events";
+import { BRAIN_ENTITY_TYPES, MEMORY_SOURCE_TYPES, MEMORY_TYPES } from "@/lib/brain/constants";
+import { BrainError } from "@/lib/brain/errors";
+import {
+  deleteMemory,
+  getMemory,
+  getMemoryVersions,
+  listBrainTags,
+  listMemories,
+  searchMemories,
+  updateMemory,
+} from "@/lib/brain/memory-service";
+import { listEntities, listRelationships, upsertEntity, upsertRelationship } from "@/lib/brain/graph-service";
+import {
+  getMemoryLinks,
+  linkMemory,
+  type LinkTarget,
+  type ResolvedLink,
+} from "@/lib/brain/link-service";
+import { consolidateBrain } from "@/lib/brain/consolidation-service";
+import { listProjects } from "@/lib/brain/project-service";
+import { recallBrainContext } from "@/lib/brain/recall";
+import { rememberMemory } from "@/lib/brain/remember";
+import { requireGrant, type McpPrincipal } from "./principal";
+
+/**
+ * The Brain MCP tool surface.
+ *
+ * Every tool goes through requireGrant() and then the Brain service layer — never
+ * SQL, never the REST API over HTTP, never a shortcut around authorization
+ * (§23, §89). Results are compact: MCP output lands directly in an agent's
+ * context window, so lists return summaries and ids to follow up with, not
+ * whole documents (§25, §68).
+ */
+
+type ToolResult = {
+  content: { type: "text"; text: string }[];
+  isError?: boolean;
+};
+
+function ok(data: unknown): ToolResult {
+  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+}
+
+function fail(error: unknown): ToolResult {
+  // Never leak SQL or stack traces to an agent (§69). Typed BrainErrors carry a
+  // message meant for callers; anything else is reported generically and logged.
+  if (error instanceof BrainError) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({ error: error.message, code: error.code }) }],
+      isError: true,
+    };
+  }
+  console.error("brain mcp tool failed", error);
+  return {
+    content: [{ type: "text", text: JSON.stringify({ error: "Internal error", code: "INTERNAL" }) }],
+    isError: true,
+  };
+}
+
+const brainIdArg = {
+  brainId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Target brain. Omit to use the default brain this credential can access."),
+};
+
+/** Trim a memory down to what an agent needs to decide whether to read it fully. */
+function summarize(memory: {
+  id: string;
+  type: string;
+  title: string;
+  summary: string | null;
+  content: string;
+  importance: number;
+  confidence: number;
+  tags: string[];
+  updatedAt: Date;
+}) {
+  const text = (memory.summary?.trim() || memory.content).replace(/\s+/g, " ").trim();
+  return {
+    id: memory.id,
+    type: memory.type,
+    title: memory.title,
+    snippet: text.length > 300 ? `${text.slice(0, 299)}…` : text,
+    importance: memory.importance,
+    confidence: memory.confidence,
+    tags: memory.tags,
+    updatedAt: memory.updatedAt.toISOString(),
+  };
+}
+
+export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal): void {
+  // ── discovery ─────────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "brain_list_brains",
+    {
+      description:
+        "List the brains this credential may access, with the scopes granted on each. Call this first when you do not know which brain to use.",
+      inputSchema: z.object({}),
+    },
+    async () =>
+      ok({
+        principal: {
+          type: principal.type,
+          agentName: principal.agentName,
+        },
+        brains: principal.grants.map((grant) => ({
+          brainId: grant.brainId,
+          name: grant.brainName,
+          isDefault: grant.isDefault,
+          scopes: grant.scopes,
+        })),
+      })
+  );
+
+  // ── recall / remember: the high-level protocol ─────────────────────────────
+
+  server.registerTool(
+    "brain_recall",
+    {
+      description:
+        "Retrieve the long-term context you should know before starting a task: standing instructions, memories relevant to the task, important memories, recent changes, and related knowledge-graph nodes. Bounded in size — call this at the START of a session, then use brain_search for follow-ups.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        task: z
+          .string()
+          .max(500)
+          .optional()
+          .describe("What you are about to do, in a sentence. Drives relevance ranking."),
+        projectId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe(
+            "Narrow recall to one project. Standing instructions stay included either way."
+          ),
+        charBudget: z.number().int().min(500).max(20000).optional(),
+      }),
+    },
+    async ({ brainId, task, projectId, charBudget }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const context = await recallBrainContext({
+          brainId: grant.brainId,
+          query: task,
+          projectId,
+          charBudget,
+        });
+        await audit(grant.brainId, "memory.recall", { task: task ?? null, projectId: projectId ?? null });
+        return ok(context);
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_remember",
+    {
+      description:
+        "Persist something worth keeping long-term. Checks for an existing memory with the same title and type and updates it instead of creating a duplicate; near-duplicates are reported back for you to judge. Only store durable knowledge — facts, decisions, preferences, procedures — not transient conversation.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        title: z.string().trim().min(1).max(300),
+        content: z.string().min(1).max(200_000),
+        type: z.enum(MEMORY_TYPES).optional().describe("Defaults to 'fact'."),
+        summary: z.string().trim().max(1000).optional(),
+        importance: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("0-1. Use >=0.7 only for durable identity/project-level knowledge."),
+        confidence: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("0-1. Lower it for inferences and observations rather than confirmed facts."),
+        sourceType: z.enum(MEMORY_SOURCE_TYPES).optional(),
+        sourceId: z.string().max(200).optional(),
+        projectId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe("Attach the memory to a project (see brain_list_projects)."),
+        tags: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+      }),
+    },
+    async ({ brainId, ...data }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.write");
+        const outcome = await rememberMemory({
+          brainId: grant.brainId,
+          principal: { userId: principal.userId, agentId: principal.agentId },
+          data,
+        });
+
+        await audit(
+          grant.brainId,
+          outcome.mode === "created" ? "memory.create" : "memory.update",
+          { via: "brain_remember", title: outcome.memory.title, type: outcome.memory.type }
+        );
+        await publishToUser(
+          principal.userId,
+          outcome.mode === "created"
+            ? {
+                type: "brain_memory_created",
+                brainId: grant.brainId,
+                memoryId: outcome.memory.id,
+                title: outcome.memory.title,
+              }
+            : {
+                type: "brain_memory_updated",
+                brainId: grant.brainId,
+                memoryId: outcome.memory.id,
+              }
+        );
+
+        return ok({
+          mode: outcome.mode,
+          memory: summarize(outcome.memory),
+          possibleDuplicates: outcome.possibleDuplicates,
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  // ── search / read ─────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "brain_search",
+    {
+      description:
+        "Full-text search the brain's memories, ranked by relevance. Returns compact summaries — follow up with brain_read for the full content of a specific memory.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        query: z.string().trim().min(1).max(300),
+        type: z.enum(MEMORY_TYPES).optional(),
+        projectId: z.string().uuid().optional(),
+        limit: z.number().int().min(1).max(50).optional(),
+        includeArchived: z.boolean().optional(),
+      }),
+    },
+    async ({ brainId, query, type, projectId, limit, includeArchived }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.search");
+        const results = await searchMemories({
+          brainId: grant.brainId,
+          query,
+          type,
+          projectId,
+          limit: limit ?? 10,
+          includeArchived,
+        });
+        await audit(grant.brainId, "memory.search", { query, hits: results.length });
+        return ok({ query, count: results.length, results: results.map(summarize) });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_read",
+    {
+      description: "Read one memory in full, including its tags and provenance.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid(),
+      }),
+    },
+    async ({ brainId, memoryId }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const memory = await getMemory({ brainId: grant.brainId, memoryId });
+        if (!memory) return fail(new BrainError("Memory not found", 404, "MEMORY_NOT_FOUND"));
+        return ok({
+          id: memory.id,
+          type: memory.type,
+          title: memory.title,
+          content: memory.content,
+          summary: memory.summary,
+          importance: memory.importance,
+          confidence: memory.confidence,
+          tags: memory.tags,
+          provenance: {
+            sourceType: memory.sourceType,
+            sourceId: memory.sourceId,
+            createdByUser: memory.createdBy,
+            createdByAgent: memory.createdByAgent,
+          },
+          version: memory.version,
+          createdAt: memory.createdAt.toISOString(),
+          updatedAt: memory.updatedAt.toISOString(),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_get_recent",
+    {
+      description: "The most recently updated memories, newest first. Use to catch up on what changed.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        type: z.enum(MEMORY_TYPES).optional(),
+        tag: z.string().trim().max(50).optional(),
+        projectId: z.string().uuid().optional(),
+        limit: z.number().int().min(1).max(50).optional(),
+        cursor: z.string().max(200).optional(),
+      }),
+    },
+    async ({ brainId, type, tag, projectId, limit, cursor }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const page = await listMemories({
+          brainId: grant.brainId,
+          type,
+          tag,
+          projectId,
+          limit: limit ?? 10,
+          cursor,
+        });
+        return ok({
+          memories: page.memories.map(summarize),
+          nextCursor: page.nextCursor,
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_get_memory_history",
+    {
+      description:
+        "Version history of one memory, newest version first. Nothing is ever overwritten, so this is the full audit trail of how a memory changed.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid(),
+        limit: z.number().int().min(1).max(50).optional(),
+      }),
+    },
+    async ({ brainId, memoryId, limit }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const versions = await getMemoryVersions({
+          brainId: grant.brainId,
+          memoryId,
+          limit: limit ?? 20,
+        });
+        return ok({
+          memoryId,
+          versions: versions.map((version) => ({
+            id: version.id,
+            versionNumber: version.versionNumber,
+            title: version.title,
+            changeReason: version.changeReason,
+            changedByUser: version.changedBy,
+            changedByAgent: version.changedByAgent,
+            createdAt: version.createdAt.toISOString(),
+          })),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_list_projects",
+    {
+      description:
+        "Projects in this brain, with how many memories each holds. Agents usually work on a project — pass its id to brain_recall or brain_remember to keep context focused.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        status: z.enum(["active", "paused", "done", "archived"]).optional(),
+      }),
+    },
+    async ({ brainId, status }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const projects = await listProjects({ brainId: grant.brainId, status });
+        return ok({
+          projects: projects.map((project) => ({
+            id: project.id,
+            name: project.name,
+            status: project.status,
+            description: project.description,
+            memoryCount: project.memoryCount,
+          })),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_list_tags",
+    {
+      description: "Every tag defined in the brain. Use to discover how this brain is organized.",
+      inputSchema: z.object({ ...brainIdArg }),
+    },
+    async ({ brainId }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const tags = await listBrainTags(grant.brainId);
+        return ok({ tags: tags.map((tag) => tag.name) });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  // ── update / delete ───────────────────────────────────────────────────────
+
+  server.registerTool(
+    "brain_update",
+    {
+      description:
+        "Amend an existing memory. The previous state is snapshotted as a version first, so corrections never destroy history. Prefer this over writing a second memory that contradicts the first.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid(),
+        title: z.string().trim().min(1).max(300).optional(),
+        content: z.string().min(1).max(200_000).optional(),
+        summary: z.string().trim().max(1000).optional(),
+        type: z.enum(MEMORY_TYPES).optional(),
+        importance: z.number().min(0).max(1).optional(),
+        confidence: z.number().min(0).max(1).optional(),
+        tags: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+        archived: z.boolean().optional().describe("Archive instead of deleting when a memory is no longer current."),
+        changeReason: z.string().trim().max(300).optional().describe("Why you are changing it."),
+      }),
+    },
+    async ({ brainId, memoryId, changeReason, ...data }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.write");
+        const memory = await updateMemory({
+          brainId: grant.brainId,
+          memoryId,
+          principal: { userId: principal.userId, agentId: principal.agentId },
+          data,
+          changeReason,
+        });
+        await audit(grant.brainId, "memory.update", {
+          via: "brain_update",
+          fields: Object.keys(data),
+          changeReason: changeReason ?? null,
+        });
+        await publishToUser(principal.userId, {
+          type: "brain_memory_updated",
+          brainId: grant.brainId,
+          memoryId,
+        });
+        return ok({ memory: summarize(memory), version: memory.version });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_delete",
+    {
+      description:
+        "Soft-delete a memory. Requires the brain.delete scope, which agents do not get by default. Consider brain_update with archived:true instead — archiving keeps the memory recoverable and searchable.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid(),
+      }),
+    },
+    async ({ brainId, memoryId }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.delete");
+        const deleted = await deleteMemory({ brainId: grant.brainId, memoryId });
+        if (!deleted) return fail(new BrainError("Memory not found", 404, "MEMORY_NOT_FOUND"));
+        await audit(grant.brainId, "memory.delete", { via: "brain_delete" });
+        await publishToUser(principal.userId, {
+          type: "brain_memory_deleted",
+          brainId: grant.brainId,
+          memoryId,
+        });
+        return ok({ deleted: true, memoryId });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  // ── knowledge graph ───────────────────────────────────────────────────────
+
+  server.registerTool(
+    "brain_get_entity",
+    {
+      description:
+        "Find knowledge-graph nodes by name or type, or list them. Nodes are things the brain knows about: people, projects, technologies, organizations.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        search: z.string().trim().max(200).optional(),
+        type: z.enum(BRAIN_ENTITY_TYPES).optional(),
+        limit: z.number().int().min(1).max(50).optional(),
+      }),
+    },
+    async ({ brainId, search, type, limit }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const entities = await listEntities({
+          brainId: grant.brainId,
+          search,
+          type,
+          limit: limit ?? 20,
+        });
+        return ok({
+          entities: entities.map((entity) => ({
+            id: entity.id,
+            name: entity.name,
+            type: entity.type,
+            description: entity.description,
+          })),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_get_related",
+    {
+      description:
+        "The edges of the knowledge graph, optionally only those touching one node. Use to follow relationships outward from something you already found.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        entityId: z.string().uuid().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+    },
+    async ({ brainId, entityId, limit }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const relationships = await listRelationships({
+          brainId: grant.brainId,
+          entityId,
+          limit: limit ?? 50,
+        });
+        return ok({
+          relationships: relationships.map((relationship) => ({
+            id: relationship.id,
+            source: relationship.sourceName,
+            type: relationship.relationshipType,
+            target: relationship.targetName,
+            confidence: relationship.confidence,
+          })),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_link",
+    {
+      description:
+        "Record that two things are related, creating the nodes by name if they do not exist yet. Example: 'Storage ByAFR' --uses--> 'Cloudflare R2'. Re-linking the same pair and type updates it rather than duplicating.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        source: z.string().trim().min(1).max(200).describe("Name of the source entity."),
+        sourceType: z.enum(BRAIN_ENTITY_TYPES).optional(),
+        target: z.string().trim().min(1).max(200).describe("Name of the target entity."),
+        targetType: z.enum(BRAIN_ENTITY_TYPES).optional(),
+        relationshipType: z
+          .string()
+          .trim()
+          .min(1)
+          .max(100)
+          .describe("A verb phrase: uses, requires, works_on, related_to, depends_on."),
+        confidence: z.number().min(0).max(1).optional(),
+      }),
+    },
+    async ({ brainId, source, sourceType, target, targetType, relationshipType, confidence }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.link");
+        const [sourceEntity, targetEntity] = await Promise.all([
+          upsertEntity({ brainId: grant.brainId, name: source, type: sourceType }),
+          upsertEntity({ brainId: grant.brainId, name: target, type: targetType }),
+        ]);
+        const relationship = await upsertRelationship({
+          brainId: grant.brainId,
+          sourceEntityId: sourceEntity.id,
+          targetEntityId: targetEntity.id,
+          relationshipType,
+          confidence,
+        });
+        await audit(grant.brainId, "relationship.upsert", {
+          via: "brain_link",
+          source: sourceEntity.name,
+          target: targetEntity.name,
+          relationshipType,
+        });
+        return ok({
+          relationship: {
+            id: relationship.id,
+            source: sourceEntity.name,
+            type: relationship.relationshipType,
+            target: targetEntity.name,
+          },
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_link_memory",
+    {
+      description:
+        "Anchor a link on a memory: either to another memory (supersedes, contradicts, relates_to) or to a named entity the memory is about. Creates the entity by name if needed. Re-linking the same pair and verb updates it rather than duplicating.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid().describe("The memory the link starts from."),
+        targetMemoryId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe("Link to another memory. Provide this OR entity, not both."),
+        entity: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Link to an entity by name; it is created if it does not exist."),
+        entityType: z.enum(BRAIN_ENTITY_TYPES).optional(),
+        linkType: z
+          .string()
+          .trim()
+          .min(1)
+          .max(64)
+          .optional()
+          .describe("Verb for the edge: relates_to (default), supersedes, contradicts, mentions."),
+      }),
+    },
+    async ({ brainId, memoryId, targetMemoryId, entity, entityType, linkType }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.link");
+
+        if (Boolean(targetMemoryId) === Boolean(entity)) {
+          return fail(
+            new BrainError(
+              "Provide exactly one of targetMemoryId or entity",
+              400,
+              "BRAIN_VALIDATION"
+            )
+          );
+        }
+
+        let target: LinkTarget;
+        if (targetMemoryId) {
+          target = { targetType: "memory", targetMemoryId };
+        } else {
+          const node = await upsertEntity({
+            brainId: grant.brainId,
+            name: entity!,
+            type: entityType,
+          });
+          target = { targetType: "entity", targetEntityId: node.id };
+        }
+
+        const link = await linkMemory({
+          brainId: grant.brainId,
+          sourceMemoryId: memoryId,
+          target,
+          linkType,
+          principal: { userId: principal.userId, agentId: principal.agentId },
+        });
+
+        await audit(grant.brainId, "memory.linked", {
+          via: "brain_link_memory",
+          sourceMemoryId: memoryId,
+          targetType: link.targetType,
+          linkType: link.linkType,
+        });
+        await publishToUser(principal.userId, {
+          type: "brain_memory_linked",
+          brainId: grant.brainId,
+          memoryId,
+          linkId: link.id,
+          targetType: link.targetType,
+        });
+
+        return ok({
+          link: {
+            id: link.id,
+            memoryId,
+            linkType: link.linkType,
+            targetType: link.targetType,
+            target: targetMemoryId ?? entity,
+          },
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_get_backlinks",
+    {
+      description:
+        "What else in the brain points at this memory, and what it points at. Use before superseding or contradicting a memory so the surrounding context is not lost.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid(),
+      }),
+    },
+    async ({ brainId, memoryId }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const links = await getMemoryLinks({ brainId: grant.brainId, memoryId });
+        const shape = (link: ResolvedLink) => ({
+          id: link.id,
+          linkType: link.linkType,
+          targetType: link.targetType,
+          nodeId: link.nodeId,
+          label: link.label,
+          nodeType: link.nodeType,
+        });
+        return ok({
+          relatedTo: links.relatedTo.map(shape),
+          referencedBy: links.referencedBy.map(shape),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_consolidate",
+    {
+      description:
+        "Find duplicate memories and contradictions in the brain. Read-only unless apply is true, in which case duplicates are archived behind a surviving memory and contradictions are recorded as links. Nothing is ever deleted.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        apply: z
+          .boolean()
+          .optional()
+          .describe("Default false. When true, requires the brain.consolidate scope."),
+        limit: z.number().int().min(1).max(200).optional(),
+      }),
+    },
+    async ({ brainId, apply, limit }) => {
+      try {
+        const shouldApply = apply === true;
+        // A preview is a read; changing the brain in bulk needs its own scope (§8).
+        const grant = requireGrant(
+          principal,
+          brainId,
+          shouldApply ? "brain.consolidate" : "brain.read"
+        );
+
+        const report = await consolidateBrain({
+          brainId: grant.brainId,
+          principal: { userId: principal.userId, agentId: principal.agentId },
+          apply: shouldApply,
+          limit,
+        });
+
+        await audit(grant.brainId, shouldApply ? "brain.consolidated" : "brain.consolidate_preview", {
+          apply: shouldApply,
+          duplicateGroups: report.duplicates.length,
+          conflicts: report.conflicts.length,
+          archived: report.applied?.memoriesArchived ?? 0,
+          via: "brain_consolidate",
+        });
+
+        if (shouldApply) {
+          for (const pair of report.conflicts) {
+            await publishToUser(principal.userId, {
+              type: "brain_conflict_detected",
+              brainId: grant.brainId,
+              memoryId: pair.memoryId,
+              conflictsWith: pair.conflictsWithId,
+              reason: pair.reason,
+            });
+          }
+        }
+
+        return ok({
+          scanned: report.scanned,
+          truncated: report.truncated,
+          duplicates: report.duplicates.map((group) => ({
+            type: group.type,
+            title: group.memories[0]?.title,
+            keepId: group.memories[0]?.id,
+            duplicateIds: group.memories.slice(1).map((item) => item.id),
+          })),
+          conflicts: report.conflicts,
+          applied: report.applied,
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  async function audit(
+    brainId: string,
+    operation: string,
+    metadata: Record<string, unknown>
+  ): Promise<void> {
+    await logBrainAudit({
+      brainId,
+      principalType: principal.type,
+      principalId: principal.id,
+      operation,
+      metadata: { ...metadata, transport: "mcp", agent: principal.agentName },
+    });
+  }
+}

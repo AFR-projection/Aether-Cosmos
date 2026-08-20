@@ -8,15 +8,12 @@ import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions"
 import { validateCsrf } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { enqueueJob } from "@/lib/queue";
+import { escapeLike } from "@/lib/utils";
 
 const requestSchema = z.object({
   idempotencyKey: z.string().min(16).max(128).optional(),
   archiveName: z.string().min(1).max(180).optional(),
 });
-
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
-}
 
 function archiveSegment(value: string): string {
   const cleaned = value

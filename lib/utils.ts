@@ -38,6 +38,14 @@ export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Escapes the LIKE/ILIKE wildcards (% and _) plus the escape character itself, so
+ * user input is matched literally. Pair the query with an ESCAPE clause.
+ */
+export function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
 export function getMimeCategory(mimeType: string): string {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("video/")) return "video";

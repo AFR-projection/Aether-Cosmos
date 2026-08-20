@@ -30,8 +30,15 @@ const PUBLIC_API_PREFIXES = [
   "/.well-known/",
 ];
 
-/** Route handlers perform their own auth */
-const HANDLER_AUTH_API_PREFIXES: string[] = [];
+/**
+ * Route handlers perform their own auth.
+ *
+ * The Brain MCP endpoint must own its 401: MCP clients discover the auth scheme
+ * from the WWW-Authenticate header on an unauthenticated call, and a CORS
+ * preflight carries no Authorization header at all, so a proxy-level 401 would
+ * make the endpoint unreachable from any browser-based MCP client.
+ */
+const HANDLER_AUTH_API_PREFIXES: string[] = ["/api/brain/mcp"];
 
 /** Obvious automated scrapers — never block browsers or health checks on pages. */
 const BOT_PATTERNS = [

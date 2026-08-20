@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { files } from "@/lib/db/schema";
 
 /**
@@ -36,7 +36,7 @@ export function hasSearchTerms(q: string | undefined | null): q is string {
  * inner aggregate is NULL → `@@ NULL` is NULL → no rows match, which is the
  * desired "nothing found" behaviour.
  */
-function prefixTsQuery(q: string): SQL {
+export function prefixTsQuery(q: string): SQL {
   return sql`to_tsquery(${TS_CONFIG}, (
     SELECT string_agg(t || ':*', ' & ')
     FROM (
@@ -48,10 +48,26 @@ function prefixTsQuery(q: string): SQL {
 }
 
 /**
+ * A `tsvector @@ to_tsquery(...)` prefix-match condition for the WHERE clause,
+ * against any generated tsvector column (files, memories, ...).
+ */
+export function ftsMatchOn(column: SQLWrapper, q: string): SQL {
+  return sql`${column} @@ ${prefixTsQuery(q)}`;
+}
+
+/**
+ * Relevance score (ts_rank) for ORDER BY against any tsvector column.
+ * Higher = more relevant. Pair with ftsMatchOn so only matching rows are ranked.
+ */
+export function ftsRankOn(column: SQLWrapper, q: string): SQL<number> {
+  return sql<number>`ts_rank(${column}, ${prefixTsQuery(q)})`;
+}
+
+/**
  * A `tsvector @@ to_tsquery(...)` prefix-match condition for the WHERE clause.
  */
 export function ftsMatch(q: string): SQL {
-  return sql`${files.searchVector} @@ ${prefixTsQuery(q)}`;
+  return ftsMatchOn(files.searchVector, q);
 }
 
 /**
@@ -59,5 +75,5 @@ export function ftsMatch(q: string): SQL {
  * Pair with ftsMatch so only matching rows are ranked.
  */
 export function ftsRank(q: string): SQL<number> {
-  return sql<number>`ts_rank(${files.searchVector}, ${prefixTsQuery(q)})`;
+  return ftsRankOn(files.searchVector, q);
 }

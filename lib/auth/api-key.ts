@@ -7,6 +7,9 @@ import { AuthError, getSessionUser, requireMaster, type SessionUser } from "@/li
 import { checkRateLimit, peekRateLimit } from "@/lib/security";
 import { OAUTH_ACCESS_PREFIX } from "@/lib/oauth/constants";
 import { authenticateOAuthAccessToken } from "@/lib/oauth/tokens";
+// Only pure scope helpers — lib/brain/constants.ts imports nothing but the schema,
+// so this cannot form a cycle back through the brain services.
+import { brainScopeSatisfied } from "@/lib/brain/constants";
 
 export type ApiKeyScope = "read" | "upload" | "download" | "delete" | "write" | "full";
 
@@ -250,6 +253,14 @@ export function extractBearerToken(request: Request): string | null {
 export function keyHasScope(keyScopes: string[], required: string): boolean {
   if (keyScopes.includes("supreme")) return true;
 
+  // Second Brain scopes are a separate namespace and are NEVER implied by the
+  // storage `full` scope: every key already issued with `full` would otherwise
+  // silently gain read/write access to the owner's memories. Only an explicit
+  // brain.<x> grant (or brain.full) opens those routes.
+  if (required.startsWith("brain.")) {
+    return brainScopeSatisfied(keyScopes, required);
+  }
+
   if (required.startsWith("admin:") || required === "admin") {
     if (keyScopes.includes("admin")) return true;
     if (required === "admin") {
@@ -260,6 +271,11 @@ export function keyHasScope(keyScopes: string[], required: string): boolean {
 
   if (keyScopes.includes("full")) return true;
   return keyScopes.includes(required);
+}
+
+/** True when this request was authenticated by an API key / OAuth token, not a cookie. */
+export function isApiKeySession(user: SessionUser): user is SessionUserFromApiKey {
+  return "authMethod" in user && (user as SessionUserFromApiKey).authMethod === "api_key";
 }
 
 export function keyHasAdminArea(keyScopes: string[], area: AdminApiArea): boolean {
@@ -302,6 +318,30 @@ export async function createApiKey(
   scopes: ApiKeyScope[],
   expiresAt?: Date | null
 ) {
+  return insertStandardApiKey(userId, name, scopes, expiresAt);
+}
+
+/**
+ * Create a standard `sk_` key carrying scopes from a non-storage namespace
+ * (currently only the Second Brain's `brain.*`). Kept as its own entry point so
+ * callers never have to cast around the `ApiKeyScope` union — the scope strings
+ * are validated by the caller's own union instead.
+ */
+export async function createNamespacedApiKey(
+  userId: string,
+  name: string,
+  scopes: readonly string[],
+  expiresAt?: Date | null
+) {
+  return insertStandardApiKey(userId, name, scopes, expiresAt);
+}
+
+async function insertStandardApiKey(
+  userId: string,
+  name: string,
+  scopes: readonly string[],
+  expiresAt?: Date | null
+) {
   const existing = await countApiKeys(userId);
   if (existing >= MAX_API_KEYS_PER_USER) {
     throw new AuthError(`Maximum ${MAX_API_KEYS_PER_USER} API keys allowed`, 400);
@@ -317,7 +357,7 @@ export async function createApiKey(
       name,
       keyPrefix: prefix,
       keyHash,
-      scopes,
+      scopes: [...scopes],
       expiresAt: expiresAt ?? null,
     })
     .returning();

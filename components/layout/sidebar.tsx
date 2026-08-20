@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   FolderOpen,
+  Brain,
   Star,
   Share2,
   Trash2,
@@ -51,6 +52,7 @@ interface SidebarProps {
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/files", label: "Files", icon: FolderOpen },
+  { href: "/brain", label: "Second Brain", icon: Brain },
   { href: "/favorites", label: "Favorites", icon: Star },
   { href: "/shared-with-me", label: "Shared with me", icon: Users },
   { href: "/shares", label: "Shared", icon: Share2 },

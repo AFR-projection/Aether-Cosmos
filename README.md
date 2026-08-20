@@ -3,7 +3,7 @@
 Modern cloud storage web application — fast, secure, and scalable.  
 Built with **Next.js 16**, **Drizzle ORM**, **Cloudflare R2**, and **Redis**.
 
-**Quick links:** [Local dev](#local-development) · **[Deploy VPS → DEPLOY.md](DEPLOY.md)** · [Troubleshooting](#troubleshooting)
+**Quick links:** [Local dev](#local-development) · [Second Brain](#second-brain) · **[Deploy VPS → DEPLOY.md](DEPLOY.md)** · [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -25,6 +25,7 @@ Built with **Next.js 16**, **Drizzle ORM**, **Cloudflare R2**, and **Redis**.
 - **End-to-end encryption** — Optional client-side AES-GCM encryption on upload; files are stored as ciphertext (server never sees the passphrase). Download prompts for the passphrase, decrypts in-browser, and saves the original file. ZIP/batch excludes encrypted files by design.
 - **Admin Panel** — User management, impersonation, Shares Center, storage analytics (30d growth + MIME charts), real-time monitoring, activity logs
 - **Enterprise security** — TOTP 2FA + recovery codes, forced password reset (`mustChangePassword`), stronger password policy (min 10, 3 character classes), account suspension with reason, session management
+- **Second Brain** — Persistent, user-owned memory for AI agents: versioned memories, projects, knowledge graph, per-agent scoped access, an MCP server, and a `/brain` workspace UI. See [Second Brain](#second-brain)
 - **Platform APIs** — API keys, webhooks, folder collaboration, file versions, bandwidth quotas, client-side encryption hooks
 - **Realtime feedback** — SSE live events, animated connection-status pill (Connecting / Live / Reconnecting / Offline), system toasts, page progress with comet-head, lightweight CSS-only loaders
 - **Background Jobs** — Thumbnail generation, image compression, media processing, webhook delivery via BullMQ
@@ -182,6 +183,78 @@ Template lengkap: [`.env.example`](.env.example)
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | `https://domain.com` (auto) |
 | `REDIS_DISABLED` | `true` OK | `false` (Docker Redis) |
 | `COOKIE_SECURE` | `false` | `true` (auto via wizard) |
+
+---
+
+## Second Brain
+
+Persistent, user-owned memory and knowledge infrastructure for AI agents, sitting
+alongside the storage product in the same PostgreSQL database.
+
+> My agent can change. My server can die. My model can change. My Brain stays mine.
+
+An agent is disposable — reinstalled, migrated to another VPS, replaced, or lost
+with its server. The user's long-term knowledge must not go with it. So memories,
+their version history, and the knowledge graph live in PostgreSQL, and agents reach
+them only through scoped, audited APIs.
+
+**Concept**
+
+| | |
+|---|---|
+| Source of truth | PostgreSQL — never R2, never Redis, never agent-local files |
+| Isolation | every row carries `brain_id`; one authorization choke point per transport |
+| Memory | versioned, provenanced, with `importance` + `confidence` |
+| Knowledge | entities and typed relationships (graph) |
+| Agents | separate identities with per-brain scoped grants, revocable independently |
+| Integration | REST for web clients, MCP for AI agents |
+
+**Setup**
+
+The tables ship with `drizzle/0013_second_brain.sql`,
+`drizzle/0014_brain_projects.sql`, and `drizzle/0015_brain_memory_links.sql`.
+`npm run db:push` creates them from the schema; to apply the SQL files directly instead:
+
+```bash
+npx tsx scripts/apply-migration.ts drizzle/0013_second_brain.sql
+npx tsx scripts/apply-migration.ts drizzle/0014_brain_projects.sql
+npx tsx scripts/apply-migration.ts drizzle/0015_brain_memory_links.sql
+```
+
+All are additive and idempotent, so re-running them is safe.
+
+No new environment variables are required. A default brain ("Personal Brain") is
+created for a user on their first Brain request — idempotent, so it is safe to call
+repeatedly.
+
+**Connecting an agent (OpenClaw, Hermes, any MCP client)**
+
+1. Create an agent under a brain — `POST /api/brain/{id}/agents`. The API key is
+   returned once and only its hash is stored.
+2. Read the connection details — `GET /api/brain/{id}/connect`.
+3. Point the client at `POST /api/brain/mcp` with
+   `Authorization: Bearer sk_<agent key>`.
+
+Agents get `brain.read + brain.search + brain.write` by default — never `delete`,
+never `export`. The storage `full` scope grants **no** brain access.
+
+**Using it**
+
+Open **Second Brain** in the sidebar, or press ⌘/Ctrl+K and type "brain". The
+workspace covers memories (with version history), projects, the knowledge graph,
+agent management, and the audit timeline.
+
+**Portability**
+
+`GET /api/brain/{id}/export` produces a `.afrbrain.zip` containing the brain's
+memories (with full version history), entities, relationships, projects, tags, and
+agents as structured JSONL. `POST /api/brain/{id}/import` validates the format,
+previews counts, and restores the data — deduplicating on title+type. The brain
+survives agent reinstall, VPS migration, or server replacement.
+
+**Docs:** [docs/SECOND-BRAIN.md](docs/SECOND-BRAIN.md) (architecture, data model,
+isolation, memory semantics) · [docs/MCP.md](docs/MCP.md) (MCP tools, connecting an
+agent, security)
 
 ---
 

@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { AuthError } from "@/lib/auth/session";
 import { SECURITY_HEADERS } from "@/lib/security";
 import { UploadServiceError } from "@/lib/storage/upload-service";
+import { BrainError } from "@/lib/brain/errors";
 
 export function apiSuccess<T>(data: T, status = 200, extraHeaders?: HeadersInit) {
   return NextResponse.json({ success: true, data }, { status, headers: { ...SECURITY_HEADERS, ...extraHeaders } });
@@ -30,6 +31,9 @@ function uniqueViolationMessage(constraint: string | undefined): string {
 
 export function handleApiError(error: unknown) {
   if (error instanceof UploadServiceError) {
+    return apiError(error.message, error.status, { code: error.code });
+  }
+  if (error instanceof BrainError) {
     return apiError(error.message, error.status, { code: error.code });
   }
   if (error instanceof AuthError) {
