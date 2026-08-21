@@ -27,6 +27,41 @@ Itu aja. Script-nya ngurusin semuanya: backup `.env` + nginx, rebuild container,
 
 **Syarat: push dulu ke GitHub.** `./update.sh` menarik kode dari repo, jadi commit + push perubahan lu dulu dari PC lokal sebelum jalanin di VPS.
 
+### Jika Update Gagal: "fatal: Not possible to fast-forward"
+
+Jika `./update.sh` gagal dengan error:
+```
+fatal: Not possible to fast-forward, aborting.
+```
+
+Ini berarti ada **diverging branches** — local VPS punya perubahan yang berbeda dengan GitHub. Ada 3 solusi:
+
+**Option 1: Force Reset (Recommended jika tidak ada perubahan penting di VPS)**
+```bash
+./update.sh --force
+```
+Script akan discard semua perubahan lokal dan reset ke origin.
+
+**Option 2: Manual Stash & Rebase**
+```bash
+cd /opt/storage-by-afr
+git stash                           # Simpan perubahan lokal
+git fetch origin
+git rebase origin/main              # Atau origin/master
+git stash pop                       # Restore perubahan lokal (jika ada conflict, resolve manual)
+./update.sh
+```
+
+**Option 3: Manual Reset (Jika yakin tidak ada perubahan penting)**
+```bash
+cd /opt/storage-by-afr
+git fetch origin
+git reset --hard origin/main        # Discard semua perubahan lokal
+./update.sh
+```
+
+**Backup otomatis:** `./update.sh` selalu backup `.env` dan nginx config ke `.deploy/backups/` sebelum update, jadi konfigurasi aman.
+
 ### Kenapa update DB selalu aman (ga perlu langkah manual)
 
 - Database (**Neon**) dan Redis itu **layanan eksternal** — VPS cuma nyambung ke sana, DB-nya sama persis dengan yang dipakai saat development.
