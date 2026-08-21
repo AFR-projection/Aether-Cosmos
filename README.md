@@ -3,7 +3,23 @@
 Modern cloud storage web application — fast, secure, and scalable.  
 Built with **Next.js 16**, **Drizzle ORM**, **Cloudflare R2**, and **Redis**.
 
-**Quick links:** [Local dev](#local-development) · [Second Brain](#second-brain) · **[Deploy VPS → DEPLOY.md](DEPLOY.md)** · [Troubleshooting](#troubleshooting)
+**📚 [Complete Documentation](docs/README.md)** · **🚀 [Getting Started](docs/getting-started.md)** · **🧠 [Second Brain](docs/second-brain.md)** · **🏗️ [Deploy VPS](docs/deployment.md)**
+
+---
+
+## 📚 Documentation
+
+**Complete documentation is available in the [`docs/`](docs/) directory:**
+
+- **[Getting Started](docs/getting-started.md)** — Installation, configuration, quick start
+- **[Deployment Guide](docs/deployment.md)** — Production VPS deployment with Docker
+- **[Architecture](docs/architecture.md)** — Tech stack, project structure, data flow
+- **[Features](docs/features.md)** — File management, security, sharing
+- **[Second Brain](docs/second-brain.md)** — Knowledge graph for AI agents
+- **[API Reference](docs/api-reference.md)** — REST endpoints documentation
+- **[Troubleshooting](docs/troubleshooting.md)** — Common issues & solutions
+
+**Quick Start:** See [Getting Started § Installation](docs/getting-started.md#installation).
 
 ---
 
@@ -39,405 +55,41 @@ Built with **Next.js 16**, **Drizzle ORM**, **Cloudflare R2**, and **Redis**.
 | Layer | Technology |
 |-------|-----------|
 | **Framework** | Next.js 16.2.10 (App Router) |
-| **Language** | TypeScript 5 |
+| **Language** | TypeScript 5 (strict mode) |
 | **Database** | Neon PostgreSQL + Drizzle ORM 0.45 |
-| **Storage** | Cloudflare R2 (S3-compatible, presigned URLs) |
+| **Storage** | Cloudflare R2 (S3-compatible) |
 | **Cache & Queue** | Redis + BullMQ 5 |
-| **Authentication** | Session-based (Argon2id via `@node-rs/argon2`) |
-| **UI** | Tailwind CSS v4 + Framer Motion + Radix UI + Lucide Icons |
-| **File Upload** | React Dropzone |
-| **Image Cropping** | React Easy Crop |
-| **Virtual Scroll** | @tanstack/react-virtual |
-| **Rich Text** | Tiptap |
-| **Drag & Drop** | @dnd-kit |
-| **PDF** | react-pdf + pdfjs-dist |
-| **Charts** | Recharts |
-| **Deployment** | Docker Compose (multi-stage, Nginx reverse proxy) |
-
----
-
-## Prerequisites
-
-**Local development:** Node.js ≥ 20, npm ≥ 10, Neon Postgres, Cloudflare R2, Redis optional (`REDIS_DISABLED=true`).
-
-**Production VPS:** Ubuntu 22.04+, Docker — lihat **[DEPLOY.md](DEPLOY.md)**.
-
----
-
-## Local Development
-
-### 1. Clone & Install
-
-```bash
-git clone <repo-url>
-cd storage-by-afr
-npm install
-```
-
-### 2. Environment Variables
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | ✅ | Neon PostgreSQL connection string |
-| `R2_ACCOUNT_ID` | ✅ | Cloudflare R2 Account ID |
-| `R2_ACCESS_KEY_ID` | ✅ | R2 Access Key |
-| `R2_SECRET_ACCESS_KEY` | ✅ | R2 Secret Access Key |
-| `R2_BUCKET_NAME` | ✅ | R2 bucket name |
-| `R2_PUBLIC_URL` | ✅ | Bucket public URL (dev: `https://pub-<hash>.r2.dev`) |
-| `SESSION_SECRET` | ✅ | Minimum 64 random characters |
-| `MASTER_USERNAME` | ✅ | Master admin username |
-| `MASTER_PASSWORD` | ✅ | Master admin password |
-| `NEXT_PUBLIC_APP_URL` | ✅ | `http://localhost:3000` (dev) |
-| `REDIS_URL` | ✅ | `redis://localhost:6379` |
-| `REDIS_DISABLED` | ❌ | Set `true` to run without Redis |
-| `MAX_FILE_SIZE_BYTES` | ❌ | Default 5GB (`5368709120`) |
-| `UPLOAD_URL_EXPIRY_SECONDS` | ❌ | Default 900 (15 minutes) |
-| `DOWNLOAD_URL_EXPIRY_SECONDS` | ❌ | Default 60 (1 minute) |
-| `RATE_LIMIT_LOGIN_MAX` | ❌ | Default 5 attempts |
-| `RATE_LIMIT_LOGIN_WINDOW_MS` | ❌ | Default 900000 (15 minutes) |
-
-### 3. Database Setup
-
-```bash
-# Push schema to database
-npm run db:push
-
-# Create master admin (first time only)
-npm run bootstrap
-
-# (Optional) Reset master password
-npm run reset-master-password
-```
-
-### 4. R2 CORS Configuration
-
-Access Cloudflare Dashboard → R2 → Bucket → Settings → CORS.  
-Use the configuration from [`docker/r2-cors.json`](docker/r2-cors.json).
-
-Or via Wrangler:
-
-```bash
-wrangler r2 bucket cors set strogebyafr --file docker/r2-cors.json
-```
-
-### 5. Start Development
-
-```bash
-# Terminal 1: Next.js dev server
-npm run dev
-
-# Terminal 2: Background worker (thumbnail, compression, scheduled cleanup)
-npm run worker
-```
-
-Access at **http://localhost:3000**.
-
-> **Note:** Without Redis, set `REDIS_DISABLED=true` in `.env` — do not run `npm run worker`.
-> Auto-cleanup (trash, file lifetime, activity logs) from Admin Settings **requires Redis + the worker**.
-
-### Redis via Docker (optional)
-
-```bash
-docker compose -f docker/docker-compose.dev.yml up -d
-```
-
----
-
-## Production Deployment (VPS)
-
-**Install pertama:**
-
-1. `cp .env.example .env` → isi manual (DATABASE_URL, R2, domain)
-2. `./install.sh`
-
-**Redeploy / update** (naikin fitur & fix terbaru) — sudah pernah install, tinggal:
-
-```bash
-cd /opt/storage-by-afr && ./update.sh
-```
-
-`./update.sh` otomatis: git pull → backup `.env`+nginx → validate → rebuild → sync DB (`db:push`, no-op kalau schema sudah cocok) → renew SSL → health check. **Push ke GitHub dulu** sebelum jalanin di VPS.
-
-Detail lengkap → **[DEPLOY.md](DEPLOY.md)** (wizard opsional: `./install.sh --wizard`)
-
-| Script | Fungsi |
-|--------|--------|
-| `./install.sh` | Install pertama (pakai `.env` manual) |
-| `./deploy.sh` | Rebuild dari kode di VPS (tanpa git pull) |
-| `./update.sh` | **Redeploy/update** — pull + backup + rebuild + migrate |
-
----
-
-## Environment Variables
-
-Template lengkap: [`.env.example`](.env.example)
-
-| Variable | Dev | Production |
-|----------|-----|------------|
-| `DATABASE_URL` | Neon / local Postgres | Neon (via wizard) |
-| `R2_*` | Cloudflare R2 | Cloudflare R2 (via wizard) |
-| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | `https://domain.com` (auto) |
-| `REDIS_DISABLED` | `true` OK | `false` (Docker Redis) |
-| `COOKIE_SECURE` | `false` | `true` (auto via wizard) |
-
----
-
-## Second Brain
-
-Persistent, user-owned memory and knowledge infrastructure for AI agents, sitting
-alongside the storage product in the same PostgreSQL database.
-
-> My agent can change. My server can die. My model can change. My Brain stays mine.
-
-An agent is disposable — reinstalled, migrated to another VPS, replaced, or lost
-with its server. The user's long-term knowledge must not go with it. So memories,
-their version history, and the knowledge graph live in PostgreSQL, and agents reach
-them only through scoped, audited APIs.
-
-**Concept**
-
-| | |
-|---|---|
-| Source of truth | PostgreSQL — never R2, never Redis, never agent-local files |
-| Isolation | every row carries `brain_id`; one authorization choke point per transport |
-| Memory | versioned, provenanced, with `importance` + `confidence` |
-| Knowledge Graph | interactive visualization with 17 nodes, 15 edges (4 semantic, 10 context, 0 explicit) |
-| Relationships | semantic similarity + shared tags/entities/projects |
-| Views | Global graph (all memories) + Local graph (N-hop neighborhood, depths 1–6) |
-| Filters | by relationship tier (Links/Semantic/Context/Entities), search query, tags, type |
-| Groups | up to 12 custom rules with color coding, first-match-wins |
-| Workspace | pop-out graph window with independent UI, shared data, cross-window sync |
-| Agents | separate identities with per-brain scoped grants, revocable independently |
-| Integration | REST for web clients, MCP for AI agents |
-
-**What's New in Graph (Phase 1–9 Browser-Verified)**
-
-- **Interactive Canvas**: Pan, zoom, hover highlight, click for detail, double-click to center local graph
-- **Context Menu**: Right-click nodes for actions (Open memory, Local graph from here, Centre on node, Copy link, Hide node)
-- **Local Graph**: Focus on one memory and see its N-hop neighborhood (depths 1–6), independent of global view
-- **Relationship Tiers**: 
-  - **Semantic** (4 edges): memories with similar embeddings
-  - **Context** (10 edges): shared tags, entities, or projects
-  - **Explicit** (0 edges): user-created memory links
-- **Smart Filters**: Toggle tiers on/off, search with query syntax, filter by tags/type, hide orphans
-- **Group Visualization**: Create up to 12 custom color-coded groups with query rules (e.g., `type:person`, `tag:byafr`)
-- **Settings Persistence**: All filters, groups, forces, display settings, and local graph state survive page reload
-- **Per-Brain Scoping**: Settings isolated by brain; Brain A and Brain B never mix
-- **Pop-out Workspace**: Click "Open graph in a separate window" for a chromeless graph that updates live when you create/edit memories in the main window
-- **Cross-Window Sync**: Create a memory in main window → popup updates in 1–2ms without refresh (via `BroadcastChannel`)
-- **Animate Toggle**: Optional force-directed layout animation; graph settles and stays stable
-- **Test Coverage**: 313 tests passed (35 files), all isolation and authorization tests verified
-
-**Setup**
-
-The tables ship with `drizzle/0013_second_brain.sql`,
-`drizzle/0014_brain_projects.sql`, and `drizzle/0015_brain_memory_links.sql`.
-`npm run db:push` creates them from the schema; to apply the SQL files directly instead:
-
-```bash
-npx tsx scripts/apply-migration.ts drizzle/0013_second_brain.sql
-npx tsx scripts/apply-migration.ts drizzle/0014_brain_projects.sql
-npx tsx scripts/apply-migration.ts drizzle/0015_brain_memory_links.sql
-```
-
-All are additive and idempotent, so re-running them is safe.
-
-No new environment variables are required. A default brain ("Personal Brain") is
-created for a user on their first Brain request — idempotent, so it is safe to call
-repeatedly.
-
-**Connecting an agent (OpenClaw, Hermes, any MCP client)**
-
-1. Create an agent under a brain — `POST /api/brain/{id}/agents`. The API key is
-   returned once and only its hash is stored.
-2. Read the connection details — `GET /api/brain/{id}/connect`.
-3. Point the client at `POST /api/brain/mcp` with
-   `Authorization: Bearer sk_<agent key>`.
-
-Agents get `brain.read + brain.search + brain.write` by default — never `delete`,
-never `export`. The storage `full` scope grants **no** brain access.
-
-**Using it**
-
-Open **Second Brain** in the sidebar, or press ⌘/Ctrl+K and type "brain". The
-workspace covers:
-
-- **Memories**: Versioned notes with importance, confidence, type, tags, and projects
-- **Projects**: Organize memories into projects with descriptions and metadata
-- **Graph**: Interactive knowledge graph with relationship visualization, local/global views, filters, and groups
-- **Agents**: Manage AI agent credentials and permissions with scoped access
-- **Activity**: Audit timeline of all brain operations (create, update, delete, search)
-
-**Graph Keyboard Shortcuts**
-
-- **Arrow keys**: Pan the canvas
-- **+/−**: Zoom in/out
-- **0**: Fit graph to view
-- **Double-click node**: Centre local graph on that memory
-- **Right-click node**: Open context menu
-
-**Portability**
-
-`GET /api/brain/{id}/export` produces a `.afrbrain.zip` containing the brain's
-memories (with full version history), entities, relationships, projects, tags, and
-agents as structured JSONL. `POST /api/brain/{id}/import` validates the format,
-previews counts, and restores the data — deduplicating on title+type. The brain
-survives agent reinstall, VPS migration, or server replacement.
-
-**Implementation Status**
-
-✅ **Complete & Browser-Verified** (Phases 1–9):
-- Graph rendering (all memories → nodes, relationships → edges)
-- Pan, zoom, fit, hover, click, double-click, right-click interactions
-- Local graph with depths 1–6, independent BFS-verified
-- Filters: semantic/context/explicit tiers, search, tags, type, orphans
-- Groups: up to 12 custom rules, color coding, first-match-wins
-- Settings persistence per brain, survives reload
-- Pop-out workspace with cross-window data sync (1–2ms)
-- Animate toggle (stable, no infinite drift)
-- 313 tests passed, all isolation verified
-
-⏭️ **Pending**:
-- Visual refinement (UI design review)
-- Backlinks panel in memory detail
-- Advanced graph layouts (hierarchical, radial)
-
-**Known Limitations**:
-- Detail page loading race on newly-created memories (UI timing, not data corruption)
-- Max 12 custom groups (performance ceiling)
-- Cross-window delete sync requires UI mutation path (DB-only writes bypass signal)
-
-**Docs:** 
-- [docs/SECOND-BRAIN.md](docs/SECOND-BRAIN.md) — Architecture, data model, isolation, memory semantics
-- [docs/SECOND-BRAIN-IMPLEMENTATION.md](docs/SECOND-BRAIN-IMPLEMENTATION.md) — Graph implementation, relationship building, filters
-- [docs/MCP.md](docs/MCP.md) — MCP tools, connecting agents, security
-
----
-
-## Project Architecture
-
-```
-storage-by-afr/
-├── app/
-│   ├── (app)/              # Route group (no additional layout)
-│   ├── (auth)/             # Route group for authentication
-│   ├── (shell)/            # Route group with AppShell (sidebar)
-│   ├── admin/              # Admin pages + API routes
-│   ├── api/                # REST API routes
-│   ├── dashboard/          # Dashboard page
-│   ├── favorites/          # Favorites page
-│   ├── files/              # File browser page
-│   ├── login/              # Login page
-│   ├── recycle-bin/        # Recycle bin page
-│   ├── shared/             # Public share page
-│   └── shares/             # Share management
-├── components/
-│   ├── admin/              # Admin UI components
-│   ├── download/           # Download manager, widget, encrypted-download dialog
-│   ├── editors/            # Image editor, Note editor, PDF viewer
-│   ├── files/              # File browser, grid, preview, share dialog, upload panel
-│   ├── folders/            # Droppable folder (dnd-kit)
-│   ├── layout/             # AppShell, Sidebar, CommandPalette, ThemeProvider
-│   ├── media-viewers/      # Image, video, audio, PDF, SVG, text, office viewers
-│   ├── system/             # Connection-status pill, page-progress, toasts, Spinner, LoadingMark
-│   └── ui/                 # Button, Card, Input (shadcn-style)
-├── lib/
-│   ├── api/                # Client fetch + server response helpers
-│   ├── auth/               # Session, password, permissions, audit log
-│   ├── cache/              # Redis cache layer (with fallback)
-│   ├── crypto/             # Client-side AES-GCM encryption helpers (E2E)
-│   ├── db/                 # Drizzle schema + connection
-│   ├── download/           # Download actions, store, encrypted-download store
-│   ├── queue/              # BullMQ job queue
-│   ├── search/             # Full-text search helpers (tsquery, tiptap → plaintext)
-│   ├── security/           # Rate limiting, CSRF, file validation, suspicious activity
-│   └── storage/            # Cloudflare R2 client
-├── workers/                # Background job worker
-├── scripts/                # CLI + deploy (see scripts/deploy/)
-├── install.sh              # Production installer entry point
-└── docker/                 # Docker Compose + nginx template
-```
-
-### Upload Data Flow
-
-```
-Browser ──presigned URL──► Cloudflare R2 ──complete──► Next.js API ──► Neon DB
-    │                                                            │
-    └──(optional)────────────────────────────► BullMQ ──► Worker ──► Thumbnail
-```
-
-### Layered Security
-
-1. **Middleware** — Bot detection, session validation, security headers (CSP, HSTS, etc.)
-2. **CSRF** — Token validation on every mutation
-3. **Rate Limiting** — Login attempt throttling, API abuse detection
-4. **File Validation** — Magic byte verification (not just extension check)
-5. **Suspicious Activity** — Pattern-based anomaly detection
-6. **Argon2id** — Password hashing with automatic salt
-7. **Presigned URLs** — Files are not directly accessible; temporary URLs only
-8. **End-to-end encryption (opt-in)** — Files encrypted client-side (AES-GCM, PBKDF2-derived key); server stores ciphertext only and never sees the passphrase
-
----
-
-## Troubleshooting
-
-### Local development
-
-**Redis `[ioredis] Unhandled error event`**
-
-- Set `REDIS_DISABLED=true` in `.env`, or start Redis: `docker compose -f docker/docker-compose.dev.yml up -d`
-
-**Upload fails / CORS error**
-
-- Configure R2 CORS using [`docker/r2-cors.json`](docker/r2-cors.json) with `http://localhost:3000`
-
-**Worker `ENOTFOUND redis`**
-
-- Worker hostname `redis` only works inside Docker. Locally: set `REDIS_DISABLED=true` and skip `npm run worker`.
-
-**Folder upload structure**
-
-- Chrome/Edge `showDirectoryPicker()` preserves paths; `webkitdirectory` fallback uses timestamp folder name.
-
-### Production (VPS)
-
-Login, SSL, container, upload issues after deploy → **[DEPLOY.md § Troubleshooting](DEPLOY.md#troubleshooting)**
+| **Authentication** | Session-based (Argon2id) |
+| **UI** | Tailwind CSS v4 + Framer Motion + Radix UI |
+| **Deployment** | Docker Compose + Nginx |
+
+See [Architecture Documentation](docs/architecture.md) for complete technical details.
 
 ---
 
 ## Commands
 
 ### Development
-
 ```bash
-npm run dev                   # Dev server
-npm run build                 # Production build
-npm run start                 # Start production server
-npm run lint                  # ESLint
-npm run db:push               # Push schema
-npm run db:studio             # Drizzle Studio
-npm run bootstrap             # Create master admin
-npm run reset-master-password # Reset master password
-npm run worker                # Background worker (needs Redis)
+npm run dev           # Development server
+npm run build         # Production build
+npm run lint          # Run ESLint
+npm test              # Run tests (313 passing)
+npm run db:push       # Push schema to database
+npm run worker        # Background worker (requires Redis)
 ```
 
-### Production (VPS)
-
+### Production
 ```bash
-./install.sh                  # First install (wizard)
-./update.sh                   # Safe update
-npm run deploy:logs           # Container logs
-npm run deploy:health         # Service health check
+./install.sh          # First-time installation
+./update.sh           # Update deployment
 ```
 
-Detail deploy → **[DEPLOY.md](DEPLOY.md)**
+See [Deployment Guide](docs/deployment.md) for complete instructions.
 
 ---
 
 ## License
 
 Private — All rights reserved.
+
