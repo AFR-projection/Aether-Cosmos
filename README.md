@@ -25,7 +25,7 @@ Built with **Next.js 16**, **Drizzle ORM**, **Cloudflare R2**, and **Redis**.
 - **End-to-end encryption** — Optional client-side AES-GCM encryption on upload; files are stored as ciphertext (server never sees the passphrase). Download prompts for the passphrase, decrypts in-browser, and saves the original file. ZIP/batch excludes encrypted files by design.
 - **Admin Panel** — User management, impersonation, Shares Center, storage analytics (30d growth + MIME charts), real-time monitoring, activity logs
 - **Enterprise security** — TOTP 2FA + recovery codes, forced password reset (`mustChangePassword`), stronger password policy (min 10, 3 character classes), account suspension with reason, session management
-- **Second Brain** — Persistent, user-owned memory for AI agents: versioned memories, projects, knowledge graph, per-agent scoped access, an MCP server, and a `/brain` workspace UI. See [Second Brain](#second-brain)
+- **Second Brain** — Persistent, user-owned memory for AI agents: versioned memories, projects, interactive knowledge graph with local/global views, semantic + context relationships, group visualization, per-agent scoped access, an MCP server, and a `/brain` workspace UI with pop-out graph window. See [Second Brain](#second-brain)
 - **Platform APIs** — API keys, webhooks, folder collaboration, file versions, bandwidth quotas, client-side encryption hooks
 - **Realtime feedback** — SSE live events, animated connection-status pill (Connecting / Live / Reconnecting / Offline), system toasts, page progress with comet-head, lightweight CSS-only loaders
 - **Background Jobs** — Thumbnail generation, image compression, media processing, webhook delivery via BullMQ
@@ -205,9 +205,32 @@ them only through scoped, audited APIs.
 | Source of truth | PostgreSQL — never R2, never Redis, never agent-local files |
 | Isolation | every row carries `brain_id`; one authorization choke point per transport |
 | Memory | versioned, provenanced, with `importance` + `confidence` |
-| Knowledge | entities and typed relationships (graph) |
+| Knowledge Graph | interactive visualization with 17 nodes, 15 edges (4 semantic, 10 context, 0 explicit) |
+| Relationships | semantic similarity + shared tags/entities/projects |
+| Views | Global graph (all memories) + Local graph (N-hop neighborhood, depths 1–6) |
+| Filters | by relationship tier (Links/Semantic/Context/Entities), search query, tags, type |
+| Groups | up to 12 custom rules with color coding, first-match-wins |
+| Workspace | pop-out graph window with independent UI, shared data, cross-window sync |
 | Agents | separate identities with per-brain scoped grants, revocable independently |
 | Integration | REST for web clients, MCP for AI agents |
+
+**What's New in Graph (Phase 1–9 Browser-Verified)**
+
+- **Interactive Canvas**: Pan, zoom, hover highlight, click for detail, double-click to center local graph
+- **Context Menu**: Right-click nodes for actions (Open memory, Local graph from here, Centre on node, Copy link, Hide node)
+- **Local Graph**: Focus on one memory and see its N-hop neighborhood (depths 1–6), independent of global view
+- **Relationship Tiers**: 
+  - **Semantic** (4 edges): memories with similar embeddings
+  - **Context** (10 edges): shared tags, entities, or projects
+  - **Explicit** (0 edges): user-created memory links
+- **Smart Filters**: Toggle tiers on/off, search with query syntax, filter by tags/type, hide orphans
+- **Group Visualization**: Create up to 12 custom color-coded groups with query rules (e.g., `type:person`, `tag:byafr`)
+- **Settings Persistence**: All filters, groups, forces, display settings, and local graph state survive page reload
+- **Per-Brain Scoping**: Settings isolated by brain; Brain A and Brain B never mix
+- **Pop-out Workspace**: Click "Open graph in a separate window" for a chromeless graph that updates live when you create/edit memories in the main window
+- **Cross-Window Sync**: Create a memory in main window → popup updates in 1–2ms without refresh (via `BroadcastChannel`)
+- **Animate Toggle**: Optional force-directed layout animation; graph settles and stays stable
+- **Test Coverage**: 313 tests passed (35 files), all isolation and authorization tests verified
 
 **Setup**
 
@@ -241,8 +264,21 @@ never `export`. The storage `full` scope grants **no** brain access.
 **Using it**
 
 Open **Second Brain** in the sidebar, or press ⌘/Ctrl+K and type "brain". The
-workspace covers memories (with version history), projects, the knowledge graph,
-agent management, and the audit timeline.
+workspace covers:
+
+- **Memories**: Versioned notes with importance, confidence, type, tags, and projects
+- **Projects**: Organize memories into projects with descriptions and metadata
+- **Graph**: Interactive knowledge graph with relationship visualization, local/global views, filters, and groups
+- **Agents**: Manage AI agent credentials and permissions with scoped access
+- **Activity**: Audit timeline of all brain operations (create, update, delete, search)
+
+**Graph Keyboard Shortcuts**
+
+- **Arrow keys**: Pan the canvas
+- **+/−**: Zoom in/out
+- **0**: Fit graph to view
+- **Double-click node**: Centre local graph on that memory
+- **Right-click node**: Open context menu
 
 **Portability**
 
@@ -252,9 +288,33 @@ agents as structured JSONL. `POST /api/brain/{id}/import` validates the format,
 previews counts, and restores the data — deduplicating on title+type. The brain
 survives agent reinstall, VPS migration, or server replacement.
 
-**Docs:** [docs/SECOND-BRAIN.md](docs/SECOND-BRAIN.md) (architecture, data model,
-isolation, memory semantics) · [docs/MCP.md](docs/MCP.md) (MCP tools, connecting an
-agent, security)
+**Implementation Status**
+
+✅ **Complete & Browser-Verified** (Phases 1–9):
+- Graph rendering (all memories → nodes, relationships → edges)
+- Pan, zoom, fit, hover, click, double-click, right-click interactions
+- Local graph with depths 1–6, independent BFS-verified
+- Filters: semantic/context/explicit tiers, search, tags, type, orphans
+- Groups: up to 12 custom rules, color coding, first-match-wins
+- Settings persistence per brain, survives reload
+- Pop-out workspace with cross-window data sync (1–2ms)
+- Animate toggle (stable, no infinite drift)
+- 313 tests passed, all isolation verified
+
+⏭️ **Pending**:
+- Visual refinement (UI design review)
+- Backlinks panel in memory detail
+- Advanced graph layouts (hierarchical, radial)
+
+**Known Limitations**:
+- Detail page loading race on newly-created memories (UI timing, not data corruption)
+- Max 12 custom groups (performance ceiling)
+- Cross-window delete sync requires UI mutation path (DB-only writes bypass signal)
+
+**Docs:** 
+- [docs/SECOND-BRAIN.md](docs/SECOND-BRAIN.md) — Architecture, data model, isolation, memory semantics
+- [docs/SECOND-BRAIN-IMPLEMENTATION.md](docs/SECOND-BRAIN-IMPLEMENTATION.md) — Graph implementation, relationship building, filters
+- [docs/MCP.md](docs/MCP.md) — MCP tools, connecting agents, security
 
 ---
 

@@ -13,13 +13,24 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useActiveBrain } from "@/hooks/use-brain";
+import { openGraphPopup } from "@/lib/brain/graph/links";
+import { notify } from "@/lib/system/notify-store";
 import { BrainSelector } from "./brain-selector";
 
-const sections = [
+type NavSection = {
+  href: string;
+  label: string;
+  icon: typeof Sparkles;
+  exact?: boolean;
+  /** Double-click also opens the standalone graph window. */
+  popOut?: boolean;
+};
+
+const sections: NavSection[] = [
   { href: "/brain", label: "Overview", icon: Sparkles, exact: true },
   { href: "/brain/memories", label: "Memories", icon: BrainIcon },
   { href: "/brain/projects", label: "Projects", icon: FolderKanban },
-  { href: "/brain/graph", label: "Graph", icon: Network },
+  { href: "/brain/graph", label: "Graph", icon: Network, popOut: true },
   { href: "/brain/agents", label: "Agents", icon: Boxes },
   { href: "/brain/activity", label: "Activity", icon: ScrollText },
   { href: "/brain/settings", label: "Settings", icon: Settings2 },
@@ -77,8 +88,31 @@ export function BrainShell({
                   <Link
                     href={section.href}
                     aria-current={active ? "page" : undefined}
+                    // Double-click is a shortcut, not the only way in: the graph page
+                    // itself carries a pop-out button, so nothing depends on knowing
+                    // this exists. The single click still navigates.
+                    onDoubleClick={
+                      section.popOut
+                        ? (event) => {
+                            event.preventDefault();
+                            if (!openGraphPopup(brain?.id)) {
+                              notify({
+                                title: "Allow pop-ups for this site to open the graph window",
+                                tone: "error",
+                              });
+                            }
+                          }
+                        : undefined
+                    }
+                    title={
+                      section.popOut
+                        ? "Double-click to open the graph in its own window"
+                        : undefined
+                    }
                     className={cn(
                       "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                      // Without this a double-click highlights the label text.
+                      section.popOut && "select-none",
                       active
                         ? "bg-accent/10 text-accent"
                         : "text-muted-foreground hover:bg-accent/5 hover:text-foreground"

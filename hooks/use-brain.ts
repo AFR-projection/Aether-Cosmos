@@ -3,12 +3,14 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api/client";
+import type { BrainGraphSnapshot } from "@/lib/brain/graph/types";
 import {
   getActiveBrainId,
   getServerActiveBrainId,
   setActiveBrainId,
   subscribeActiveBrain,
 } from "@/lib/brain/active-brain";
+import { publishBrainChange, subscribeBrainChange } from "@/lib/brain/brain-sync";
 
 /**
  * Data access for the Second Brain UI.
@@ -237,7 +239,28 @@ function useBrainInvalidator(brainId: string | undefined) {
   return () => {
     void queryClient.invalidateQueries({ queryKey: ["brain", brainId] });
     void queryClient.invalidateQueries({ queryKey: ["brains"] });
+    // Other documents (the popped-out graph window, a second tab) hold their own
+    // cache and cannot see this invalidation, so it is announced to them too.
+    publishBrainChange(brainId);
   };
+}
+
+/**
+ * Applies writes made in *other* documents to this one's cache.
+ *
+ * Mount it wherever a window has to stay current without the user reloading —
+ * the standalone graph window in particular. It invalidates rather than patching,
+ * so the API remains the source of truth for what changed.
+ */
+export function useBrainDataSync(brainId: string | undefined): void {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!brainId) return;
+    return subscribeBrainChange((message) => {
+      if (message.brainId !== brainId) return;
+      void queryClient.invalidateQueries({ queryKey: ["brain", brainId] });
+    });
+  }, [brainId, queryClient]);
 }
 
 export type MemoryDraft = {
@@ -375,6 +398,29 @@ export function useRelationships(brainId: string | undefined) {
       get<{ relationships: BrainRelationship[] }>(
         `/api/brain/${brainId}/relationships?limit=100`
       ),
+  });
+}
+
+/**
+ * The whole graph in one request: entities and memories as nodes, relationships
+ * and memory links as edges. Separate from useEntities/useRelationships because
+ * those are paginated lists capped at 100 rows — a graph needs the whole picture,
+ * which is why the endpoint is rate limited and doubly capped server-side.
+ */
+export function useBrainGraph(
+  brainId: string | undefined,
+  options?: { includeMemories?: boolean }
+) {
+  const includeMemories = options?.includeMemories ?? true;
+  return useQuery({
+    enabled: !!brainId,
+    queryKey: ["brain", brainId, "graph", includeMemories],
+    queryFn: () =>
+      get<BrainGraphSnapshot>(
+        `/api/brain/${brainId}/graph?includeMemories=${includeMemories ? "true" : "false"}`
+      ),
+    // A snapshot is expensive to build; the graph does not need to be live.
+    staleTime: 60_000,
   });
 }
 

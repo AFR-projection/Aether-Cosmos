@@ -27,7 +27,8 @@ export default function BrainMemoriesPage() {
   const { brain } = useActiveBrain();
 
   const [creating, setCreating] = useState(searchParams.get("new") === "1");
-  const [search, setSearch] = useState("");
+  // The graph view deep-links here as ?q=<label> when a memory node is opened.
+  const [search, setSearch] = useState(searchParams.get("q") ?? "");
   const [type, setType] = useState("");
   const [tag, setTag] = useState("");
   // Deep links from the projects page arrive as ?project=<id>.
