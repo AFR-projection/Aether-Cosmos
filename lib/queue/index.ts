@@ -45,7 +45,11 @@ export type JobType =
   | "deliver_webhook"
   | "cleanup_schedules"
   | "build_archive"
-  | "process_deletion";
+  | "process_deletion"
+  // Second Brain enrichment (P1). Both are idempotent: a duplicate job is a no-op
+  // once the memory's content hash already matches what was enriched.
+  | "enrich_memory"
+  | "enrich_brain";
 
 export async function enqueueJob(
   type: JobType,

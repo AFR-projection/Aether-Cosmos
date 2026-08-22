@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { KeyRound, User, Monitor, Shield, Hash } from "lucide-react";
+import { KeyRound, User, Monitor, Shield, Hash, Info } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useTheme } from "@/components/theme-provider";
 import { apiFetch } from "@/lib/api/client";
+import { APP_VERSION_LABEL } from "@/lib/app-version";
 import { cn } from "@/lib/utils";
 import {
   PasswordSection as SharedPasswordSection,
@@ -97,6 +98,14 @@ function SettingsContent({ user }: { user: SessionUser }) {
       icon: Monitor,
       gradient: "from-emerald-500 to-teal-500",
       component: <SessionsSection />,
+    },
+    {
+      id: "about",
+      title: "About",
+      description: `Storage ByAFR ${APP_VERSION_LABEL}`,
+      icon: Info,
+      gradient: "from-slate-500 to-slate-700",
+      component: <AboutSection />,
     },
   ];
 
@@ -192,6 +201,27 @@ function ProfileSection({ user }: { user: SessionUser }) {
       <div className="rounded-lg bg-surface-hover/50 p-4">
         <label className="text-xs font-medium text-muted-foreground/70">Role</label>
         <p className="mt-0.5 text-sm font-medium capitalize">{user.role}</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── About Section ────────────────────────────────────────────────────────────
+
+/**
+ * Read-only. `APP_VERSION` is pinned to `package.json` by a test, so what this
+ * row shows is the version that was actually built and deployed.
+ */
+function AboutSection() {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg bg-surface-hover/50 p-4">
+        <label className="text-xs font-medium text-muted-foreground/70">App version</label>
+        <p className="mt-0.5 text-sm font-medium">{APP_VERSION_LABEL}</p>
+      </div>
+      <div className="rounded-lg bg-surface-hover/50 p-4">
+        <label className="text-xs font-medium text-muted-foreground/70">Release</label>
+        <p className="mt-0.5 text-sm font-medium">Second Brain 2.0</p>
       </div>
     </div>
   );

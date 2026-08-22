@@ -63,9 +63,15 @@ and cascades from `brains`.
 | `brain_projects` | groups memories by the work they belong to; unique on `(brain_id, name)` |
 | `brain_entities` | knowledge-graph nodes; unique on `(brain_id, name, type)` |
 | `brain_relationships` | typed edges; unique on `(source, target, relationship_type)` |
+| `memory_links` | explicit memory↔memory edges created by users or agents |
 | `brain_agents` | agent identities, each optionally bound to one API key |
 | `brain_access` | grants: `(brain_id, principal_type, principal_id) → role + scopes` |
 | `brain_audit_logs` | append-only trail of every write and every agent read |
+| `memory_mentions` | extracted entity references in memory content; idempotent via `enriched_hash` |
+| `brain_graph_metrics` | cached PageRank scores and component ids |
+| `brain_health_snapshots` | periodic health assessments (completeness, quality, connections, recency) |
+| `brain_retrieval_events` | feedback counters: how many times each memory was retrieved, scored, selected |
+| `brain_review_items` | quality warnings from the enrichment process (write-only for now) |
 
 Notable constraints:
 
@@ -108,10 +114,16 @@ authenticated principal → authorized brain → authorized resource → operati
 | `brain.read` | read memories, tags, entities, relationships, recall |
 | `brain.search` | full-text search |
 | `brain.write` | create/update memories, upsert entities and relationships |
+| `brain.link` | create/delete explicit memory↔memory links |
 | `brain.delete` | soft-delete memories, delete entities/edges, delete a brain |
-| `brain.export` | bulk export |
+| `brain.export` | bulk export to `.afrbrain.zip` |
+| `brain.import` | bulk import from `.afrbrain.zip` |
+| `brain.consolidate` | non-destructive consolidation (merge duplicate entities, reconcile conflicts) |
 
-New agents default to `read + search + write` — never `delete`, never `export`.
+New agents default to `read + search + write + link` — never `delete`, never
+`export`, never `import`, never `consolidate`.
+
+`brain.write` implies `brain.link` — an agent that can create memories can link them.
 
 **The storage `full` scope does NOT grant any `brain.*` scope.** Every API key
 already issued with `full` would otherwise silently gain access to the owner's
@@ -162,7 +174,8 @@ SESSION END
 snippets). `brain_remember` updates an existing memory when title+type already
 match, and reports near-duplicates it found instead of silently forking them.
 
-See [MCP.md](./MCP.md) for the tool list and how to connect an agent.
+See [Second Brain MCP](second-brain-mcp.md) for the tool list and how to connect
+an agent.
 
 ## Web UI
 
@@ -175,28 +188,26 @@ into the data.
 | `/brain/memories` | search + type/project/tag/archived filters, create |
 | `/brain/memories/[memoryId]` | read, edit, version history with restore, archive, delete |
 | `/brain/projects` | create, re-status, delete; deep-links into filtered memories |
-| `/brain/graph` | entities and their edges |
+| `/brain/graph` | the knowledge graph: interactive canvas, derived+explicit edges, local/global views, filters, groups, pop-out workspace |
 | `/brain/agents` | mint an agent (key shown once), revoke, MCP connection details |
 | `/brain/activity` | the audit trail, rendered as an agent timeline |
 | `/brain/settings` | rename, archive, export, add another brain |
 
-The selected brain lives in `localStorage` via `lib/brain/active-brain.ts` and is
-read through `useSyncExternalStore`, so it survives navigation and stays in sync
-across tabs.
-
-The graph view is an adjacency list, not a force layout: §40 requires that a graph
-of thousands of nodes must not freeze the browser, and a physics simulation is the
-most likely way to break that. Nodes are capped at 60 per view and filterable;
-edges are listed per selected node.
+The graph view pipeline (snapshot → model → query → view → groups → engine → canvas)
+is described in [Second Brain Graph](second-brain-graph.md). Nodes are capped at
+2500 (workspace) / 6000 (pop-out), edges at 6000 / 20000; the canvas renderer
+batches draws per colour to stay under 16 ms per frame.
 
 ## Portability
 
 A brain must be recoverable outside the runtime that wrote it.
 
-- `GET /api/brain/{id}/export` returns the brain, its memories with tags, its
-  projects, and the full graph as one JSON document, gated behind `brain.export`
-  and always audited. `/brain/settings` downloads it as a dated `.json` file.
+- `GET /api/brain/{id}/export` returns the brain, its memories with tags and
+  versions, its projects, entities, relationships, memory links, and agents (no
+  secrets) as a dated `.afrbrain.zip` (manifest + JSONL per table), gated behind
+  `brain.export` and always audited.
+- `POST /api/brain/{id}/import` accepts the same format. Projects, entities, tags,
+  and relationships merge by natural key; memories, memory links, and versions are
+  additive. Gated behind `brain.import`.
 
-**Not yet implemented:** the packaged `.afrbrain` format (manifest + JSONL per
-table) and the import path. Until import exists, export is a backup, not
-portability. Tracked as the remaining Priority 5 work.
+Both paths are covered by 81 integration tests.

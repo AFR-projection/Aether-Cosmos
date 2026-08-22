@@ -147,10 +147,11 @@ Then set `REDIS_DISABLED=false` in `.env`.
 | `R2_SECRET_ACCESS_KEY` | ✅ | - | R2 Secret Key |
 | `R2_BUCKET_NAME` | ✅ | - | R2 bucket name |
 | `R2_PUBLIC_URL` | ✅ | - | Bucket public URL (dev: `https://pub-<hash>.r2.dev`) |
-| `SESSION_SECRET` | ✅ | - | Minimum 64 random characters for session encryption |
+| `SESSION_SECRET` | ✅ | - | Minimum 64 random characters for session encryption. Rotating it invalidates TOTP secrets, step codes, and stored email credentials — see [Deployment § SESSION_SECRET](deployment.md#rotating-session_secret-invalidates-credentials). |
 | `MASTER_USERNAME` | ✅ | - | Master admin username |
 | `MASTER_PASSWORD` | ✅ | - | Master admin password |
 | `NEXT_PUBLIC_APP_URL` | ✅ | `http://localhost:3000` | Application base URL |
+| `BRAIN_EMBEDDING_PROVIDER` | ❌ | `none` | Embedding provider: `none` (default, semantic search abstains) or `openai` / `voyageai` (requires API key). See [Second Brain 2.0 § Embeddings](second-brain-2.0.md#embeddings). |
 | `REDIS_URL` | ❌ | `redis://localhost:6379` | Redis connection string |
 | `REDIS_DISABLED` | ❌ | `false` | Set `true` to disable Redis |
 | `MAX_FILE_SIZE_BYTES` | ❌ | `5368709120` | Maximum file size (5GB) |

@@ -81,18 +81,31 @@ credential's grants is a 404 — an agent cannot name a brain it was not given.
 |---|---|---|
 | `brain_list_brains` | — | which brains this credential may access, and with what scopes |
 | `brain_recall` | `brain.read` | bounded context package for a task: standing instructions, relevant memories, important memories, recent changes, related graph nodes |
+| `brain_context` | `brain.read` | 2.0 context engine: hybrid retrieval + pure scorer + redundancy filter + token packing + explanation |
 | `brain_search` | `brain.search` | ranked full-text search, compact results |
 | `brain_read` | `brain.read` | one memory in full, with provenance |
 | `brain_get_recent` | `brain.read` | recently updated memories, cursor-paginated |
 | `brain_get_memory_history` | `brain.read` | version history of one memory |
+| `brain_get_backlinks` | `brain.read` | explicit memory links pointing at this memory |
 | `brain_list_projects` | `brain.read` | projects and their memory counts |
 | `brain_list_tags` | `brain.read` | how this brain is organized |
 | `brain_remember` | `brain.write` | persist durable knowledge; dedupes on title+type |
 | `brain_update` | `brain.write` | amend a memory (snapshots a version first); also archive/unarchive |
 | `brain_delete` | `brain.delete` | soft-delete — **not** granted to agents by default |
+| `brain_link_memory` | `brain.link` | explicit memory↔memory edge with a label |
 | `brain_get_entity` | `brain.read` | find knowledge-graph nodes |
 | `brain_get_related` | `brain.read` | edges, optionally around one node |
-| `brain_link` | `brain.write` | link two things by name, creating nodes as needed |
+| `brain_link` | `brain.write` | link two entities by name, creating nodes as needed |
+| `brain_path` | `brain.read` | shortest path between two entities in the knowledge graph |
+| `brain_timeline` | `brain.read` | temporal slices: memories created/updated in a date range |
+| `brain_related` | `brain.read` | related memories via graph algorithms (PageRank walk + label propagation) |
+| `brain_explain` | `brain.read` | why a memory was retrieved or scored the way it was |
+| `brain_health` | `brain.read` | brain health snapshot: completeness, quality, connections, recency |
+| `brain_consolidate` | `brain.consolidate` | non-destructive consolidation preview or apply (merge duplicate entities, reconcile naming conflicts) |
+
+**23 tools.** The first 14 are the 1.0 surface; the rest are 2.0 intelligence-layer
+additions. See [Intelligence Layer (2.0)](second-brain-2.0.md) for what the 2.0
+tools do and their current limits.
 
 ### Recommended usage
 

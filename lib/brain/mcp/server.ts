@@ -23,6 +23,8 @@ export function createBrainMcpServer(principal: McpPrincipal): McpServer {
         "",
         "Protocol:",
         "1. Call brain_recall once at the start of a task to load standing instructions and relevant context.",
+        "   With a token budget to respect, call brain_context instead: same purpose, but bounded in",
+        "   tokens and it tells you why each memory was chosen and what was left out.",
         "2. Use brain_search / brain_read while working to look things up.",
         "3. Call brain_remember only for knowledge worth keeping permanently — facts, decisions,",
         "   preferences, procedures, project context. Not transient conversation.",

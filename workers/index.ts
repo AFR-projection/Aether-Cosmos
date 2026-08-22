@@ -23,6 +23,7 @@ import {
 } from "../lib/db/schema";
 import { QUEUE_NAME } from "../lib/queue";
 import { runScheduledCleanups } from "./cleanup";
+import { enrichBrain, enrichMemory, ENRICH_SWEEP_LIMIT } from "../lib/brain/enrich/enrich-service";
 import { Queue } from "bullmq";
 import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
@@ -535,6 +536,51 @@ async function processDeletion(deletionJobId: string): Promise<void> {
   }
 }
 
+// ── Second Brain enrichment (P1) ─────────────────────────────────────────────
+
+/**
+ * Enrich one memory.
+ *
+ * A `failed` outcome is rethrown so BullMQ retries it with the queue's backoff;
+ * `skipped` and `missing` are normal completions — a memory deleted or already
+ * current between enqueue and pickup is not an error. Logs carry counts and status
+ * only: memory text never reaches the worker's stdout.
+ */
+async function runEnrichMemory(brainId: string, memoryId: string): Promise<void> {
+  const report = await enrichMemory(db, { brainId, memoryId });
+  console.log(
+    `enrich_memory ${memoryId}: ${report.outcome} entities=${report.entities} mentions=${report.mentions} links=+${report.linksAdded}/-${report.linksRemoved}`
+  );
+  if (report.outcome === "failed") {
+    throw new Error(`Enrichment failed for memory ${memoryId}: ${report.error ?? "unknown"}`);
+  }
+}
+
+/**
+ * Bounded backfill sweep. Re-queues itself only while it is still making progress,
+ * so a memory that fails every attempt cannot turn the sweep into an infinite loop.
+ */
+async function runEnrichBrain(brainId: string, limit?: number): Promise<void> {
+  const batchLimit = limit ?? ENRICH_SWEEP_LIMIT;
+  const report = await enrichBrain(db, { brainId, limit: batchLimit });
+  console.log(
+    `enrich_brain ${brainId}: processed=${report.processed} ready=${report.ready} skipped=${report.skipped} failed=${report.failed} remaining=${report.remaining}`
+  );
+
+  if (report.remaining > 0 && report.ready + report.skipped > 0 && redisConnection) {
+    const queue = new Queue(QUEUE_NAME, { connection: redisConnection });
+    try {
+      await queue.add(
+        "enrich_brain",
+        { type: "enrich_brain", brainId, limit: batchLimit },
+        { delay: 2000, removeOnComplete: 20, removeOnFail: 20 }
+      );
+    } finally {
+      await queue.close();
+    }
+  }
+}
+
 const worker = new Worker(
   QUEUE_NAME,
   async (job) => {
@@ -551,6 +597,9 @@ const worker = new Worker(
       body?: string;
       archiveJobId?: string;
       deletionJobId?: string;
+      brainId?: string;
+      memoryId?: string;
+      limit?: number;
     };
 
     switch (data.type) {
@@ -581,6 +630,18 @@ const worker = new Worker(
         break;
       case "process_deletion":
         await processDeletion(data.deletionJobId!);
+        break;
+      case "enrich_memory":
+        // Both ids are required: enrichment scopes every statement by brain, so a
+        // payload without one must not fall through to a brain-wide operation.
+        if (data.brainId && data.memoryId) {
+          await runEnrichMemory(data.brainId, data.memoryId);
+        }
+        break;
+      case "enrich_brain":
+        if (data.brainId) {
+          await runEnrichBrain(data.brainId, data.limit);
+        }
         break;
     }
   },

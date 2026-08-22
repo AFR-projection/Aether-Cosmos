@@ -28,11 +28,10 @@ Second Brain is a knowledge management system designed for AI agents. Unlike eph
 ### Knowledge Graph
 - **Interactive Visualization** — Pan, zoom, hover, click, right-click
 - **Relationship Tiers:**
-  - **Semantic** (4 edges) — Similar content via embeddings
-  - **Context** (10 edges) — Shared tags, entities, projects
-  - **Explicit** (0 edges) — User-created memory links
+  - **Derived** — TF-IDF cosine similarity between memory content (not embeddings)
+  - **Explicit** — User-created memory links
 - **Local Graph** — Focus on one memory, see N-hop neighborhood (depths 1-6)
-- **Filters** — Toggle tiers, search queries, hide orphans
+- **Filters** — Search queries, hide orphans
 - **Groups** — Up to 12 custom color-coded rules
 - **Pop-out Workspace** — Independent window with cross-window sync (1-2ms)
 
@@ -41,9 +40,13 @@ Second Brain is a knowledge management system designed for AI agents. Unlike eph
 - Filter memories by project
 
 ### AI Agent Integration
-- **MCP Server** — 17 tools for reading, writing, searching memories
-- **Scoped Access** — Per-brain API keys with granular permissions
-- **Rate Limited** — Protect against agent abuse
+- **MCP Server** — 23 tools for reading, writing, searching memories, and using the
+  2.0 intelligence layer (retrieval, context, health, consolidation)
+- **Scoped Access** — Per-brain API keys with 8 granular scopes: `brain.read`,
+  `brain.search`, `brain.write`, `brain.link`, `brain.delete`, `brain.export`,
+  `brain.import`, `brain.consolidate`
+- **Rate Limited** — Separate `brain:*` buckets so agent traffic cannot starve file
+  uploads
 
 ---
 
@@ -91,9 +94,12 @@ Authorization: Bearer sk_<agent-key>
 
 ### 3. Grant Permissions
 
-Default scopes: `brain.read`, `brain.search`, `brain.write`
+Default scopes for a new agent: `brain.read`, `brain.search`, `brain.write`,
+`brain.link`.
 
-Never grant: `delete`, `export` (user-only operations)
+`brain.write` implies `brain.link` — an agent that can create memories can link
+them. `brain.delete`, `brain.export`, `brain.import`, and `brain.consolidate` are
+user-only operations by default.
 
 ---
 
@@ -141,7 +147,9 @@ POST /api/brain/{id}/import
 Upload `.afrbrain.zip`. The system:
 1. Validates format
 2. Previews counts
-3. Deduplicates on title+type
+3. Merges projects, entities, tags, and relationships by natural keys; memories,
+   memory links, and versions are additive (non-idempotent — importing the same
+   archive twice creates duplicates)
 4. Restores data
 
 ---
@@ -178,20 +186,18 @@ See [Second Brain MCP](second-brain-mcp.md) for:
 
 ## Implementation Status
 
-✅ **Complete & Verified:**
-- Memory CRUD with versioning
-- Projects and tags
-- Knowledge graph visualization
-- Semantic + context relationships
-- Local/global graph views
-- Filters, groups, settings persistence
-- Pop-out workspace with cross-window sync
-- MCP server with 17 tools
-- Export/import
-- Audit logging
-- 313 tests passing
+**Second Brain 1.0** (memories, versions, projects, entities, tags, relationships,
+graph, MCP 1.0, export/import, audit) is covered by unit and integration tests and
+in production use by the maintainer.
 
-⏭️ **Future Enhancements:**
+**Second Brain 2.0** (hybrid retrieval, context engine, enrichment, health,
+provenance, feedback loop, consolidation, extended MCP tools) is covered by unit
+tests and reachable through MCP only. See
+[Intelligence Layer (2.0)](second-brain-2.0.md) for capabilities and limits.
+
+Test count is reported in [docs/README.md § Project status](README.md#project-status).
+
+⏭️ **Future:**
 - Backlinks panel in memory detail
 - Advanced graph layouts (hierarchical, radial)
 - Visual refinement (UI design review)
@@ -203,6 +209,8 @@ See [Second Brain MCP](second-brain-mcp.md) for:
 - Detail page loading race on newly-created memories (UI timing issue)
 - Max 12 custom groups (performance ceiling)
 - Cross-window delete sync requires UI mutation path
+- Import is non-idempotent for memories — importing the same archive twice creates
+  duplicates; see [Second Brain 2.0 § Import](second-brain-2.0.md#import-non-idempotency)
 
 ---
 

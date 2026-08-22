@@ -122,8 +122,12 @@ const REASON_MAX = 90;
 // listed here. There is no stemmer: Indonesian affixes ("meng-", "-kan", "-nya")
 // would need a real morphological analyser, and naive suffix stripping conflates
 // unrelated words — a false edge is worse than a missed one.
+//
+// Exported because entity extraction (lib/brain/enrich/extract.ts) must reject the
+// exact same words. Two lists would drift, and a drifted list is how "Yang" ends
+// up as a person node in the graph.
 
-const STOP_WORDS = new Set([
+export const STOP_WORDS = new Set([
   // English
   "the", "a", "an", "and", "or", "but", "if", "then", "than", "so", "because",
   "is", "are", "was", "were", "be", "been", "being", "am", "will", "would",

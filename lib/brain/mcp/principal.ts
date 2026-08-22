@@ -5,6 +5,8 @@ import { authenticateApiKey, keyHasScope } from "@/lib/auth/api-key";
 import { AuthError } from "@/lib/auth/session";
 import {
   BRAIN_API_SCOPES,
+  brainScopeSatisfied,
+  expandBrainScopes,
   type BrainApiScope,
 } from "@/lib/brain/constants";
 import { BrainForbiddenError, BrainNotFoundError } from "@/lib/brain/errors";
@@ -36,8 +38,24 @@ export type McpPrincipal = {
   grants: BrainGrant[];
 };
 
-function asBrainScopes(scopes: readonly string[]): BrainApiScope[] {
-  return BRAIN_API_SCOPES.filter((scope) => scopes.includes(scope));
+/**
+ * Effective scopes for one grant: the grant's own scopes expanded through the
+ * implication table (so `brain.full` and `brain.write`→`brain.link` mean the same
+ * thing here as on the REST routes), intersected with what the API key carries.
+ *
+ * Both halves go through the shared helpers in lib/brain/constants.ts. Rolling
+ * our own membership test here is what let MCP drift stricter than REST.
+ *
+ * Exported so the parity regression test can compare this against the REST
+ * predicate directly instead of re-implementing it.
+ */
+export function effectiveGrantScopes(
+  grantScopes: readonly string[],
+  keyScopes: readonly string[]
+): BrainApiScope[] {
+  return expandBrainScopes(grantScopes).filter((scope) =>
+    keyHasScope([...keyScopes], scope)
+  );
 }
 
 /**
@@ -90,7 +108,7 @@ export async function resolveMcpPrincipal(token: string): Promise<McpPrincipal> 
         brainId: brain.id,
         brainName: brain.name,
         isDefault: brain.isDefault,
-        scopes: asBrainScopes(keyScopes),
+        scopes: effectiveGrantScopes(keyScopes, keyScopes),
       })),
     };
   }
@@ -131,9 +149,7 @@ export async function resolveMcpPrincipal(token: string): Promise<McpPrincipal> 
       isDefault: row.isDefault,
       // Effective scopes are the INTERSECTION of the key's scopes and the grant's:
       // narrowing either one narrows the agent.
-      scopes: asBrainScopes(row.scopes ?? []).filter((scope) =>
-        keyHasScope(keyScopes, scope)
-      ),
+      scopes: effectiveGrantScopes(row.scopes ?? [], keyScopes),
     })),
   };
 }
@@ -162,7 +178,9 @@ export function requireGrant(
       principal.grants.find((candidate) => candidate.isDefault) ?? principal.grants[0];
   }
 
-  if (!grant.scopes.includes(scope)) {
+  // Same predicate the REST choke point uses (lib/brain/access.ts), so a scope
+  // that opens a route over HTTP opens the equivalent MCP tool and nothing more.
+  if (!brainScopeSatisfied(grant.scopes, scope)) {
     throw new BrainForbiddenError(`Missing scope: ${scope}`);
   }
   return grant;

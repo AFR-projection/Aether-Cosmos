@@ -14,6 +14,7 @@ import {
   real,
   primaryKey,
   check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations, sql, type SQL } from "drizzle-orm";
 
@@ -881,6 +882,58 @@ export const brainEntityTypeEnum = pgEnum("brain_entity_type", [
   "concept", "product", "agent", "document", "other",
 ]);
 
+/**
+ * Where a memory sits in its own lifecycle. Distinct from `archivedAt`/`deletedAt`
+ * (user intent) — this is what the *knowledge* is worth right now. `stale` and
+ * `superseded` memories stay readable and exportable; they only lose ranking
+ * weight, because decay must never delete knowledge.
+ */
+export const memoryValidityStateEnum = pgEnum("memory_validity_state", [
+  "active",
+  "superseded",
+  "stale",
+  "retracted",
+]);
+
+/** Background-enrichment state machine. `skipped` = deliberately not enriched. */
+export const memoryEnrichmentStatusEnum = pgEnum("memory_enrichment_status", [
+  "pending",
+  "processing",
+  "ready",
+  "failed",
+  "skipped",
+]);
+
+/** Node kinds that can carry cached graph metrics. */
+export const brainGraphNodeKindEnum = pgEnum("brain_graph_node_kind", ["memory", "entity"]);
+
+/** Lifecycle of one retrieved memory inside one retrieval. Feeds bounded ranking signals. */
+export const brainRetrievalOutcomeEnum = pgEnum("brain_retrieval_outcome", [
+  "retrieved",
+  "selected",
+  "omitted",
+  "opened",
+  "confirmed",
+  "corrected",
+  "superseded",
+]);
+
+/** What a review item is asking the human to look at. */
+export const brainReviewKindEnum = pgEnum("brain_review_kind", [
+  "contradiction",
+  "duplicate",
+  "stale",
+  "orphan",
+  "low_confidence_important",
+  "missing_entities",
+]);
+
+export const brainReviewStatusEnum = pgEnum("brain_review_status", [
+  "open",
+  "dismissed",
+  "resolved",
+]);
+
 export const brains = pgTable(
   "brains",
   {
@@ -963,6 +1016,36 @@ export const memories = pgTable(
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+
+    // ── Second Brain 2.0: enrichment bookkeeping ──────────────────────────
+    /**
+     * SHA-256 of the enrichable payload (type + title + content + summary).
+     * Enrichment compares this against `enrichedHash` so re-running the job for
+     * an unchanged memory is a no-op — the idempotency key required by P1.
+     */
+    contentHash: text("content_hash"),
+    enrichedHash: text("enriched_hash"),
+    enrichmentStatus: memoryEnrichmentStatusEnum("enrichment_status").notNull().default("pending"),
+    enrichmentError: text("enrichment_error"),
+    enrichedAt: timestamp("enriched_at", { withTimezone: true }),
+
+    // ── Second Brain 2.0: temporal / epistemic state ──────────────────────
+    /** Bounded usage counters. Retrieval feedback must not run away (P10). */
+    recallCount: integer("recall_count").notNull().default(0),
+    lastRecalledAt: timestamp("last_recalled_at", { withTimezone: true }),
+    confirmationCount: integer("confirmation_count").notNull().default(0),
+    lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }),
+    /** Explicit validity window. NULL `validFrom` means "since createdAt". */
+    validFrom: timestamp("valid_from", { withTimezone: true }),
+    validUntil: timestamp("valid_until", { withTimezone: true }),
+    validityState: memoryValidityStateEnum("validity_state").notNull().default("active"),
+    /** Set when consolidation supersedes this memory. Never deletes the row. */
+    supersededById: uuid("superseded_by_id").references((): AnyPgColumn => memories.id, {
+      onDelete: "set null",
+    }),
+    /** Extra surface forms for this memory's subject, used by mention detection. */
+    aliases: text("aliases").array(),
+
     searchVector: tsvector("search_vector").generatedAlwaysAs(
       (): SQL =>
         sql`setweight(to_tsvector('simple', coalesce(${memories.title}, '')), 'A') || setweight(to_tsvector('simple', coalesce(${memories.content}, '')), 'B')`
@@ -980,6 +1063,14 @@ export const memories = pgTable(
     index("memories_brain_keyset_idx").on(table.brainId, table.createdAt, table.id),
     index("memories_project_idx").on(table.projectId),
     index("memories_search_vector_idx").using("gin", table.searchVector),
+    // Worker claim query: "next N memories in this brain needing enrichment".
+    index("memories_enrichment_idx")
+      .on(table.brainId, table.enrichmentStatus)
+      .where(sql`enrichment_status <> 'ready'`),
+    index("memories_brain_validity_idx").on(table.brainId, table.validityState),
+    index("memories_superseded_by_idx").on(table.supersededById),
+    // Temporal ranking + "what did I last touch" reads.
+    index("memories_brain_recalled_idx").on(table.brainId, table.lastRecalledAt),
   ]
 );
 
@@ -1064,6 +1155,15 @@ export const brainEntities = pgTable(
     type: brainEntityTypeEnum("type").notNull().default("other"),
     description: text("description"),
     metadata: jsonb("metadata"),
+    // ── Second Brain 2.0: extraction provenance (P1) ──────────────────────
+    /** Alternate surface forms that resolve to this node ("R2", "Cloudflare R2"). */
+    aliases: text("aliases").array(),
+    mentionCount: integer("mention_count").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    /** Which extractor produced this node, e.g. `manual` or `deterministic-v1`. */
+    extractedBy: text("extracted_by"),
+    extractionConfidence: real("extraction_confidence"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1180,6 +1280,169 @@ export const brainAuditLogs = pgTable(
   ]
 );
 
+// ── Second Brain 2.0: intelligence tables ───────────────────────────────────
+
+/**
+ * One occurrence of an entity inside one memory, with the exact surface form and
+ * character offsets that produced it. This is the evidence layer: every
+ * memory→entity link the enrichment pipeline writes can be traced back to the
+ * literal span that justified it, so no relationship is ever unexplainable.
+ */
+export const memoryMentions = pgTable(
+  "memory_mentions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    memoryId: uuid("memory_id").notNull().references(() => memories.id, { onDelete: "cascade" }),
+    entityId: uuid("entity_id").notNull().references(() => brainEntities.id, { onDelete: "cascade" }),
+    /** `title` | `summary` | `content` — which field the span was found in. */
+    field: text("field").notNull(),
+    /** The literal matched text, kept verbatim for auditability. */
+    surface: text("surface").notNull(),
+    startOffset: integer("start_offset").notNull(),
+    endOffset: integer("end_offset").notNull(),
+    confidence: real("confidence").notNull().default(1),
+    extractedBy: text("extracted_by").notNull().default("deterministic-v1"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("memory_mentions_brain_idx").on(table.brainId),
+    index("memory_mentions_memory_idx").on(table.memoryId),
+    index("memory_mentions_entity_idx").on(table.brainId, table.entityId),
+    // Re-running enrichment on unchanged text must not duplicate spans.
+    uniqueIndex("memory_mentions_span_unique").on(
+      table.memoryId,
+      table.entityId,
+      table.field,
+      table.startOffset
+    ),
+    check("memory_mentions_offsets", sql`"end_offset" > "start_offset"`),
+    check("memory_mentions_field", sql`"field" IN ('title', 'summary', 'content')`),
+  ]
+);
+
+/**
+ * Cached graph metrics per node. Recomputing PageRank/communities on every
+ * request is the O(N) trap the performance rules forbid, so the worker writes
+ * this table and readers treat it as a stale-tolerant cache: absent rows mean
+ * "not computed yet", never "metric is zero".
+ */
+export const brainGraphMetrics = pgTable(
+  "brain_graph_metrics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    nodeKind: brainGraphNodeKindEnum("node_kind").notNull(),
+    /** Not an FK: one column has to point at either memories or brain_entities. */
+    nodeId: uuid("node_id").notNull(),
+    degree: integer("degree").notNull().default(0),
+    weightedDegree: real("weighted_degree").notNull().default(0),
+    pagerank: real("pagerank").notNull().default(0),
+    /** Label-propagation community id, stable within one computation run. */
+    communityId: integer("community_id"),
+    componentId: integer("component_id"),
+    isBridge: boolean("is_bridge").notNull().default(false),
+    isOrphan: boolean("is_orphan").notNull().default(false),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("brain_graph_metrics_node_unique").on(table.brainId, table.nodeKind, table.nodeId),
+    index("brain_graph_metrics_brain_rank_idx").on(table.brainId, table.pagerank),
+    index("brain_graph_metrics_brain_kind_idx").on(table.brainId, table.nodeKind),
+  ]
+);
+
+/** Point-in-time health rollup so the UI can show a trend without a full rescan. */
+export const brainHealthSnapshots = pgTable(
+  "brain_health_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    totalMemories: integer("total_memories").notNull().default(0),
+    staleCount: integer("stale_count").notNull().default(0),
+    contradictionCount: integer("contradiction_count").notNull().default(0),
+    duplicateCount: integer("duplicate_count").notNull().default(0),
+    orphanCount: integer("orphan_count").notNull().default(0),
+    weakClusterCount: integer("weak_cluster_count").notNull().default(0),
+    missingEntityCount: integer("missing_entity_count").notNull().default(0),
+    lowConfidenceImportantCount: integer("low_confidence_important_count").notNull().default(0),
+    avgConfidence: real("avg_confidence").notNull().default(0),
+    /** 0..1 composite. Deterministic function of the counters above. */
+    score: real("score").notNull().default(0),
+    /** Counter breakdown only — never memory titles or content. */
+    details: jsonb("details"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brain_health_snapshots_brain_time_idx").on(table.brainId, table.createdAt),
+  ]
+);
+
+/**
+ * Retrieval telemetry feeding the ranking feedback loop (P10).
+ *
+ * Privacy: `queryHash` is a salted SHA-256 of the normalized query — the raw
+ * query text is NEVER stored, because Brain content must not leak into
+ * analytics. The hash exists only to group events from one retrieval.
+ */
+export const brainRetrievalEvents = pgTable(
+  "brain_retrieval_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    memoryId: uuid("memory_id").notNull().references(() => memories.id, { onDelete: "cascade" }),
+    queryHash: text("query_hash"),
+    /** Which surface produced the event: `brain_context`, `brain_search`, ... */
+    tool: text("tool").notNull(),
+    outcome: brainRetrievalOutcomeEnum("outcome").notNull(),
+    rank: integer("rank"),
+    score: real("score"),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    agentId: uuid("agent_id").references(() => brainAgents.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("brain_retrieval_events_brain_time_idx").on(table.brainId, table.createdAt),
+    index("brain_retrieval_events_memory_idx").on(table.memoryId, table.outcome),
+    index("brain_retrieval_events_query_idx").on(table.brainId, table.queryHash),
+  ]
+);
+
+/**
+ * Human review queue. Contradictions and duplicates are surfaced here instead of
+ * being auto-resolved — resolution is always an explicit user/policy decision.
+ *
+ * `dedupeKey` is a deterministic string built by the health service (kind plus
+ * the sorted memory ids), so re-scanning updates the existing row rather than
+ * flooding the queue.
+ */
+export const brainReviewItems = pgTable(
+  "brain_review_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id").notNull().references(() => brains.id, { onDelete: "cascade" }),
+    kind: brainReviewKindEnum("kind").notNull(),
+    status: brainReviewStatusEnum("status").notNull().default("open"),
+    memoryId: uuid("memory_id").references(() => memories.id, { onDelete: "cascade" }),
+    relatedMemoryId: uuid("related_memory_id").references(() => memories.id, { onDelete: "cascade" }),
+    dedupeKey: text("dedupe_key").notNull(),
+    /** Short machine-generated explanation, e.g. "negation + 0.71 overlap". */
+    reason: text("reason").notNull(),
+    /** Structured evidence (scores, shared terms) — bounded, no full content. */
+    evidence: jsonb("evidence"),
+    priority: real("priority").notNull().default(0.5),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: uuid("resolved_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("brain_review_items_dedupe_unique").on(table.brainId, table.dedupeKey),
+    index("brain_review_items_brain_status_idx").on(table.brainId, table.status, table.priority),
+    index("brain_review_items_memory_idx").on(table.memoryId),
+  ]
+);
+
 // Relations
 export const brainsRelations = relations(brains, ({ one, many }) => ({
   owner: one(users, { fields: [brains.ownerUserId], references: [users.id] }),
@@ -1277,3 +1540,30 @@ export const memoryLinksRelations = relations(memoryLinks, ({ one }) => ({
 
 export type MemoryLink = typeof memoryLinks.$inferSelect;
 export type NewMemoryLink = typeof memoryLinks.$inferInsert;
+
+export const memoryMentionsRelations = relations(memoryMentions, ({ one }) => ({
+  brain: one(brains, { fields: [memoryMentions.brainId], references: [brains.id] }),
+  memory: one(memories, { fields: [memoryMentions.memoryId], references: [memories.id] }),
+  entity: one(brainEntities, { fields: [memoryMentions.entityId], references: [brainEntities.id] }),
+}));
+
+export const brainRetrievalEventsRelations = relations(brainRetrievalEvents, ({ one }) => ({
+  brain: one(brains, { fields: [brainRetrievalEvents.brainId], references: [brains.id] }),
+  memory: one(memories, { fields: [brainRetrievalEvents.memoryId], references: [memories.id] }),
+}));
+
+export const brainReviewItemsRelations = relations(brainReviewItems, ({ one }) => ({
+  brain: one(brains, { fields: [brainReviewItems.brainId], references: [brains.id] }),
+  memory: one(memories, { fields: [brainReviewItems.memoryId], references: [memories.id] }),
+}));
+
+export type MemoryMention = typeof memoryMentions.$inferSelect;
+export type NewMemoryMention = typeof memoryMentions.$inferInsert;
+export type BrainGraphMetric = typeof brainGraphMetrics.$inferSelect;
+export type NewBrainGraphMetric = typeof brainGraphMetrics.$inferInsert;
+export type BrainHealthSnapshot = typeof brainHealthSnapshots.$inferSelect;
+export type NewBrainHealthSnapshot = typeof brainHealthSnapshots.$inferInsert;
+export type BrainRetrievalEvent = typeof brainRetrievalEvents.$inferSelect;
+export type NewBrainRetrievalEvent = typeof brainRetrievalEvents.$inferInsert;
+export type BrainReviewItem = typeof brainReviewItems.$inferSelect;
+export type NewBrainReviewItem = typeof brainReviewItems.$inferInsert;

@@ -28,6 +28,25 @@ import {
   encodeMemoryCursor,
   type MemoryCursor,
 } from "./pagination";
+import { memoryContentHash } from "./enrich/enrich-service";
+import { enqueueJob } from "@/lib/queue";
+
+/**
+ * Ask the worker to enrich a memory (P1).
+ *
+ * Deliberately fire-and-forget and deliberately un-awaited by the write path: the
+ * memory is already committed, and enrichment failing — or Redis being absent
+ * entirely — must never turn a successful write into an error. With no worker the
+ * row simply stays `enrichment_status = 'pending'` until a sweep picks it up.
+ *
+ * No `jobId` de-duplication on purpose: `removeOnComplete` keeps finished jobs
+ * around, and a retained completed job would make BullMQ silently drop the next
+ * add for the same id. Duplicate jobs are harmless here — the second one sees a
+ * matching `enriched_hash` and does nothing.
+ */
+function requestEnrichment(brainId: string, memoryId: string): void {
+  void enqueueJob("enrich_memory", { brainId, memoryId }).catch(() => {});
+}
 
 export type MemoryWithTags = Memory & { tags: string[] };
 
@@ -143,16 +162,19 @@ export async function createMemory(params: {
 }): Promise<MemoryWithTags> {
   const { brainId, principal, data } = params;
   const tags = normalizeTags(data.tags ?? []);
+  const type = data.type ?? "fact";
+  const title = data.title.trim();
+  const summary = data.summary?.trim() || null;
 
-  return db.transaction(async (tx) => {
+  const created = await db.transaction(async (tx) => {
     const [memory] = await tx
       .insert(memories)
       .values({
         brainId,
-        type: data.type ?? "fact",
-        title: data.title.trim(),
+        type,
+        title,
         content: data.content,
-        summary: data.summary?.trim() || null,
+        summary,
         importance: data.importance ?? 0.5,
         confidence: data.confidence ?? 0.9,
         // An agent that does not say where the memory came from is itself the source.
@@ -162,6 +184,9 @@ export async function createMemory(params: {
         createdByAgent: principal.agentId,
         projectId: data.projectId ?? null,
         metadata: data.metadata ?? null,
+        // Written with the row so enrichment has its idempotency key from the
+        // start; `enrichment_status` keeps its `pending` default.
+        contentHash: memoryContentHash({ type, title, content: data.content, summary }),
       })
       .returning();
 
@@ -173,6 +198,9 @@ export async function createMemory(params: {
 
     return { ...memory, tags };
   });
+
+  requestEnrichment(brainId, created.id);
+  return created;
 }
 
 // ── read ────────────────────────────────────────────────────────────────────
@@ -311,7 +339,9 @@ export async function updateMemory(params: {
 
   if (!hasAnyChange) throw new BrainValidationError("No fields to update");
 
-  return db.transaction(async (tx) => {
+  let needsEnrichment = false;
+
+  const result = await db.transaction(async (tx) => {
     // SELECT ... FOR UPDATE serializes concurrent PATCHes on the same memory, so
     // two writers cannot both snapshot version N and collide on the unique
     // (memory_id, version_number) index.
@@ -341,6 +371,24 @@ export async function updateMemory(params: {
     if (data.metadata !== undefined) patch.metadata = data.metadata;
     if (data.archived !== undefined) {
       patch.archivedAt = data.archived ? (existing.archivedAt ?? new Date()) : null;
+    }
+
+    // Re-enrichment is keyed on the hash rather than on "was a text field in the
+    // patch": re-submitting identical text must not queue work, and a legacy row
+    // with no hash yet must. Status returns to `pending` so the graph is never
+    // silently left describing the previous version of the text.
+    const nextHash = memoryContentHash({
+      type: (data.type ?? existing.type) as string,
+      title: data.title !== undefined ? data.title.trim() : existing.title,
+      content: data.content !== undefined ? data.content : existing.content,
+      summary:
+        data.summary !== undefined ? data.summary?.trim() || null : existing.summary,
+    });
+    if (nextHash !== existing.contentHash) {
+      patch.contentHash = nextHash;
+      patch.enrichmentStatus = "pending";
+      patch.enrichmentError = null;
+      needsEnrichment = true;
     }
 
     // Only snapshot a version when the versioned columns actually change —
@@ -376,6 +424,9 @@ export async function updateMemory(params: {
     const [withTag] = await withTags([updated]);
     return withTag;
   });
+
+  if (needsEnrichment) requestEnrichment(brainId, memoryId);
+  return result;
 }
 
 function asJsonObject(value: unknown): Record<string, unknown> | null {

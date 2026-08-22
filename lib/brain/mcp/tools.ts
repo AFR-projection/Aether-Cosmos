@@ -21,6 +21,20 @@ import {
   type ResolvedLink,
 } from "@/lib/brain/link-service";
 import { consolidateBrain } from "@/lib/brain/consolidation-service";
+import {
+  CONTEXT_MAX_MEMORIES_MAX,
+  CONTEXT_TOKEN_BUDGET_MAX,
+  CONTEXT_TOKEN_BUDGET_MIN,
+  buildBrainContext,
+  type ContextPackage,
+} from "@/lib/brain/context-engine";
+import { findBrainMemoryPath } from "@/lib/brain/graph/path-service";
+import { getBrainRelatedMemories } from "@/lib/brain/graph/related-service";
+import { getMemoryTimeline } from "@/lib/brain/temporal-service";
+import { getMemoryProvenance } from "@/lib/brain/provenance-service";
+import { getBrainHealth } from "@/lib/brain/health-service";
+import { syncBrainReviewQueue } from "@/lib/brain/review-service";
+import { recordMemoryFeedback } from "@/lib/brain/feedback-loop";
 import { listProjects } from "@/lib/brain/project-service";
 import { recallBrainContext } from "@/lib/brain/recall";
 import { rememberMemory } from "@/lib/brain/remember";
@@ -94,6 +108,49 @@ function summarize(memory: {
   };
 }
 
+/** Cap on how many dropped candidates the MCP response reports. */
+const MCP_OMITTED_MAX = 10;
+
+/**
+ * The context package, without repeating itself.
+ *
+ * `contextText` already holds every selected body, so the per-memory entries carry
+ * only what an agent needs to act on one: where it sits in the text, why it is there,
+ * and the ids to follow up with. Returning both copies would double the cost of the
+ * very thing this tool exists to bound (§25, §68).
+ */
+function compactContext(context: ContextPackage) {
+  return {
+    task: context.task,
+    tokenModel: context.tokenModel,
+    tokenBudget: context.tokenBudget,
+    usableBudget: context.usableBudget,
+    tokensUsed: context.tokensUsed,
+    truncated: context.truncated,
+    candidates: context.candidates,
+    semanticAvailable: context.semanticAvailable,
+    contextText: context.contextText,
+    memories: context.memories.map((memory, index) => ({
+      position: index + 1,
+      id: memory.id,
+      type: memory.type,
+      title: memory.title,
+      relevance: Math.round(memory.score * 1000) / 1000,
+      whyMatched: memory.whyMatched,
+      matchedBy: memory.legs,
+      tokens: memory.tokens,
+      truncated: memory.truncated,
+      entities: memory.entities,
+      graph: memory.graph,
+      provenance: memory.provenance,
+    })),
+    omitted: context.omitted.slice(0, MCP_OMITTED_MAX),
+    omittedTotal: context.omitted.length,
+    graph: context.graph,
+    contradictions: context.contradictions,
+  };
+}
+
 export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal): void {
   // ── discovery ─────────────────────────────────────────────────────────────
 
@@ -154,6 +211,83 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
         });
         await audit(grant.brainId, "memory.recall", { task: task ?? null, projectId: projectId ?? null });
         return ok(context);
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_context",
+    {
+      description:
+        "Assemble a token-bounded context package for one task: the memories worth knowing, why each was chosen, what was left out and why, plus — on request — the graph edges between them, contradictions among them, and their provenance. Use this instead of brain_recall when you have a token budget to respect: `contextText` is measured with a documented tokenizer and never exceeds the budget you ask for.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        task: z
+          .string()
+          .trim()
+          .min(1)
+          .max(1000)
+          .describe("What you are about to do. Drives retrieval and ranking."),
+        tokenBudget: z
+          .number()
+          .int()
+          .min(CONTEXT_TOKEN_BUDGET_MIN)
+          .max(CONTEXT_TOKEN_BUDGET_MAX)
+          .optional()
+          .describe("Tokens `contextText` may occupy. Defaults to 2000."),
+        maxMemories: z
+          .number()
+          .int()
+          .min(1)
+          .max(CONTEXT_MAX_MEMORIES_MAX)
+          .optional()
+          .describe("Hard cap on memories returned, even if the budget allows more."),
+        includeGraph: z
+          .boolean()
+          .optional()
+          .describe("Add the explicit links and shared entities among the selected memories."),
+        includeProvenance: z
+          .boolean()
+          .optional()
+          .describe("Add source, confidence, confirmation and validity per memory."),
+        projectId: z.string().uuid().optional().describe("Narrow the whole package to one project."),
+        types: z.array(z.enum(MEMORY_TYPES)).min(1).max(MEMORY_TYPES.length).optional(),
+        seedMemoryIds: z
+          .array(z.string().uuid())
+          .min(1)
+          .max(8)
+          .optional()
+          .describe("Memories you are already looking at. Their graph neighbours are considered."),
+      }),
+    },
+    async (args) => {
+      try {
+        const grant = requireGrant(principal, args.brainId, "brain.read");
+        const context = await buildBrainContext({
+          brainId: grant.brainId,
+          task: args.task,
+          tokenBudget: args.tokenBudget,
+          maxMemories: args.maxMemories,
+          includeGraph: args.includeGraph,
+          includeProvenance: args.includeProvenance,
+          projectId: args.projectId,
+          types: args.types,
+          seedMemoryIds: args.seedMemoryIds,
+        });
+        // Counts, not text: an audit row records that context was assembled, not what
+        // the brain knows (§ no Brain content in audit logs unnecessarily).
+        await audit(grant.brainId, "memory.context", {
+          projectId: args.projectId ?? null,
+          taskChars: args.task.length,
+          tokenBudget: context.tokenBudget,
+          tokensUsed: context.tokensUsed,
+          selected: context.memories.length,
+          omitted: context.omitted.length,
+          truncated: context.truncated,
+        });
+        return ok(compactContext(context));
       } catch (error) {
         return fail(error);
       }
@@ -283,6 +417,24 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
         const grant = requireGrant(principal, brainId, "brain.read");
         const memory = await getMemory({ brainId: grant.brainId, memoryId });
         if (!memory) return fail(new BrainError("Memory not found", 404, "MEMORY_NOT_FOUND"));
+
+        // This is the one tool that hands out a full body, so it is the one read that
+        // most needs a row: the id and the tool, never the content (§ audit logs carry
+        // no Brain content). Recorded before the feedback counter, so a feedback
+        // failure can never lose the disclosure.
+        await audit(grant.brainId, "memory.read", { via: "brain_read", memoryId });
+
+        // Feedback signal (P10): this memory was opened in full. Bounded counters
+        // only — the ranking adjustment saturates, so reads can never runaway-boost.
+        await recordMemoryFeedback(
+          grant.brainId,
+          memoryId,
+          "opened",
+          principal.userId,
+          principal.agentId,
+          { tool: "brain_read" }
+        );
+
         return ok({
           id: memory.id,
           type: memory.type,
@@ -752,6 +904,316 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
   );
 
   server.registerTool(
+    "brain_path",
+    {
+      description:
+        "Find an explainable path between two memories: the chain of links connecting them. Returns the sequence of hops (A --supersedes--> B --related_to--> C) or 'not found' if no path exists within the depth limit. Use to understand how concepts are connected.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        sourceMemoryId: z.string().uuid().describe("Starting memory id."),
+        targetMemoryId: z.string().uuid().describe("Target memory id."),
+        maxDepth: z
+          .number()
+          .int()
+          .min(1)
+          .max(8)
+          .optional()
+          .describe("Maximum number of hops (default 5)."),
+      }),
+    },
+    async ({ brainId, sourceMemoryId, targetMemoryId, maxDepth }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const result = await findBrainMemoryPath(
+          grant.brainId,
+          sourceMemoryId,
+          targetMemoryId,
+          maxDepth ?? 5
+        );
+
+        await audit(grant.brainId, "graph.path", {
+          via: "brain_path",
+          sourceMemoryId,
+          targetMemoryId,
+          found: result.found,
+          hops: result.path.length,
+        });
+
+        if (!result.found) {
+          return ok({
+            found: false,
+            message: `No path found from ${sourceMemoryId} to ${targetMemoryId} within ${maxDepth ?? 5} hops.`,
+          });
+        }
+
+        return ok({
+          found: true,
+          path: result.path.map((hop) => ({
+            source: { id: hop.source.id, title: hop.source.title, type: hop.source.type },
+            relationshipType: hop.relationshipType,
+            target: { id: hop.target.id, title: hop.target.title, type: hop.target.type },
+            weight: hop.weight,
+          })),
+          distance: result.distance,
+          hops: result.path.length,
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_timeline",
+    {
+      description:
+        "Show the evolution of one memory over time: when it was created, updated, accessed, confirmed, or superseded. Returns a chronological timeline of events. Use to understand how knowledge changed.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid().describe("Memory to show timeline for."),
+      }),
+    },
+    async ({ brainId, memoryId }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const timeline = await getMemoryTimeline(grant.brainId, memoryId);
+
+        if (!timeline) {
+          return ok({
+            found: false,
+            message: `Memory ${memoryId} not found in brain ${grant.brainId}.`,
+          });
+        }
+
+        await audit(grant.brainId, "memory.timeline", {
+          via: "brain_timeline",
+          memoryId,
+          events: timeline.events.length,
+        });
+
+        return ok({
+          found: true,
+          memoryId: timeline.memoryId,
+          memoryTitle: timeline.memoryTitle,
+          events: timeline.events.map((event) => ({
+            timestamp: event.timestamp.toISOString(),
+            eventType: event.eventType,
+            version: event.version,
+            supersededBy: event.supersededBy,
+            changeReason: event.changeReason,
+          })),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_related",
+    {
+      description:
+        "Find memories related to a given memory by combining direct links, graph proximity, semantic overlap, and shared entities. Returns a ranked list of related memories with explanations. Use to explore connections and discover relevant context.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid().describe("Memory to find relatives of."),
+        maxResults: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .optional()
+          .describe("Maximum number of results (default 20)."),
+        maxHops: z
+          .number()
+          .int()
+          .min(1)
+          .max(4)
+          .optional()
+          .describe("Maximum graph distance (default 2)."),
+      }),
+    },
+    async ({ brainId, memoryId, maxResults, maxHops }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const related = await getBrainRelatedMemories(
+          grant.brainId,
+          memoryId,
+          maxResults ?? 20,
+          maxHops ?? 2
+        );
+
+        await audit(grant.brainId, "memory.related", {
+          via: "brain_related",
+          memoryId,
+          found: related.length,
+        });
+
+        return ok({
+          memoryId,
+          related: related.map((r) => ({
+            id: r.id,
+            title: r.title,
+            type: r.type,
+            score: r.score,
+            reason: r.reason,
+            linkType: r.linkType,
+            hops: r.hops,
+          })),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_explain",
+    {
+      description:
+        "Explain where a memory came from: its creation source, authorship, confirmation history, quality signals, update lineage, supersession chain, and source memories it was derived from. Full provenance audit trail.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        memoryId: z.string().uuid().describe("Memory to explain."),
+      }),
+    },
+    async ({ brainId, memoryId }) => {
+      try {
+        const grant = requireGrant(principal, brainId, "brain.read");
+        const provenance = await getMemoryProvenance(grant.brainId, memoryId);
+
+        if (!provenance) {
+          return ok({
+            found: false,
+            message: `Memory ${memoryId} not found in brain ${grant.brainId}.`,
+          });
+        }
+
+        await audit(grant.brainId, "memory.provenance", {
+          via: "brain_explain",
+          memoryId,
+        });
+
+        return ok({
+          found: true,
+          memoryId: provenance.memoryId,
+          memoryTitle: provenance.memoryTitle,
+          memoryType: provenance.memoryType,
+          creation: {
+            sourceType: provenance.sourceType,
+            sourceId: provenance.sourceId,
+            createdAt: provenance.createdAt.toISOString(),
+            createdBy: provenance.createdBy,
+            createdByUserId: provenance.createdByUserId,
+            createdByAgentId: provenance.createdByAgentId,
+            createdByAgentName: provenance.createdByAgentName,
+          },
+          quality: {
+            confidence: provenance.confidence,
+            importance: provenance.importance,
+            confirmationCount: provenance.confirmationCount,
+            lastConfirmedAt: provenance.lastConfirmedAt?.toISOString() ?? null,
+            validityState: provenance.validityState,
+          },
+          evolution: {
+            versionCount: provenance.versionCount,
+            lastUpdated: provenance.lastUpdated.toISOString(),
+            lastUpdatedBy: provenance.lastUpdatedBy,
+            lastChangeReason: provenance.lastChangeReason,
+          },
+          relationships: {
+            supersededBy: provenance.supersededBy,
+            supersedes: provenance.supersedes,
+            sourceMemories: provenance.sourceMemories,
+          },
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "brain_health",
+    {
+      description:
+        "Analyze brain health: quality metrics, structural issues (orphans, weak links), and contradictions. Returns metrics and a list of issues ranked by severity. Read-only unless queueForReview is true, which persists the findings to the human review queue — it never resolves anything.",
+      inputSchema: z.object({
+        ...brainIdArg,
+        staleDays: z
+          .number()
+          .int()
+          .min(30)
+          .max(365)
+          .optional()
+          .describe("Days since last access to consider stale (default 180)."),
+        lowConfidenceThreshold: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Confidence below this is flagged (default 0.5)."),
+        maxIssues: z
+          .number()
+          .int()
+          .min(10)
+          .max(200)
+          .optional()
+          .describe("Maximum issues to return (default 50)."),
+        queueForReview: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default false. When true, findings are written to the review queue and the brain.consolidate scope is required. Existing items are refreshed, never reopened."
+          ),
+      }),
+    },
+    async ({ brainId, staleDays, lowConfidenceThreshold, maxIssues, queueForReview }) => {
+      try {
+        const shouldQueue = queueForReview === true;
+        // Reporting is a read; persisting a curation queue is a write, and takes the
+        // same scope as the other bulk curation surface (§8).
+        const grant = requireGrant(
+          principal,
+          brainId,
+          shouldQueue ? "brain.consolidate" : "brain.read"
+        );
+        const health = await getBrainHealth(
+          grant.brainId,
+          staleDays ?? 180,
+          lowConfidenceThreshold ?? 0.5,
+          maxIssues ?? 50
+        );
+
+        const queued = shouldQueue ? await syncBrainReviewQueue(grant.brainId, health) : null;
+
+        await audit(grant.brainId, "brain.health", {
+          via: "brain_health",
+          issueCount: health.issues.length,
+          orphans: health.metrics.orphanMemories,
+          contradictions: health.metrics.contradictionCount,
+          ...(shouldQueue ? { queuedForReview: queued } : {}),
+        });
+
+        return ok({
+          metrics: health.metrics,
+          queuedForReview: queued,
+          issues: health.issues.map((issue) => ({
+            type: issue.type,
+            severity: issue.severity,
+            memoryId: issue.memoryId,
+            memoryTitle: issue.memoryTitle,
+            reason: issue.reason,
+            conflictsWith: issue.conflictsWith,
+          })),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    }
+  );
+
+  server.registerTool(
     "brain_consolidate",
     {
       description:
@@ -820,17 +1282,29 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
     }
   );
 
+  /**
+   * One audit row, stamped with the principal and the transport it arrived over.
+   *
+   * Every caller awaits this *after* the work it describes has already happened, so a
+   * failure here must not be reported as a failed tool call: the agent would retry a
+   * write that already landed. `logBrainAudit` swallows its own errors; this is the
+   * second belt, in case a future audit sink does not.
+   */
   async function audit(
     brainId: string,
     operation: string,
     metadata: Record<string, unknown>
   ): Promise<void> {
-    await logBrainAudit({
-      brainId,
-      principalType: principal.type,
-      principalId: principal.id,
-      operation,
-      metadata: { ...metadata, transport: "mcp", agent: principal.agentName },
-    });
+    try {
+      await logBrainAudit({
+        brainId,
+        principalType: principal.type,
+        principalId: principal.id,
+        operation,
+        metadata: { ...metadata, transport: "mcp", agent: principal.agentName },
+      });
+    } catch (error) {
+      console.error("brain mcp audit failed", { operation, error });
+    }
   }
 }

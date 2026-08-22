@@ -5,6 +5,8 @@ import JSZip from "jszip";
 import { z } from "zod";
 import { BRAIN_ARCHIVE_FORMAT, BRAIN_ARCHIVE_VERSION } from "./export-service";
 import { BrainValidationError } from "./errors";
+import { ENRICH_SWEEP_MAX, memoryContentHash } from "./enrich/enrich-service";
+import { enqueueJob } from "@/lib/queue";
 import {
   MEMORY_TYPES,
   MEMORY_SOURCE_TYPES,
@@ -64,7 +66,10 @@ const memoryRecord = z.object({
   title: z.string().trim().min(1).max(MAX_TITLE),
   content: z.string().max(MAX_CONTENT),
   summary: z.string().max(MAX_SUMMARY).nullish(),
-  importance: z.number().int().min(1).max(10).optional(),
+  // 0..1, matching `memories.importance` (a real) and the POST /memories contract.
+  // An earlier 1..10 integer range here silently dropped every memory in a real
+  // export, because the app never writes an integer importance.
+  importance: z.number().min(0).max(1).optional(),
   confidence: z.number().min(0).max(1).optional(),
   sourceType: z.enum(MEMORY_SOURCE_TYPES as unknown as [string, ...string[]]).optional(),
   sourceId: z.string().max(200).nullish(),
@@ -513,7 +518,9 @@ export async function runImport(params: {
               name: entity.name,
               type: (entity.type ?? "other") as (typeof BRAIN_ENTITY_TYPES)[number],
               description: entity.description ?? null,
-              metadata: provenance,
+              // `metadata` is human-owned meaning (enrich-service refuses to overwrite
+              // it), so provenance is layered over it rather than replacing it.
+              metadata: { ...(entity.metadata ?? {}), ...provenance },
             }))
           )
           .onConflictDoNothing();
@@ -558,14 +565,16 @@ export async function runImport(params: {
     const memoryRows = plan.memories.map((memory) => {
       const id = randomUUID();
       memoryIdMap.set(memory.id, id);
+      const type = (memory.type ?? "knowledge") as (typeof MEMORY_TYPES)[number];
+      const summary = memory.summary ?? null;
       return {
         id,
         brainId,
-        type: (memory.type ?? "knowledge") as (typeof MEMORY_TYPES)[number],
+        type,
         title: memory.title,
         content: memory.content,
-        summary: memory.summary ?? null,
-        importance: memory.importance ?? 5,
+        summary,
+        importance: memory.importance ?? 0.5,
         confidence: memory.confidence ?? 1,
         sourceType: (memory.sourceType
           ?? "imported_document") as (typeof MEMORY_SOURCE_TYPES)[number],
@@ -575,6 +584,10 @@ export async function runImport(params: {
         createdBy: principal.agentId ? null : principal.userId,
         createdByAgent: principal.agentId,
         archivedAt: memory.archivedAt ? new Date(memory.archivedAt) : null,
+        // Imported entity nodes and links are restored verbatim from the archive;
+        // the *derived* graph is not, so every imported memory starts `pending`
+        // with its hash already written and a sweep re-derives it locally.
+        contentHash: memoryContentHash({ type, title: memory.title, content: memory.content, summary }),
       };
     });
     for (const group of chunk(memoryRows)) await tx.insert(memories).values(group);
@@ -629,7 +642,7 @@ export async function runImport(params: {
           targetEntityId: target,
           relationshipType: relationship.relationshipType,
           confidence: relationship.confidence ?? 0.9,
-          metadata: provenance,
+          metadata: { ...(relationship.metadata ?? {}), ...provenance },
         },
       ];
     });
@@ -646,7 +659,7 @@ export async function runImport(params: {
         brainId,
         sourceMemoryId: source,
         linkType: link.linkType ?? "relates_to",
-        metadata: provenance,
+        metadata: { ...(link.metadata ?? {}), ...provenance },
         createdBy: principal.agentId ? null : principal.userId,
         createdByAgent: principal.agentId,
       };
@@ -675,6 +688,17 @@ export async function runImport(params: {
       tagAssignments: tagAssignments.length,
     };
   });
+
+  // One bounded sweep instead of a job per memory: an import can be thousands of
+  // rows, and enrichment is a background chore that must not flood the queue. The
+  // sweep re-queues itself while it is still making progress; with no Redis the
+  // rows simply stay `pending` until something else sweeps them.
+  if (written.memories > 0) {
+    void enqueueJob("enrich_brain", {
+      brainId,
+      limit: Math.min(written.memories, ENRICH_SWEEP_MAX),
+    }).catch(() => {});
+  }
 
   return { ...preview, written };
 }

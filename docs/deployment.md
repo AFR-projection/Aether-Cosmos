@@ -1,127 +1,73 @@
-# Deploy Storage ByAFR di VPS Ubuntu (dari nol)
+# Deployment
 
-Panduan production untuk user **non-developer**.  
-Target: VPS Ubuntu fresh + domain → **`./install.sh`** → selesai dengan HTTPS.
+Production deployment of Storage ByAFR on a fresh Ubuntu VPS, from nothing to a
+working HTTPS site. Written to be followable without prior DevOps experience: the
+whole path is a fresh VPS + a domain + `./install.sh`.
 
-> Local development → lihat [README.md](README.md)
+For local development, see [Getting Started](getting-started.md).
 
----
-
-## 🔁 Redeploy / update (baca ini dulu kalau udah pernah install)
-
-Udah pernah deploy dan cuma mau naikin fitur/fix terbaru? **Cukup 3 baris, ga ada langkah tambahan:**
-
-```bash
-cd /opt/storage-by-afr
-git pull          # ambil update terbaru dari GitHub
-./update.sh       # backup → validate → rebuild → migrate DB → health check
-```
-
-Atau lebih singkat lagi — `./update.sh` **otomatis `git pull` sendiri**, jadi bisa langsung:
-
-```bash
-cd /opt/storage-by-afr && ./update.sh
-```
-
-Itu aja. Script-nya ngurusin semuanya: backup `.env` + nginx, rebuild container, sinkron schema database, renew SSL, dan health check di akhir. Kalau ada yang gagal, dia berhenti dan kasih tau.
-
-**Syarat: push dulu ke GitHub.** `./update.sh` menarik kode dari repo, jadi commit + push perubahan lu dulu dari PC lokal sebelum jalanin di VPS.
-
-### Jika Update Gagal: "fatal: Not possible to fast-forward"
-
-Jika `./update.sh` gagal dengan error:
-```
-fatal: Not possible to fast-forward, aborting.
-```
-
-Ini berarti ada **diverging branches** — local VPS punya perubahan yang berbeda dengan GitHub. Ada 3 solusi:
-
-**Option 1: Force Reset (Recommended jika tidak ada perubahan penting di VPS)**
-```bash
-./update.sh --force
-```
-Script akan discard semua perubahan lokal dan reset ke origin.
-
-**Option 2: Manual Stash & Rebase**
-```bash
-cd /opt/storage-by-afr
-git stash                           # Simpan perubahan lokal
-git fetch origin
-git rebase origin/main              # Atau origin/master
-git stash pop                       # Restore perubahan lokal (jika ada conflict, resolve manual)
-./update.sh
-```
-
-**Option 3: Manual Reset (Jika yakin tidak ada perubahan penting)**
-```bash
-cd /opt/storage-by-afr
-git fetch origin
-git reset --hard origin/main        # Discard semua perubahan lokal
-./update.sh
-```
-
-**Backup otomatis:** `./update.sh` selalu backup `.env` dan nginx config ke `.deploy/backups/` sebelum update, jadi konfigurasi aman.
-
-### Kenapa update DB selalu aman (ga perlu langkah manual)
-
-- Database (**Neon**) dan Redis itu **layanan eksternal** — VPS cuma nyambung ke sana, DB-nya sama persis dengan yang dipakai saat development.
-- `./update.sh` menyinkronkan schema via **`npm run db:push`** (bukan `drizzle-kit migrate`). `db:push` membandingkan `lib/db/schema.ts` langsung ke DB dan hanya menerapkan yang beda — kalau schema & DB udah cocok, dia **no-op** (ga ngapa-ngapain).
-- Perubahan schema yang sudah diterapkan ke Neon saat development (contoh: rename kolom, kolom enkripsi, index full-text) **sudah live** begitu VPS konek — jadi redeploy tinggal rebuild kode aplikasinya.
-
-> ⚠️ **Perhatian rename kolom.** `db:push` aman untuk nambah kolom/index. Tapi untuk **rename kolom**, terapkan dulu perubahannya ke Neon **sebelum** redeploy (biar `db:push` lihatnya sebagai "sudah cocok", bukan "drop kolom lama + bikin baru" yang menghapus data). Selama alurnya "apply ke Neon dulu → baru redeploy", data aman.
+- [Already installed? Update in three lines](#updating-an-existing-deployment)
+- [First install](#first-install)
+- [Daily operations](#daily-operations)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Ringkasan install pertama (30 detik)
+## Requirements
+
+### Server
+
+| Item | Minimum |
+|------|---------|
+| OS | Ubuntu 22.04 or 24.04 LTS |
+| RAM | 2 GB (4 GB recommended) |
+| CPU | 2 vCPU |
+| Disk | 20 GB SSD |
+| Network | Ports **80** and **443** open in both the OS firewall and the provider's security group |
+
+### External services (free tiers are sufficient)
+
+| Service | Used for | Where |
+|---------|----------|-------|
+| Neon PostgreSQL | All metadata and Second Brain data | https://neon.tech |
+| Cloudflare R2 | File objects | https://dash.cloudflare.com → R2 |
+| A domain | HTTPS certificate and app URL | Your registrar's DNS panel |
+
+The database and Redis are **external to the VPS**. The VPS runs the app, the
+worker, Redis, and Nginx; it never becomes the system of record.
+
+---
+
+## First install
+
+The whole sequence, if you already know what goes in `.env`:
 
 ```bash
-ssh ubuntu@IP-VPS
+ssh ubuntu@YOUR-VPS-IP
 git clone <repo-url> /opt/storage-by-afr
 cd /opt/storage-by-afr
 chmod +x install.sh deploy.sh update.sh
 
 cp .env.example .env
-nano .env    # isi DATABASE_URL, R2, domain — paste 1 baris penuh!
+nano .env          # DATABASE_URL, R2 credentials, domain — see step 3
 
 ./install.sh
 ```
 
-**`.env` manual** — sama seperti dulu. Wizard opsional: `./install.sh --wizard`
+The steps below explain each part.
 
----
+### Step 1 — Point the domain at the VPS
 
-## Server requirement
-
-| Item | Minimum |
-|------|---------|
-| OS | Ubuntu 22.04 / 24.04 LTS |
-| RAM | 2 GB (4 GB recommended) |
-| CPU | 2 vCPU |
-| Disk | 20 GB SSD |
-| Port | **80** dan **443** terbuka (firewall + cloud security group) |
-
-### Layanan eksternal (gratis tier OK)
-
-1. **Neon PostgreSQL** — https://neon.tech  
-2. **Cloudflare R2** — https://dash.cloudflare.com → R2  
-3. **Domain** — A record mengarah ke IP VPS
-
----
-
-## Langkah 1 — Siapkan domain
-
-Di panel DNS domain kamu:
+In your DNS panel:
 
 | Type | Name | Value |
 |------|------|-------|
-| A | storage (atau @) | IP-VPS-KAMU |
+| A | `storage` (or `@`) | YOUR-VPS-IP |
 
-Tunggu 5–30 menit sampai DNS propagate.  
-Cek: `ping storage.example.com` harus menunjuk ke IP VPS.
+Propagation takes 5–30 minutes. Verify before continuing — `ping storage.example.com`
+must resolve to the VPS IP. Certificate issuance fails if it does not.
 
----
-
-## Langkah 2 — Firewall VPS
+### Step 2 — Open the firewall
 
 ```bash
 sudo ufw allow OpenSSH
@@ -131,32 +77,30 @@ sudo ufw enable
 sudo ufw status
 ```
 
-Di panel cloud provider (Tencent, AWS, dll.) buka juga **Security Group** port 80 & 443.
+Cloud providers (AWS, Tencent, GCP, …) have a second firewall in the console. Open
+ports 80 and 443 in that **security group** as well, or the certificate request
+will time out even though `ufw` looks correct.
 
----
-
-## Langkah 3 — Buat `.env` & install
+### Step 3 — Write `.env` and install
 
 ```bash
-ssh ubuntu@IP-VPS
-
+ssh ubuntu@YOUR-VPS-IP
 sudo apt update && sudo apt install -y git curl
 
 git clone <repo-url> /opt/storage-by-afr
 cd /opt/storage-by-afr
-
 chmod +x install.sh deploy.sh update.sh
 
 cp .env.example .env
 nano .env
 ```
 
-### Isi `.env` (contoh)
+A production `.env` looks like this:
 
 ```env
 NODE_ENV=production
-DEPLOY_DOMAIN=storage.dataku.id
-CERTBOT_EMAIL=admin@storage.dataku.id
+DEPLOY_DOMAIN=storage.example.com
+CERTBOT_EMAIL=admin@storage.example.com
 
 DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 
@@ -166,255 +110,361 @@ R2_SECRET_ACCESS_KEY=...
 R2_BUCKET_NAME=strogebyafr
 R2_PUBLIC_URL=https://pub-xxxx.r2.dev
 
-MASTER_USERNAME=ByAFR
-MASTER_PASSWORD=password-min-10-char
-SESSION_SECRET=random-64-char-hex
+MASTER_USERNAME=admin
+MASTER_PASSWORD=password-at-least-10-characters
+SESSION_SECRET=random-64-character-hex
 
-NEXT_PUBLIC_APP_URL=https://storage.dataku.id
+NEXT_PUBLIC_APP_URL=https://storage.example.com
 COOKIE_SECURE=true
 HSTS_ENABLED=true
 REDIS_URL=redis://redis:6379
 REDIS_DISABLED=false
 ```
 
-**Penting:** `DATABASE_URL` harus **1 baris penuh** dari Neon.  
-Jangan sampai terpotong jadi `...?sslmode>` — itu penyebab deploy gagal.
+> **`DATABASE_URL` must be one unbroken line** exactly as Neon gives it. A value
+> wrapped by the editor into `...?sslmode>` is the single most common cause of a
+> failed deploy.
 
-Deploy:
+Every variable, including the optional ones, is documented in
+[Getting Started § Environment variables](getting-started.md#environment-variables-reference).
+
+Then run the installer:
 
 ```bash
 ./install.sh
 ```
 
-Script otomatis:
-- Validasi `.env` (format)
-- Request SSL Let's Encrypt
-- Generate nginx config
-- Build & start Docker (app, worker, redis, nginx)
-- Database migrate + admin bootstrap
+It performs, in order:
 
-### Wizard (opsional)
+1. validates `.env` formatting,
+2. requests a Let's Encrypt certificate,
+3. generates the Nginx configuration,
+4. builds and starts the containers (app, worker, redis, nginx),
+5. syncs the database schema and bootstraps the master admin,
+6. health-checks every service.
 
-Kalau mau wizard interaktif: `./install.sh --wizard`
-- Build & start containers
-- Database migration + bootstrap admin
-- Health check semua service
+An interactive wizard is available instead of hand-editing `.env`:
+`./install.sh --wizard`.
 
-**Output sukses:**
+A successful run ends with a health report; the labels are `Redis`, `App`,
+`Worker`, `Nginx`, `Database`, `SSL`, and `Email`:
 
 ```
-Application : Running
-Database    : Connected
-Redis       : OK
-Worker      : OK
-SSL         : Active
-URL         : https://storage.example.com
+  Redis          OK   running
+  App            OK   HTTP responding
+  Worker         OK   running
+  Nginx          OK   running
+  Database       OK   connected
+  SSL            OK   valid until Nov 12 08:14:00 2026 GMT
+  Email          WARN no verified sender — add one in Admin → Email
+  All services healthy
 ```
 
-### Setelah install — aktifkan WhatsApp (OTP)
+`Email` warns rather than fails on a fresh install — see
+[Step 6](#step-6--add-an-email-sender-otp-delivery).
 
-OTP & notifikasi WA butuh **sender terhubung** (Baileys). Setelah app jalan:
+### Step 4 — Configure R2 CORS
 
-1. Login sebagai master → **Admin → WhatsApp**
-2. **Add Sender** → scan QR atau pakai pairing code
-3. Pastikan status **Connected** (hijau)
-4. Coba register user baru — harus terima pesan pairing di WhatsApp
+Browser uploads go straight to R2, so the bucket must accept your origin.
+Uploads fail with a CORS error until this is done.
 
-Setelah itu, session tersimpan di volume Docker `wa_sessions` dan **auto-restore** tiap restart/update.
+1. Edit `docker/r2-cors.json` and replace `your-domain.com` with your domain.
+2. Apply it — Cloudflare Dashboard → R2 → your bucket → Settings → CORS, or:
 
----
+```bash
+wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
+```
 
-## Langkah 4 — R2 CORS (wajib untuk upload)
+### Step 5 — Allowlist the VPS in Neon (if required)
 
-1. Edit `docker/r2-cors.json` — ganti `your-domain.com` dengan domain kamu  
-2. Cloudflare Dashboard → R2 → Bucket → Settings → CORS  
-   Atau via Wrangler:
-   ```bash
-   wrangler r2 bucket cors set NAMA-BUCKET --file docker/r2-cors.json
-   ```
+Neon projects with IP restrictions enabled reject the VPS until it is listed:
+Neon Dashboard → Project → Settings → **IP Allow** → add the VPS public IP. The
+installer prints the IP it connected from when the check fails.
 
----
+### Step 6 — Add an email sender (OTP delivery)
 
-## Neon: allowlist IP VPS
+Registration codes, verification codes, and notifications go out over SMTP using
+Gmail senders you add yourself. Until at least one sender is verified, the health
+check reports `Email WARN` and no OTP can be delivered.
 
-Neon free tier kadang perlu allow IP VPS:
-- Neon Dashboard → Project → Settings → IP Allow  
-- Tambahkan IP publik VPS kamu
+1. Log in as the master user → **Admin → Email**.
+2. **Add sender** → Gmail address + a Gmail **App Password** (not the account
+   password). The App Password is stored encrypted (AES-256-GCM, key derived from
+   `SESSION_SECRET`).
+3. Verify the sender; its status must read `ok`.
+4. Register a test user and confirm the code arrives.
 
----
+More than one sender is worth adding. The router spreads volume across the pool:
+each sender has a rolling 24-hour cap (`emailDailyLimitPerSender`, default 400), a
+sender is rested after `emailFailureThreshold` consecutive failures (default 3)
+for `emailCooldownMinutes` (default 30), and among equally eligible senders the
+least recently used goes first. All of that accounting lives in the database, so
+it survives restarts.
 
-## Perintah sehari-hari
-
-| Command | Fungsi |
-|---------|--------|
-| `./install.sh` | Install pertama (wizard + deploy) |
-| `./deploy.sh` | Deploy ulang pakai `.env` existing (tanpa `git pull`) |
-| `./update.sh` | **Redeploy/update** — git pull + backup + rebuild + migrate + health check |
-| `npm run deploy:logs` | Lihat log |
-| `npm run deploy:health` | Cek status service |
-
-> **`./update.sh` vs `./deploy.sh`:** pakai **`./update.sh`** untuk naikin versi (dia pull kode terbaru + backup + migrate). Pakai `./deploy.sh` kalau cuma mau rebuild dari kode yang sudah ada di VPS tanpa narik update.
-
----
-
-## Backup
-
-Installer backup otomatis saat `./update.sh`:
-- `.deploy/backups/.env.TIMESTAMP`
-- `.deploy/backups/nginx.TIMESTAMP.conf`
-
-Backup manual yang disarankan:
-- File `.env` (simpan offline, berisi secrets)
-- Neon: built-in backup / branch di dashboard
-- R2: data sudah di Cloudflare
+> Rotating `SESSION_SECRET` makes every stored App Password unreadable. Re-enter
+> them from Admin → Email afterwards.
 
 ---
 
-## Update versi aplikasi
+## Updating an existing deployment
+
+Three lines, no extra steps:
 
 ```bash
 cd /opt/storage-by-afr
+git pull            # fetch the latest code
+./update.sh         # backup → validate → rebuild → sync schema → health check
+```
+
+`./update.sh` runs `git pull` itself, so this is equivalent:
+
+```bash
+cd /opt/storage-by-afr && ./update.sh
+```
+
+It backs up `.env` and the Nginx config, rebuilds the containers, syncs the
+database schema, renews the certificate, and health-checks at the end. If any
+stage fails it stops and reports which one.
+
+**Push first.** `./update.sh` pulls from the Git remote, so commit and push your
+local changes before running it on the VPS.
+
+Backups it writes before touching anything:
+
+- `.deploy/backups/.env.TIMESTAMP`
+- `.deploy/backups/nginx.TIMESTAMP.conf`
+
+### When the update fails with "Not possible to fast-forward"
+
+```
+fatal: Not possible to fast-forward, aborting.
+```
+
+The VPS checkout has diverged from the remote — someone edited files on the server.
+Three ways out, in order of preference:
+
+**1. Force reset** — the right choice when nothing on the VPS is worth keeping:
+
+```bash
+./update.sh --force      # discards local changes, resets to origin, then updates
+```
+
+**2. Stash and rebase** — keeps the local changes:
+
+```bash
+cd /opt/storage-by-afr
+git stash                       # set local changes aside
+git fetch origin
+git rebase origin/main          # or origin/master
+git stash pop                   # reapply; resolve conflicts by hand if any
 ./update.sh
 ```
 
-Otomatis: backup → git pull → validate → rebuild → migration → health check.
+**3. Manual reset** — same effect as option 1, done explicitly:
+
+```bash
+cd /opt/storage-by-afr
+git fetch origin
+git reset --hard origin/main    # discards all local changes
+./update.sh
+```
+
+Options 1 and 3 delete uncommitted work on the server permanently. `.env` and the
+Nginx config survive either way, because `./update.sh` backs them up first.
+
+### Why schema updates need no manual step
+
+- PostgreSQL (Neon) and Redis are **external services**. The VPS only connects to
+  them, and it connects to the same database used during development.
+- `./update.sh` syncs the schema with **`npm run db:push`**, not
+  `drizzle-kit migrate`. `db:push` compares `lib/db/schema.ts` against the live
+  database and applies only the difference; when they already match it is a no-op.
+- Schema changes already applied to Neon during development (new columns, indexes,
+  full-text search columns) are therefore live the moment the VPS connects. A
+  redeploy only rebuilds the application code.
+
+> **Renaming a column is the exception.** `db:push` handles added columns and
+> indexes safely, but a rename it has not seen yet looks like "drop the old column,
+> create a new one", which destroys the data in it. Apply renames to Neon **before**
+> redeploying, so `db:push` sees a schema that already matches. Keep the order
+> "apply to Neon first, then redeploy" and data is never at risk.
+
+---
+
+## Daily operations
+
+| Command | What it does |
+|---------|--------------|
+| `./install.sh` | First-time install (optionally with `--wizard`) |
+| `./update.sh` | Update: pull, back up, rebuild, sync schema, health check |
+| `./deploy.sh` | Rebuild from the code already on the VPS, without pulling |
+| `npm run deploy:logs` | Tail container logs |
+| `npm run deploy:health` | Report the status of every service |
+
+Use `./update.sh` to move to a newer version; use `./deploy.sh` only to rebuild
+the current checkout, for example after editing `.env`.
+
+### Backups
+
+Automatic, on every `./update.sh`: `.env` and the generated Nginx config, under
+`.deploy/backups/`.
+
+Worth doing yourself:
+
+- keep an offline copy of `.env` — it holds every secret, and nothing else does;
+- use Neon's built-in backups or branches for the database;
+- R2 objects are already durable on Cloudflare's side.
 
 ---
 
 ## Troubleshooting
 
-### Login tidak work / CSRF error
+### Login fails or returns a CSRF error
 
-- Pastikan akses via **HTTPS** (`https://domain.com`)
-- `NEXT_PUBLIC_APP_URL` di `.env` harus `https://domain.com` (wizard set otomatis)
-- Rebuild app setelah ubah URL: `./deploy.sh`
+- Access the site over **HTTPS**, not the raw IP or `http://`.
+- `NEXT_PUBLIC_APP_URL` in `.env` must be exactly `https://your-domain.com`.
+- That value is baked in at build time — rebuild after changing it: `./deploy.sh`.
 
-### SSL gagal
+### Certificate issuance fails
 
-- DNS belum pointing ke VPS → perbaiki A record, tunggu propagate
-- Port 80 blocked → buka firewall & security group
-- Jalankan ulang: `sudo bash scripts/deploy/ssl.sh`
+- DNS is not pointing at the VPS yet → fix the A record and wait for propagation.
+- Port 80 is blocked → open it in `ufw` **and** the provider's security group.
+- Retry on its own: `sudo bash scripts/deploy/ssl.sh`.
 
 ### Docker permission denied
 
 ```bash
 sudo usermod -aG docker $USER
 newgrp docker
-# atau langsung:
+# or simply:
 sudo ./install.sh
 ```
 
-Installer otomatis pakai `sudo docker` jika perlu.
+The installer falls back to `sudo docker` when it has to.
 
-### Database connection failed
+### Database connection fails
 
-- Cek `DATABASE_URL` di Neon dashboard — **harus 1 baris penuh** (jangan terpotong)
-- Neon → Project Settings → **IP Allow** → tambahkan IP VPS (installer menampilkan IP saat gagal)
-- Atau nonaktifkan IP restriction sementara di Neon
-- Test: `npm run deploy:health`
+- Re-copy `DATABASE_URL` from the Neon dashboard — it must be **one unbroken line**.
+- Neon → Project Settings → **IP Allow** → add the VPS IP (printed by the installer
+  when the connection is refused), or disable the restriction temporarily.
+- Verify with `npm run deploy:health`.
 
-### `.env` rusak (ada `"` atau baris baru di tengah value)
+### `.env` is malformed (stray quote or newline inside a value)
 
-Bug wizard lama bisa menghasilkan:
+An older version of the wizard could produce:
 
 ```env
 R2_SECRET_ACCESS_KEY="
 acf230cb..."
 ```
 
-Perbaiki otomatis:
+Repair it in place, or regenerate it:
 
 ```bash
-./install.sh --fix-env
+./install.sh --fix-env         # repair
+./install.sh --force-wizard    # start over from the wizard
 ```
 
-Atau buat ulang dari wizard:
+### Uploads fail with a CORS error
 
-```bash
-./install.sh --force-wizard
-```
+- The R2 bucket CORS policy must list your HTTPS origin (see
+  [Step 4](#step-4--configure-r2-cors)).
+- `NEXT_PUBLIC_APP_URL` must match the URL in the browser's address bar.
 
-### Upload gagal (CORS)
+### Encrypted files ask for a passphrase and are excluded from ZIPs
 
-- Update R2 CORS dengan domain HTTPS kamu
-- `NEXT_PUBLIC_APP_URL` harus match browser URL
+Working as designed, not a bug. Files uploaded with encryption enabled are
+encrypted in the browser before they reach the server:
 
-### File terenkripsi: download minta passphrase / tidak bisa masuk ZIP
+- **Downloading** one prompts for the passphrase, decrypts in the browser, and
+  saves the original file. The passphrase is never sent to the server.
+- **ZIP and batch downloads skip encrypted files** — the server holds no
+  passphrase, so it cannot put the plaintext into an archive. Download them
+  individually.
+- If the passphrase is lost the file is unrecoverable by anyone, including an
+  administrator. That is the point of end-to-end encryption.
 
-Ini **normal & disengaja**, bukan bug. File yang diupload dengan enkripsi itu **end-to-end** (dienkripsi di browser sebelum sampai ke server), jadi:
-
-- **Download** file terenkripsi akan memunculkan dialog passphrase dulu, lalu didekripsi di browser dan disimpan sebagai file asli. Passphrase **tidak pernah** dikirim ke server.
-- **ZIP / batch download** menolak file terenkripsi — server tidak memegang passphrase sehingga tidak bisa memasukkan file aslinya ke arsip. Download file terenkripsi satu per satu.
-- Kalau passphrase hilang, file **tidak bisa** dipulihkan oleh siapa pun (termasuk admin) — itu memang inti dari enkripsi E2E.
-
-### Worker FAIL di health check
+### The worker reports FAIL in the health check
 
 ```bash
 docker compose -f docker/docker-compose.yml logs worker --tail 50
 ```
 
-Penyebab umum: Redis down, DATABASE_URL salah, R2 credential invalid.
+Usual causes: Redis is down, `DATABASE_URL` is wrong, or the R2 credentials are
+invalid.
 
-### OTP / notifikasi WhatsApp tidak jalan
+### OTP emails stop arriving
 
-WhatsApp di app ini **self-hosted (Baileys)** — bukan Fonnte/Twilio. Session disimpan di disk (`wa-sessions/`) dan socket harus hidup di proses app.
+Delivery is plain SMTP through the Gmail senders in **Admin → Email**. There is no
+session or socket to restore — a stalled pool is always a sender problem.
 
-Setelah deploy/update VPS:
+1. Check the health line: `npm run deploy:health` reports `Email OK` with the
+   number of ready senders, or `WARN` when none is verified.
+2. **Admin → Email** shows each sender's status, last error, daily count, and
+   cooldown. A sender on cooldown resumes automatically; one marked failed needs
+   attention.
+3. Usual causes: the Gmail App Password was revoked, 2-Step Verification was turned
+   off on that Google account (which invalidates App Passwords), or the sender hit
+   its rolling 24-hour cap.
+4. After rotating `SESSION_SECRET`, every stored App Password is unreadable —
+   re-enter them.
+5. `/api/admin/email/logs` and the Admin → Email log view record what was
+   attempted and which sender was chosen.
 
-1. Pastikan volume `wa_sessions` terpasang (sudah di `docker-compose.yml`).
-2. Cek log bootstrap:
-   ```bash
-   docker compose -f docker/docker-compose.yml logs app --tail 100 | grep -i WA
-   ```
-   Harus ada `[WA Bootstrap] Restored ...` atau `[WA] Connected: ...`.
-3. Kalau `missingSession` / status `disconnected`: buka **Admin → WhatsApp**, reconnect (QR atau pairing code). Session lama hilang kalau deploy sebelum volume diaktifkan.
-4. Satu instance app saja (jangan scale replica) — socket Baileys stateful di memory.
-5. Setelah reconnect sekali, restart/redeploy berikutnya harus auto-restore (session di volume).
-
-Health check menampilkan baris **WhatsApp** (`OK` / `WARN` / `FAIL`).
-
-### HTTP 403 saat curl homepage
-
-Sudah diperbaiki — bot block tidak lagi block halaman utama.  
-Protected API tetap aman.
-
-### Reset password admin
+### Reset the master password
 
 ```bash
 docker compose -f docker/docker-compose.yml --profile setup run --rm setup
-# atau di host dengan .env:
+# or, on the host with .env present:
 npm run reset-master-password
 ```
 
+> Changing `SESSION_SECRET` is not a password reset and is not free: stored Gmail
+> app passwords and TOTP secrets are encrypted with it and become unreadable.
+> Re-enter them from the admin panel afterwards.
+
 ---
 
-## Arsitektur deploy
+## Deployment architecture
 
 ```
-Internet → Nginx (:443 SSL) → Next.js app (:3000)
-                           ↘ Redis → Worker (thumbnail, cleanup)
-Neon PostgreSQL (external)
-Cloudflare R2 (external)
-WhatsApp Baileys (in-app) + volume wa_sessions
-Let's Encrypt (auto renew via cron)
+Internet → Nginx (:443, TLS) → Next.js app (:3000)
+                             ↘ Redis → Worker (thumbnails, cleanup, webhooks)
+
+External: Neon PostgreSQL · Cloudflare R2 · Gmail SMTP (senders you add)
+Volumes:  redis_data (the only one)
+Certs:    Let's Encrypt, renewed automatically
 ```
 
+If Redis or R2 is unavailable the app degrades — background jobs queue up, file
+bodies are unreachable — but PostgreSQL remains the single source of truth for
+metadata and Second Brain content.
+
+## Files that matter
+
+| Path | Purpose |
+|------|---------|
+| `install.sh` | Install entry point |
+| `update.sh` | Safe update path |
+| `deploy.sh` | Rebuild without pulling |
+| `.env` | All secrets and configuration |
+| `docker/docker-compose.yml` | Container topology |
+| `docker/generated/nginx.conf` | Generated Nginx config — do not edit by hand |
+| `scripts/deploy/` | Modular deploy steps |
+| `.deploy/backups/` | Automatic `.env` and Nginx backups |
+
+`scripts/vps-deploy.sh` is a legacy script kept for reference; use `./install.sh`.
+
 ---
 
-## File penting
+**See also:** [Getting Started](getting-started.md) ·
+[Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
-| File | Fungsi |
-|------|--------|
-| `install.sh` | Entry point install |
-| `update.sh` | Safe update |
-| `.env` | Secrets (auto-generated wizard) |
-| `docker/generated/nginx.conf` | Nginx auto-generated |
-| `scripts/deploy/` | Modular deploy scripts |
 
----
 
-## Untuk developer
 
-Lihat juga [README.md](README.md) untuk local development.
 
-Legacy script `scripts/vps-deploy.sh` masih ada tapi **disarankan pakai `./install.sh`**.
+
+
+
+
