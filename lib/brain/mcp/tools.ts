@@ -1197,17 +1197,18 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
 
         return ok({
           metrics: health.metrics,
-          queuedForReview: queued,
+          queuedForReview: queued ?? null,
           issues: health.issues.map((issue) => ({
             type: issue.type,
             severity: issue.severity,
             memoryId: issue.memoryId,
             memoryTitle: issue.memoryTitle,
             reason: issue.reason,
-            conflictsWith: issue.conflictsWith,
+            ...(issue.conflictsWith ? { conflictsWith: issue.conflictsWith } : {}),
           })),
         });
       } catch (error) {
+        console.error("[brain_health] Error:", error);
         return fail(error);
       }
     }

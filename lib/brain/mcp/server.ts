@@ -3,7 +3,7 @@ import { registerBrainMcpTools } from "./tools";
 import type { McpPrincipal } from "./principal";
 
 export const BRAIN_MCP_SERVER_NAME = "storage-byafr-brain";
-export const BRAIN_MCP_SERVER_VERSION = "1.0.0";
+export const BRAIN_MCP_SERVER_VERSION = "2.0.0";
 
 /**
  * A server instance scoped to ONE authenticated principal.
@@ -29,7 +29,15 @@ export function createBrainMcpServer(principal: McpPrincipal): McpServer {
         "3. Call brain_remember only for knowledge worth keeping permanently — facts, decisions,",
         "   preferences, procedures, project context. Not transient conversation.",
         "4. Use brain_update to correct an existing memory instead of writing a contradicting one.",
-        "5. Use brain_link to record relationships between things the brain knows about.",
+        "5. Use brain_link_memory to create explicit relationships between memories.",
+        "   Use brain_link to record entity relationships the brain should know about.",
+        "",
+        "Retrieval notes:",
+        "- Semantic search is OFF by default (embeddings disabled). Retrieval uses lexical (FTS),",
+        "  entity overlap, and graph proximity. To enable semantic: set BRAIN_EMBEDDING_PROVIDER",
+        "  to 'openai' or 'voyageai' and provide the API key.",
+        "- brain_related returns memories connected by explicit links (memory_links table) or",
+        "  semantic/entity overlap. If results are empty, use brain_link_memory to create links.",
         "",
         "You are a guest here. The brain outlives you: keep it valuable, not exhaustive.",
       ].join("\n"),
