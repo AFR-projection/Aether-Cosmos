@@ -5,6 +5,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/lib/db/schema";
 import { setEmbeddingProviderForTests } from "../embedding/provider";
 import {
+  ANY_FALLBACK_MIN_LEXEMES,
   CANDIDATE_POOL_MAX,
   ENTITY_CANDIDATE_LIMIT,
   GRAPH_CANDIDATE_LIMIT,
@@ -34,6 +35,8 @@ type QuerySpec = { table: string; joined: boolean; grouped: boolean; limited: bo
 
 type FakeRows = {
   lexical?: unknown[];
+  /** Rows the OR recall tier returns when the AND tier leaves room (second lexical read). */
+  lexicalAny?: unknown[];
   entities?: unknown[];
   entityHits?: unknown[];
   mentions?: unknown[];
@@ -47,6 +50,7 @@ type Fake = { db: PostgresJsDatabase<typeof schema>; reads: QuerySpec[] };
 function fakeDb(rows: FakeRows): Fake {
   const reads: QuerySpec[] = [];
   const hops = [...(rows.links ?? [])];
+  let lexicalReads = 0;
 
   const answer = (spec: QuerySpec): unknown[] => {
     if (spec.table === "brain_entities") return rows.entities ?? [];
@@ -54,9 +58,15 @@ function fakeDb(rows: FakeRows): Fake {
       return (spec.joined ? rows.entityHits : rows.mentions) ?? [];
     }
     if (spec.table === "memory_links") return hops.shift() ?? [];
-    // The lexical leg is the only read of `memories` that is ordered and capped;
-    // the uncapped one is the candidate-row loader.
-    if (spec.table === "memories") return (spec.limited ? rows.lexical : rows.loaded) ?? [];
+    // The lexical leg is the only read of `memories` that is ordered and capped; the
+    // uncapped one is the candidate-row loader. The capped read happens up to twice:
+    // the AND precision tier first, then the OR recall tier that backfills leftover
+    // slots — so the second capped read answers with `lexicalAny`.
+    if (spec.table === "memories") {
+      if (!spec.limited) return rows.loaded ?? [];
+      lexicalReads += 1;
+      return (lexicalReads === 1 ? rows.lexical : rows.lexicalAny) ?? [];
+    }
     throw new Error(`unexpected read of ${spec.table}`);
   };
 
@@ -239,6 +249,78 @@ describe("retrieveMemories — the lexical leg", () => {
     expect(result.candidates).toBe(40);
     expect(result.omitted).toHaveLength(OMITTED_REPORT_MAX);
     expect(result.omitted[0].rank).toBe(6);
+  });
+});
+
+describe("retrieveMemories — the lexical recall tier", () => {
+  it("backfills OR matches when the AND tier leaves room, without displacing it", async () => {
+    // The AND tier found one exact hit; the recall tier adds a memory that matches
+    // only some of the query's words. Both reach the ranker, and the precise hit —
+    // carrying the higher ts_rank — still leads.
+    const { db, reads } = fakeDb({
+      lexical: [{ ...memoryRow("exact"), lexicalRank: 0.9 }],
+      lexicalAny: [{ ...memoryRow("partial"), lexicalRank: 0.2 }],
+    });
+
+    const result = await retrieveMemories(db, {
+      brainId: BRAIN,
+      query: "postgres backup strategy",
+      now: NOW,
+    });
+
+    expect(result.results.map((row) => row.id)).toEqual(["exact", "partial"]);
+    expect(result.legCounts.lexical).toBe(2);
+    expect(result.results[0].features.lexicalRank).toBe(0.9);
+    expect(result.results[1].features.lexicalRank).toBe(0.2);
+    // Two capped reads of `memories`: the AND precision tier, then the OR recall tier.
+    expect(reads.filter((read) => read.table === "memories" && read.limited)).toHaveLength(2);
+  });
+
+  it("recovers results the brittle AND match would have dropped entirely", async () => {
+    // No memory carries every term, so the AND tier returns nothing. Before the recall
+    // tier this query answered with an empty list; now the best partial match surfaces.
+    const { db } = fakeDb({
+      lexical: [],
+      lexicalAny: [{ ...memoryRow("partial"), lexicalRank: 0.3 }],
+    });
+
+    const result = await retrieveMemories(db, {
+      brainId: BRAIN,
+      query: "postgres backup strategy production",
+      now: NOW,
+    });
+
+    expect(result.results.map((row) => row.id)).toEqual(["partial"]);
+    expect(result.legCounts.lexical).toBe(1);
+  });
+
+  it("does not run the OR tier for a single-term query (AND and OR are identical)", async () => {
+    const { db, reads } = fakeDb({
+      lexical: [{ ...memoryRow("only"), lexicalRank: 0.5 }],
+      lexicalAny: [{ ...memoryRow("phantom"), lexicalRank: 0.9 }],
+    });
+
+    const result = await retrieveMemories(db, { brainId: BRAIN, query: "postgres", now: NOW });
+
+    // One lexeme ⇒ the fallback is a no-op and must not run, so `phantom` never loads.
+    expect(result.results.map((row) => row.id)).toEqual(["only"]);
+    expect(reads.filter((read) => read.table === "memories" && read.limited)).toHaveLength(1);
+    expect(ANY_FALLBACK_MIN_LEXEMES).toBe(2);
+  });
+
+  it("never double-counts a memory the OR tier repeats", async () => {
+    // A stub that ignores the notInArray filter can hand the same row back to both
+    // tiers; the merge must still list it once, keeping the precise tier's rank.
+    const { db } = fakeDb({
+      lexical: [{ ...memoryRow("dup"), lexicalRank: 0.8 }],
+      lexicalAny: [{ ...memoryRow("dup"), lexicalRank: 0.1 }],
+    });
+
+    const result = await retrieveMemories(db, { brainId: BRAIN, query: "postgres backup", now: NOW });
+
+    expect(result.results.map((row) => row.id)).toEqual(["dup"]);
+    expect(result.legCounts.lexical).toBe(1);
+    expect(result.results[0].features.lexicalRank).toBe(0.8);
   });
 });
 

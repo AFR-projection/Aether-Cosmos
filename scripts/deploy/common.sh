@@ -13,6 +13,18 @@ NGINX_GEN="$ROOT/docker/generated/nginx.conf"
 NGINX_TEMPLATE="$ROOT/docker/nginx.conf.template"
 DOMAIN_FILE="$ROOT/.deploy/domain"
 
+# Compose picks the Bake builder when COMPOSE_BAKE=true, but Bake needs the buildx
+# plugin. On a host with COMPOSE_BAKE=true and no buildx, every `compose build` prints
+# "configured to build using Bake, but buildx isn't installed" and silently falls back
+# to the classic builder anyway. So: if buildx is present, leave the host's choice
+# alone; if it isn't, force Bake off (exported so every sourced sub-script inherits it).
+# Build output is identical either way -- this only removes the spurious warning.
+if docker buildx version >/dev/null 2>&1; then
+  export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"   # buildx present: keep host's choice, default off
+else
+  export COMPOSE_BAKE=false                      # no buildx: Bake can't work, don't ask for it
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -135,7 +147,13 @@ init_docker() {
     DOCKER=(docker)
   elif sudo docker info >/dev/null 2>&1; then
     DOCKER=(sudo docker)
-    warn "Docker pakai sudo — fix permanen: sudo usermod -aG docker \$USER && newgrp docker"
+    # init_docker runs several times per deploy (validate, health, …) and each sourced
+    # sub-script is a fresh shell. Warn ONCE and export the flag so children inherit it,
+    # instead of printing the same line six times.
+    if [[ -z "${_DOCKER_SUDO_WARNED:-}" ]]; then
+      warn "Docker pakai sudo — fix permanen: sudo usermod -aG docker \$USER && newgrp docker"
+      export _DOCKER_SUDO_WARNED=1
+    fi
   else
     die "Docker tidak bisa diakses. Install: curl -fsSL https://get.docker.com | sh"
   fi

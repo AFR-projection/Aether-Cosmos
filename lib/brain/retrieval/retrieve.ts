@@ -1,8 +1,8 @@
-import { and, asc, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/lib/db/schema";
 import { brainEntities, memories, memoryLinks, memoryMentions } from "@/lib/db/schema";
-import { ftsMatchOn, ftsRankOn, hasSearchTerms } from "@/lib/search/fts";
+import { ftsAnyMatchOn, ftsAnyRankOn, ftsMatchOn, ftsRankOn, hasSearchTerms } from "@/lib/search/fts";
 import { embeddingsAvailable } from "../embedding/provider";
 import { STOP_WORDS } from "../graph/relate";
 import type { MemoryType } from "../constants";
@@ -298,8 +298,10 @@ async function resolveQueryEntities(
 }
 
 /**
- * Lexical leg. Same column, same helpers and same prefix-tsquery as `brain_search`,
- * so what the search box finds is exactly what retrieval considers relevant.
+ * Lexical leg, precision tier. Same column, same helpers and same prefix-tsquery as
+ * `brain_search`, so what the search box finds is exactly what retrieval considers
+ * relevant. `prefixTsQuery` ANDs every term (`a:* & b:*`), so a row must contain all
+ * of them.
  *
  * The ordering matters even though the result is re-ranked afterwards: it decides
  * *which* 60 rows a large match set contributes, and dropping the strongest matches
@@ -320,6 +322,63 @@ async function lexicalLeg(
       desc(memories.id)
     )
     .limit(LEXICAL_CANDIDATE_LIMIT);
+
+  return rows.map(({ lexicalRank, ...memory }) => ({ memory, lexicalRank }));
+}
+
+/**
+ * A distinctive lexeme is worth two or more terms only when the AND tier can starve:
+ * a single-term query has an identical AND and OR tsquery, so the recall fallback
+ * below would just re-run the same match. This counts the alphanumeric runs the
+ * tsquery builder would keep, so the decision uses the same notion of "term" Postgres
+ * does.
+ */
+function distinctLexemeCount(query: string): number {
+  const lexemes = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return new Set(lexemes).size;
+}
+
+/** Below this many distinct lexemes the OR fallback is a no-op, so it is skipped. */
+export const ANY_FALLBACK_MIN_LEXEMES = 2;
+
+/**
+ * Lexical leg, recall tier — the "smarter" half of P2's text matching.
+ *
+ * The AND tier is precise but brittle: "postgres backup strategy production" returns
+ * nothing unless one memory carries *every* word, so a note that covers three of the
+ * four is invisible even though it is plainly the best answer. This tier fills the
+ * slots the AND tier left empty using the OR tsquery (`a:* | b:*`), which the relate
+ * candidate probe already relies on. `ts_rank` still rewards matching more terms, so
+ * a row hitting three of four out-ranks one hitting a single common word — graceful
+ * degradation, not a flood.
+ *
+ * It is strictly additive: `notInArray(alreadyFound)` means it can only *add* rows the
+ * precision tier missed, never displace or reorder them, and it is capped to whatever
+ * room is left under {@link LEXICAL_CANDIDATE_LIMIT}. When AND already fills the pool
+ * this runs zero extra work. The final ranking in `score.ts` is the precision guard:
+ * the tier's only job is to make sure a relevant memory reaches the ranker at all.
+ */
+async function lexicalAnyLeg(
+  db: RetrievalDb,
+  params: RetrieveParams,
+  query: string,
+  alreadyFound: readonly string[],
+  slots: number
+): Promise<{ memory: CandidateMemory; lexicalRank: number }[]> {
+  if (slots <= 0) return [];
+  const scope = [...visibilityScope(params), ftsAnyMatchOn(memories.searchVector, query)];
+  if (alreadyFound.length > 0) scope.push(notInArray(memories.id, [...alreadyFound]));
+
+  const rows = await db
+    .select({ ...candidateColumns, lexicalRank: ftsAnyRankOn(memories.searchVector, query) })
+    .from(memories)
+    .where(and(...scope))
+    .orderBy(
+      desc(ftsAnyRankOn(memories.searchVector, query)),
+      desc(memories.importance),
+      desc(memories.id)
+    )
+    .limit(slots);
 
   return rows.map(({ lexicalRank, ...memory }) => ({ memory, lexicalRank }));
 }
@@ -571,7 +630,7 @@ export async function retrieveMemories(
   const query = processed ? buildEnhancedQuery(processed) : null;
   const entityWords = processed ? extractEntityMatchWords(processed) : [];
 
-  const [semanticAvailable, lexical, entityResolved] = await Promise.all([
+  const [semanticAvailable, lexicalPrecise, entityResolved] = await Promise.all([
     embeddingsAvailable(),
     query && hasSearchTerms(query) ? lexicalLeg(db, params, query) : Promise.resolve([]),
     (async () => {
@@ -581,6 +640,28 @@ export async function retrieveMemories(
     })(),
   ]);
   const { entities: queryEntities, hits: entityHits } = entityResolved;
+
+  // Recall tier. When the AND match leaves room and the query has more than one term,
+  // backfill with the OR match so a memory that covers most of the query — but not
+  // every word — still reaches the ranker. Strictly additive: it excludes the ids the
+  // precise tier already found and only fills the leftover slots (see lexicalAnyLeg).
+  let lexical = lexicalPrecise;
+  if (
+    query &&
+    hasSearchTerms(query) &&
+    lexicalPrecise.length < LEXICAL_CANDIDATE_LIMIT &&
+    distinctLexemeCount(query) >= ANY_FALLBACK_MIN_LEXEMES
+  ) {
+    const preciseIds = lexicalPrecise.map((row) => row.memory.id);
+    const backfill = await lexicalAnyLeg(
+      db,
+      params,
+      query,
+      preciseIds,
+      LEXICAL_CANDIDATE_LIMIT - lexicalPrecise.length
+    );
+    lexical = [...lexicalPrecise, ...backfill];
+  }
 
   // Explicit seeds are roots, not results: `brain_related(memoryId)` must not
   // return the memory it was asked about. Lexical/entity seeds stay eligible — a
@@ -632,6 +713,10 @@ export async function retrieveMemories(
 
   for (const row of lexical) {
     if (excluded.has(row.memory.id)) continue;
+    // A candidate can appear in both the precise and recall tiers only if the
+    // notInArray filter is bypassed (e.g. a stubbed db); dedupe by id so the leg is
+    // never double-counted and the precise tier's rank is the one that sticks.
+    if (pool.has(row.memory.id)) continue;
     const candidate = candidateFor(row.memory);
     candidate.features.lexicalRank = row.lexicalRank;
     candidate.legs.push("lexical");
