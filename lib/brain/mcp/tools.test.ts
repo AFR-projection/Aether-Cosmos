@@ -161,6 +161,8 @@ const BRAIN_B = "bbbbbbbb-2222-4222-8222-222222222222";
 const UNGRANTED_BRAIN = "eeeeeeee-5555-4555-8555-555555555555";
 const MEM_A = "cccccccc-3333-4333-8333-333333333333";
 const MEM_B = "dddddddd-4444-4444-8444-444444444444";
+/** A third memory, used where a tool must report two relatives of different kinds. */
+const MEM_C = "eeeeeeee-5555-4555-8555-555555555555";
 const PROJECT = "ffffffff-6666-4666-8666-666666666666";
 
 /**
@@ -373,10 +375,26 @@ beforeEach(() => {
       id: MEM_B,
       title: "Deploy target (old)",
       type: "fact",
-      score: 0.62,
-      reason: "shares entity nginx",
-      linkType: null,
+      score: 1,
+      origin: "explicit",
+      explicit: true,
+      reason: "direct_link",
+      linkType: "supersedes",
       hops: 1,
+    },
+    {
+      id: MEM_C,
+      title: "Nginx tuning",
+      type: "fact",
+      score: 0.425,
+      origin: "derived",
+      explicit: false,
+      reason: "shares entity nginx",
+      weight: 0.5,
+      confidence: 0.45,
+      status: "suggested",
+      evidence: { sharedEntities: ["nginx"], signalFamilyCount: 1 },
+      computedBy: "relate-v1",
     },
   ]);
   getMemoryTimeline.mockResolvedValue({
@@ -415,6 +433,9 @@ beforeEach(() => {
     supersededBy: null,
     supersedes: [],
     sourceMemories: [],
+    // PHASE 2: brain_explain reports computed relationships too. Empty by default so
+    // each test decides whether this brain has any.
+    derivedRelationships: [],
   });
   getBrainHealth.mockResolvedValue(healthReport);
   syncBrainReviewQueue.mockResolvedValue(4);
@@ -580,7 +601,9 @@ describe("limits belong to the server, not to the caller", () => {
     expect(listEntities).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }));
     expect(listRelationships).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 }));
     expect(findBrainMemoryPath).toHaveBeenCalledWith(BRAIN_A, MEM_A, MEM_B, 5);
-    expect(getBrainRelatedMemories).toHaveBeenCalledWith(BRAIN_A, MEM_A, 20, 2);
+    // The trailing `false` is the suggestion gate: below-threshold derived edges are
+    // for review UIs, and an agent must opt in rather than be handed guesses.
+    expect(getBrainRelatedMemories).toHaveBeenCalledWith(BRAIN_A, MEM_A, 20, 2, false);
   });
 
   it("gives brain_health its thresholds so a scan cannot be silently widened", async () => {
@@ -614,6 +637,94 @@ describe("limits belong to the server, not to the caller", () => {
     // has no business reaching the service layer or a uuid column at all.
     await invalidArguments("brain_read", { brainId: "not-a-uuid", memoryId: MEM_A });
     expect(getMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe("computed knowledge never passes for asserted knowledge", () => {
+  it("labels every brain_related row with where it came from", async () => {
+    const { payload } = await call("brain_related", { memoryId: MEM_A });
+    const rows = payload.related as Array<Record<string, unknown>>;
+
+    expect(rows[0]).toMatchObject({
+      id: MEM_B,
+      origin: "explicit",
+      explicit: true,
+      linkType: "supersedes",
+      reason: "direct_link",
+    });
+    // An assertion carries no scorer metadata: there is no algorithm to blame.
+    expect(rows[0].computedBy).toBeUndefined();
+    expect(rows[0].evidence).toBeUndefined();
+
+    expect(rows[1]).toMatchObject({
+      id: MEM_C,
+      origin: "derived",
+      explicit: false,
+      weight: 0.5,
+      confidence: 0.45,
+      // Below the apply threshold, and the payload says so: an agent that reads only
+      // `origin` would treat this exactly like an auto-applied edge.
+      status: "suggested",
+      computedBy: "relate-v1",
+      evidence: { sharedEntities: ["nginx"], signalFamilyCount: 1 },
+    });
+  });
+
+  it("returns below-threshold suggestions by default, and drops them on request", async () => {
+    await call("brain_related", { memoryId: MEM_A });
+    expect(getBrainRelatedMemories).toHaveBeenLastCalledWith(BRAIN_A, MEM_A, 20, 2, false);
+
+    await call("brain_related", { memoryId: MEM_A, appliedOnly: true });
+    expect(getBrainRelatedMemories).toHaveBeenLastCalledWith(BRAIN_A, MEM_A, 20, 2, true);
+  });
+
+  it("keeps brain_explain's inferences out of the asserted relationship block", async () => {
+    const base = await getMemoryProvenance();
+    getMemoryProvenance.mockClear();
+    getMemoryProvenance.mockResolvedValue({
+      ...(base as Record<string, unknown>),
+      derivedRelationships: [
+        {
+          id: MEM_C,
+          title: "Nginx tuning",
+          origin: "inferred",
+          status: "suggested",
+          relation: "entity",
+          weight: 0.44,
+          confidence: 0.61,
+          reason: "shared entity: nginx",
+          evidence: { sharedEntities: ["nginx"], signalFamilyCount: 2 },
+          computedBy: "relate-v1",
+          computedAt: UPDATED_AT,
+        },
+      ],
+    });
+
+    const { payload } = await call("brain_explain", { memoryId: MEM_A });
+
+    // PRINSIP 3: `relationships` is what somebody stated; inferences live in their own
+    // block, with the evidence and the scorer version needed to audit them.
+    expect(payload.relationships).toEqual({
+      supersededBy: null,
+      supersedes: [],
+      sourceMemories: [],
+    });
+    const inferences = payload.algorithmicInferences as Record<string, unknown>;
+    expect(inferences.count).toBe(1);
+    expect(inferences.note).toContain("not asserted by anyone");
+    expect((inferences.relationships as Array<Record<string, unknown>>)[0]).toEqual({
+      id: MEM_C,
+      title: "Nginx tuning",
+      origin: "inferred",
+      status: "suggested",
+      relation: "entity",
+      weight: 0.44,
+      confidence: 0.61,
+      reason: "shared entity: nginx",
+      evidence: { sharedEntities: ["nginx"], signalFamilyCount: 2 },
+      computedBy: "relate-v1",
+      computedAt: UPDATED_AT.toISOString(),
+    });
   });
 });
 

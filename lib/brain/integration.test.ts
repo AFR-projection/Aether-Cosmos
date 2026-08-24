@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brains, brainAccess, memories, users } from "@/lib/db/schema";
 import { rememberMemory } from "./remember";
 import { updateMemory } from "./memory-service";
+import { enrichMemory } from "./enrich/enrich-service";
 import { linkMemory } from "./link-service";
 import { recallBrainContext } from "./recall";
 import { buildBrainContext } from "./context-engine";
@@ -29,6 +30,11 @@ import { getBrainHealth } from "./health-service";
  */
 
 const DATABASE_AVAILABLE = Boolean(process.env.DATABASE_URL);
+
+// These tests hit live Postgres — several round trips per test, plus inline
+// enrichment transactions — which comfortably exceeds vitest's 5s default. Match
+// the timeout the other DB-gated suites use so a real run does not flake.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const principalOf = (userId: string) => ({ userId, agentId: null });
 
@@ -110,6 +116,18 @@ describe.skipIf(!DATABASE_AVAILABLE)("Second Brain integration (requires DATABAS
         tags: ["typescript", "javascript"],
       },
     });
+
+    // Enrichment is what the worker runs asynchronously in production
+    // (CREATE → enrich → relate). It extracts entities — React, Next.js and
+    // TypeScript are all in the extractor lexicon — and writes the mention spans the
+    // entity and graph retrieval legs depend on. Run it inline so this test
+    // exercises the real remember → enrich → retrieve chain: a natural-language task
+    // like the one below has no entities to resolve without it, and the lexical leg
+    // AND-matches every content word, so a framing word such as "relate" (present in
+    // no memory) would otherwise defeat the match and return nothing.
+    await enrichMemory(db, { brainId: testBrainId, memoryId: react.memory.id });
+    await enrichMemory(db, { brainId: testBrainId, memoryId: next.memory.id });
+    await enrichMemory(db, { brainId: testBrainId, memoryId: typescript.memory.id });
 
     // Explicit, evidence-carrying links — never inferred from a shared word.
     await linkMemory({

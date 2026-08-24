@@ -29,6 +29,8 @@ import {
   type MemoryCursor,
 } from "./pagination";
 import { memoryContentHash } from "./enrich/enrich-service";
+import { deleteDerivedEdgesFor } from "./graph/derived-link-service";
+import { relateJobId } from "./graph/relate-jobs";
 import { enqueueJob } from "@/lib/queue";
 
 /**
@@ -46,6 +48,40 @@ import { enqueueJob } from "@/lib/queue";
  */
 function requestEnrichment(brainId: string, memoryId: string): void {
   void enqueueJob("enrich_memory", { brainId, memoryId }).catch(() => {});
+}
+
+/**
+ * PHASE 2: Ask the worker to compute derived relationships for a memory.
+ *
+ * Same fire-and-forget pattern as enrichment. Normally the worker chains relate off
+ * a successful enrichment (PRINSIP 9: CREATE → enrichment → relate), so this direct
+ * call is only for edits enrichment ignores but the scorer does not — tags and
+ * project membership are signal families of their own.
+ *
+ * `jobId` dedupe collapses burst writes: five rapid PATCHes queue one relate pass.
+ * Safe because reconciliation is idempotent — it rewrites the seed's edges rather
+ * than adding to them.
+ */
+function requestRelate(brainId: string, memoryId: string): void {
+  void enqueueJob("relate_memory", { brainId, memoryId }, { jobId: relateJobId(memoryId) }).catch(() => {});
+}
+
+/**
+ * PHASE 2: Drop the derived edges of a memory that just went away.
+ *
+ * Soft delete leaves the row in place, so the FK `ON DELETE cascade` never fires and
+ * `memory_derived_links` would keep pointing at a memory no reader should surface.
+ * Derived edges are recomputable artifacts, so hard-deleting them costs nothing —
+ * explicit `memory_links` are deliberately left alone so a restore revives them.
+ *
+ * Best-effort: the delete has already been committed and reported to the caller, and
+ * the read paths filter `deleted_at` anyway. A failure here leaves rows that the next
+ * relate pass reconciles away.
+ */
+function forgetDerivedEdges(brainId: string, memoryId: string): void {
+  void deleteDerivedEdgesFor(db, brainId, memoryId).catch((error) => {
+    console.error("failed to remove derived edges for deleted memory", error);
+  });
 }
 
 export type MemoryWithTags = Memory & { tags: string[] };
@@ -335,6 +371,11 @@ export async function updateMemory(params: {
     data.importance !== undefined ||
     data.confidence !== undefined ||
     data.tags !== undefined ||
+    // `projectId` belongs here for the same reason `tags` does: it is applied to the
+    // row below and it is a relate signal family, so a patch that only moves a memory
+    // between projects is a real change. Its absence made that PATCH a 400 and left
+    // the relate request below it unreachable from that path.
+    data.projectId !== undefined ||
     data.archived !== undefined;
 
   if (!hasAnyChange) throw new BrainValidationError("No fields to update");
@@ -426,6 +467,13 @@ export async function updateMemory(params: {
   });
 
   if (needsEnrichment) requestEnrichment(brainId, memoryId);
+  // Tags and project are relate signal families in their own right, and neither is
+  // part of the enrichment hash — so an edit that only re-tags a memory changes its
+  // relationships without changing `contentHash`. When enrichment does run the worker
+  // chains relate itself, so asking twice would only burn a dedupe slot.
+  else if (data.tags !== undefined || data.projectId !== undefined) {
+    requestRelate(brainId, memoryId);
+  }
   return result;
 }
 
@@ -453,6 +501,8 @@ export async function deleteMemory(params: {
       )
     )
     .returning({ id: memories.id });
+
+  if (deleted.length > 0) forgetDerivedEdges(params.brainId, params.memoryId);
 
   return deleted.length > 0;
 }

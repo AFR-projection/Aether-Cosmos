@@ -48,11 +48,44 @@ export function prefixTsQuery(q: string): SQL {
 }
 
 /**
+ * Same construction as {@link prefixTsQuery} but OR-ing the lexemes instead of
+ * AND-ing them: `to_tsquery('simple', 'a:* | b:* …')`.
+ *
+ * PHASE 2 (relate candidate probes) needs "any of these terms" recall, not the
+ * "all of these terms" precision the search box wants. Feeding a whole memory
+ * title+summary through the AND variant matches essentially nothing, which is
+ * exactly the wrong behaviour for a candidate generator.
+ *
+ * Same injection story as the AND variant: `q` stays a bound parameter and every
+ * token is stripped to `[[:alnum:]]` inside Postgres before reaching the parser.
+ */
+export function anyPrefixTsQuery(q: string): SQL {
+  return sql`to_tsquery(${TS_CONFIG}, (
+    SELECT string_agg(t || ':*', ' | ')
+    FROM (
+      SELECT regexp_replace(word, '[^[:alnum:]]', '', 'g') AS t
+      FROM unnest(regexp_split_to_array(lower(trim(${q})), '[[:space:]]+')) AS word
+    ) tokens
+    WHERE t <> ''
+  ))`;
+}
+
+/**
  * A `tsvector @@ to_tsquery(...)` prefix-match condition for the WHERE clause,
  * against any generated tsvector column (files, memories, ...).
  */
 export function ftsMatchOn(column: SQLWrapper, q: string): SQL {
   return sql`${column} @@ ${prefixTsQuery(q)}`;
+}
+
+/** WHERE-clause condition matching ANY term in `q` (see {@link anyPrefixTsQuery}). */
+export function ftsAnyMatchOn(column: SQLWrapper, q: string): SQL {
+  return sql`${column} @@ ${anyPrefixTsQuery(q)}`;
+}
+
+/** Relevance score for the OR variant, for ORDER BY. Pair with ftsAnyMatchOn. */
+export function ftsAnyRankOn(column: SQLWrapper, q: string): SQL<number> {
+  return sql<number>`ts_rank(${column}, ${anyPrefixTsQuery(q)})`;
 }
 
 /**

@@ -122,6 +122,17 @@ export async function linkMemory(params: {
       ? [memoryLinks.sourceMemoryId, memoryLinks.targetMemoryId, memoryLinks.linkType]
       : [memoryLinks.sourceMemoryId, memoryLinks.targetEntityId, memoryLinks.linkType];
 
+  // The unique indexes these upserts arbitrate on are PARTIAL — memory_links_memory_unique
+  // is guarded by "target_memory_id IS NOT NULL", the entity one by "target_entity_id IS
+  // NOT NULL" (there is no plain unique, because only one target column is ever set). A
+  // partial index can only be inferred as an ON CONFLICT arbiter when the statement
+  // repeats its predicate, so this WHERE must be present or Postgres raises 42P10
+  // ("no unique or exclusion constraint matching the ON CONFLICT specification").
+  const conflictWhere =
+    target.targetType === "memory"
+      ? sql`${memoryLinks.targetMemoryId} is not null`
+      : sql`${memoryLinks.targetEntityId} is not null`;
+
   const [row] = await db
     .insert(memoryLinks)
     .values({
@@ -137,6 +148,7 @@ export async function linkMemory(params: {
     })
     .onConflictDoUpdate({
       target: conflictTarget,
+      targetWhere: conflictWhere,
       set: { metadata: params.metadata ?? null },
     })
     .returning();

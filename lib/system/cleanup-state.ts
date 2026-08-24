@@ -35,6 +35,8 @@ export interface CleanupResult {
   abortedMultipartUploads?: number;
   orphanObjectsReported?: number;
   expiredArchives?: number;
+  expiredSessions?: number;
+  expiredOtpTokens?: number;
 }
 
 export interface CleanupState {

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { otpTokens } from "@/lib/db/schema";
-import { eq, and, gt, lt, desc } from "drizzle-orm";
+import { eq, and, gt, desc } from "drizzle-orm";
 import { deliverMail } from "./mailer";
 import { generateOTP, hashOTP } from "./otp-utils";
 import { otpEmail } from "./templates";
@@ -105,8 +105,4 @@ export async function verifyOTP(email: string, code: string): Promise<boolean> {
   await db.update(otpTokens).set({ verified: true }).where(eq(otpTokens.id, token.id));
   recordEmailLog("info", "otp", `OTP verified for ${clean}`, { to: clean });
   return true;
-}
-
-export async function cleanupExpiredOTP(): Promise<void> {
-  await db.delete(otpTokens).where(lt(otpTokens.expiresAt, new Date()));
 }

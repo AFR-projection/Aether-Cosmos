@@ -1,8 +1,11 @@
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db as applicationDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
-import { memories, memoryLinks, memoryVersions } from "@/lib/db/schema";
+import { memories, memoryDerivedLinks, memoryLinks, memoryVersions } from "@/lib/db/schema";
+
+/** Derived edges reported per memory. Bounded: brain_explain is a report, not a dump. */
+const DERIVED_EXPLAIN_MAX = 40;
 
 /**
  * Provenance service: explain where a memory came from and how it evolved.
@@ -46,6 +49,33 @@ export type MemoryProvenance = {
 
   // Lineage (source memories this was derived from)
   sourceMemories: Array<{ id: string; title: string; linkType: string }>;
+
+  /**
+   * PHASE 2: relationships no human ever asserted — the scorer's own conclusions.
+   *
+   * Kept in a separate field from `sourceMemories` and `supersedes` on purpose. Those
+   * are lineage the user or an agent stated; these are inferences, and a provenance
+   * report that blurred the two would be exactly the wrong answer to "where did this
+   * come from?". Each entry carries the reason, the evidence and the scorer version,
+   * so a reader can audit the inference instead of taking it on faith.
+   */
+  derivedRelationships: Array<{
+    id: string;
+    title: string;
+    /** `derived` (one signal family) or `inferred` (several agreed). */
+    origin: "derived" | "inferred";
+    /** `applied` (visible to readers) or `suggested` (below the apply threshold). */
+    status: "applied" | "suggested";
+    /** Dominant signal: semantic | tag | entity | project. */
+    relation: string;
+    weight: number;
+    confidence: number;
+    reason: string;
+    evidence: Record<string, unknown> | null;
+    /** Scorer version, e.g. "relate-v1". */
+    computedBy: string;
+    computedAt: Date;
+  }>;
 };
 
 /**
@@ -198,6 +228,64 @@ export async function explainMemoryProvenance(
     }
   }
 
+  // PHASE 2: algorithmic inferences about this memory. Both statuses are reported —
+  // brain_explain is an audit surface, and "the scorer suspected this but did not
+  // apply it" is information a reader auditing the graph wants.
+  const derivedRows = await db
+    .select()
+    .from(memoryDerivedLinks)
+    .where(
+      and(
+        eq(memoryDerivedLinks.brainId, brainId),
+        or(
+          eq(memoryDerivedLinks.sourceMemoryId, memoryId),
+          eq(memoryDerivedLinks.targetMemoryId, memoryId)
+        )
+      )
+    )
+    .orderBy(desc(memoryDerivedLinks.weight), asc(memoryDerivedLinks.id))
+    .limit(DERIVED_EXPLAIN_MAX);
+
+  const derivedRelationships: MemoryProvenance["derivedRelationships"] = [];
+  if (derivedRows.length > 0) {
+    const otherIds = derivedRows.map((row) =>
+      row.sourceMemoryId === memoryId ? row.targetMemoryId : row.sourceMemoryId
+    );
+    const otherRows = await db
+      .select({ id: memories.id, title: memories.title })
+      .from(memories)
+      .where(
+        and(
+          eq(memories.brainId, brainId),
+          inArray(memories.id, otherIds),
+          isNull(memories.deletedAt)
+        )
+      );
+    const otherMap = new Map(otherRows.map((row) => [row.id, row.title]));
+
+    for (const row of derivedRows) {
+      const otherId = row.sourceMemoryId === memoryId ? row.targetMemoryId : row.sourceMemoryId;
+      const title = otherMap.get(otherId);
+      // A missing title means the other endpoint was deleted or belongs to another
+      // brain: report nothing rather than a dangling id.
+      if (title === undefined) continue;
+
+      derivedRelationships.push({
+        id: otherId,
+        title,
+        origin: row.origin,
+        status: row.status,
+        relation: row.relation,
+        weight: row.weight,
+        confidence: row.confidence,
+        reason: row.reason,
+        evidence: (row.evidence as Record<string, unknown> | null) ?? null,
+        computedBy: row.computedBy,
+        computedAt: row.updatedAt,
+      });
+    }
+  }
+
   return {
     memoryId: memory.id,
     memoryTitle: memory.title,
@@ -222,6 +310,7 @@ export async function explainMemoryProvenance(
     supersededBy,
     supersedes,
     sourceMemories,
+    derivedRelationships,
   };
 }
 

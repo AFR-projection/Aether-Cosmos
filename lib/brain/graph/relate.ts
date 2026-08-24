@@ -538,3 +538,157 @@ export function relateMemories(memories: RelateMemory[], options: RelateOptions 
 
   return { edges, candidates: pairs.size };
 }
+
+// ── PHASE 2: Single-seed scoring ───────────────────────────────────────────
+
+/**
+ * PHASE 2: Structured evidence for derived edges, bounded and safe for agents.
+ * Never contains full memory content — only signal metadata.
+ */
+export type EdgeEvidence = {
+  signals: {
+    semantic?: { similarity: number; sharedTerms: string[] };
+    tag?: { sharedTags: string[]; rare: boolean };
+    entity?: { sharedEntityIds: string[] };
+    project?: boolean;
+  };
+  signalFamilyCount: number;
+};
+
+/**
+ * PHASE 2: Scored edge with full provenance for persistence layer.
+ */
+export type ScoredEdgeWithEvidence = {
+  memoryA: string;
+  memoryB: string;
+  relation: DerivedRelation;
+  weight: number;
+  reason: string;
+  evidence: EdgeEvidence;
+};
+
+/**
+ * PHASE 2: Score one seed memory against a bounded candidate set.
+ *
+ * Determinism guarantee: for the SAME (seed, candidates) inputs, the output is
+ * byte-stable across runs — the final sort is total-ordered (weight desc, then
+ * memoryB), and every score is a pure function of the inputs.
+ *
+ * NOT equal to a full-brain run. IDF/DF — both term (buildDocs) and tag — and the
+ * document `total` are computed LOCALLY over `[seed, ...candidates]`, never over the
+ * whole brain. So the same pair can come out with a different weight here than a
+ * full-brain relateMemories() would give it, and can even clear or miss its gate
+ * differently: fewer documents means different rarity, which moves the cosine, the
+ * distinctive-term set, and the tag IDF. This is intentional — candidates are already
+ * pre-filtered and bounded upstream (relate-candidates.ts), and derived edges are a
+ * bounded suggestion layer, so local DF is the correct, cheaper contract. Do NOT
+ * "restore parity" by threading global DF in without a policy decision: it rewrites
+ * every derived edge weight in the brain.
+ *
+ * What IS shared with relateMemories is the scoring CODE — scorePair(), buildDocs(),
+ * the gates — so the two entry points apply one formula, not two. They agree on how
+ * to score given identical inputs; they are fed different inputs on purpose.
+ *
+ * Pruning is NOT applied here — that happens in the persistence layer after
+ * candidates from all probes are merged. This function returns every pair that
+ * passes the signal gates + minWeight threshold.
+ */
+export function relateOne(
+  seed: RelateMemory,
+  candidates: RelateMemory[],
+  options: RelateOptions = {}
+): ScoredEdgeWithEvidence[] {
+  const { minWeight } = { ...RELATE_DEFAULTS, ...options };
+
+  if (candidates.length === 0) return [];
+
+  // Build docs for seed + candidates. Only `docs` is needed: candidate nomination
+  // (the one consumer of `termDf`) already happened upstream in relate-candidates.
+  const memories = [seed, ...candidates];
+  const { docs } = buildDocs(memories);
+  const total = docs.length;
+
+  // Seed is always index 0
+  const seedIdx = 0;
+
+  // Tag DF
+  const tagDf = new Map<string, number>();
+  for (const doc of docs) {
+    for (const tag of new Set(doc.tags)) tagDf.set(tag, (tagDf.get(tag) ?? 0) + 1);
+  }
+
+  const results: ScoredEdgeWithEvidence[] = [];
+
+  // Score seed against each candidate
+  for (let candidateIdx = 1; candidateIdx < total; candidateIdx += 1) {
+    const scored = scorePair(seedIdx, candidateIdx, docs, tagDf, total);
+    if (!scored || scored.weight < minWeight) continue;
+
+    // Extract structured evidence from the scoring internals
+    // (Re-derive to keep evidence consistent with the score)
+    const left = docs[seedIdx];
+    const right = docs[candidateIdx];
+
+    const sharedEntities = shared(left.entityIds, right.entityIds);
+    const sharedTags = byRarity(shared(left.tags, right.tags), tagDf);
+
+    const sharedTerms: string[] = [];
+    for (const term of left.distinctive) {
+      if (right.distinctive.has(term)) sharedTerms.push(term);
+      if (sharedTerms.length >= 6) break;
+    }
+
+    const similarity = sharedTerms.length > 0 ? cosine(left.vector, right.vector) : 0;
+    const semanticGate = similarity >= SEMANTIC_MIN && sharedTerms.length >= 2;
+
+    const rareCutoff = Math.max(
+      RARE_TAG_DF_ABS,
+      Math.min(POSTING_MAX, Math.floor(total * RARE_TAG_DF_RATIO))
+    );
+    const rareTag = sharedTags.length > 0 && (tagDf.get(sharedTags[0]) ?? 0) <= rareCutoff;
+    const tagGate = sharedTags.length >= 2 || rareTag;
+
+    const sameProject =
+      left.projectId !== null && right.projectId !== null && left.projectId === right.projectId;
+
+    const evidence: EdgeEvidence = {
+      signals: {},
+      signalFamilyCount: 0,
+    };
+
+    if (semanticGate) {
+      evidence.signals.semantic = { similarity, sharedTerms: sharedTerms.slice(0, 4) };
+      evidence.signalFamilyCount += 1;
+    }
+
+    if (tagGate) {
+      evidence.signals.tag = { sharedTags: sharedTags.slice(0, 3), rare: rareTag };
+      evidence.signalFamilyCount += 1;
+    }
+
+    if (sharedEntities.length > 0) {
+      evidence.signals.entity = { sharedEntityIds: sharedEntities };
+      evidence.signalFamilyCount += 1;
+    }
+
+    if (sameProject) {
+      evidence.signals.project = true;
+      // Project is a bonus, not a family — don't increment signalFamilyCount
+    }
+
+    results.push({
+      memoryA: seed.id,
+      memoryB: candidates[candidateIdx - 1].id,
+      relation: scored.relation,
+      weight: Math.round(scored.weight * 1000) / 1000,
+      reason: scored.reason,
+      evidence,
+    });
+  }
+
+  // Sort by weight DESC for deterministic output
+  results.sort((a, b) => b.weight - a.weight || (a.memoryB < b.memoryB ? -1 : 1));
+
+  return results;
+}
+

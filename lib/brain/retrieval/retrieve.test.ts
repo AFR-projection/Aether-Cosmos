@@ -232,7 +232,8 @@ describe("retrieveMemories — the lexical leg", () => {
     }));
     const { db } = fakeDb({ lexical });
 
-    const result = await retrieveMemories(db, { brainId: BRAIN, query: "x", limit: 5, now: NOW });
+    // Use a query that passes preprocessing (>= 3 chars, not a stopword)
+    const result = await retrieveMemories(db, { brainId: BRAIN, query: "test query", limit: 5, now: NOW });
 
     expect(result.results).toHaveLength(5);
     expect(result.candidates).toBe(40);

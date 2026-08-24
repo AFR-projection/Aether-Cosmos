@@ -2,7 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import * as schema from "../lib/db/schema";
-import { activityLogs, archiveJobs, fileVersions, files, folders, uploadSessions, users } from "../lib/db/schema";
+import { activityLogs, archiveJobs, fileVersions, files, folders, otpTokens, sessions, uploadSessions, users } from "../lib/db/schema";
 import { headObject, listMultipartUploads, listR2Objects, abortMultipartUpload } from "../lib/storage/r2";
 import { assertFileUploadTransition, assertUploadSessionTransition } from "../lib/storage/upload-state";
 import {
@@ -111,7 +111,33 @@ async function cleanupLogs(db: Db, days: number) {
   if (!days || days < 7) return { deleted: 0 };
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const result = await db.delete(activityLogs).where(lt(activityLogs.createdAt, cutoff));
-  return { deleted: (result as { rowCount?: number }).rowCount ?? 0 };
+  // postgres-js returns the affected-row count on `.count`, not `.rowCount`
+  // (that is node-postgres). Reading `.rowCount` here always yielded 0.
+  return { deleted: (result as unknown as { count?: number }).count ?? 0 };
+}
+
+/**
+ * Purge auth sessions whose `expiresAt` is in the past. Every session reader
+ * filters on `expiresAt > now` (see lib/auth/session.ts and the admin/session
+ * routes), so an expired row is already invisible to the app, to admins, to
+ * everyone — deleting it changes no behaviour, it only stops the table growing
+ * without bound. One DELETE, no per-row work, so it needs no batching.
+ */
+export async function cleanupExpiredSessions(db: Db) {
+  const result = await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
+  return { deleted: (result as unknown as { count?: number }).count ?? 0 };
+}
+
+/**
+ * Purge one-time passcodes whose `expiresAt` is in the past. `verifyOTP` only
+ * ever reads codes with `expiresAt > now`, and the 10-minute expiry is far
+ * longer than the 60-second resend rate-limit window, so removing expired rows
+ * can neither revive a code nor loosen rate-limiting. It just keeps the table
+ * from accumulating every passcode ever issued.
+ */
+export async function cleanupExpiredOtpTokens(db: Db) {
+  const result = await db.delete(otpTokens).where(lt(otpTokens.expiresAt, new Date()));
+  return { deleted: (result as unknown as { count?: number }).count ?? 0 };
 }
 
 async function cleanupArchives(db: Db) {
@@ -270,6 +296,8 @@ export async function runScheduledCleanups(
     const lifetime = await cleanupFileLifetime(db, settings.maxFileLifetimeDays);
     const logs = await cleanupLogs(db, settings.logRetentionDays);
     const archives = await cleanupArchives(db);
+    const expiredSessions = await cleanupExpiredSessions(db);
+    const expiredOtpTokens = await cleanupExpiredOtpTokens(db);
 
     const result: CleanupResult = {
       trashFiles: trash.files,
@@ -277,12 +305,14 @@ export async function runScheduledCleanups(
       lifetimeSoftDeleted: lifetime.softDeleted,
       logsDeleted: logs.deleted,
       expiredArchives: archives.expired,
+      expiredSessions: expiredSessions.deleted,
+      expiredOtpTokens: expiredOtpTokens.deleted,
       ...reconciliation,
     };
 
     await recordCleanupResult(db, { result });
     console.log(
-      `[cleanup:${source}] trash files=${result.trashFiles} folders=${result.trashFolders} lifetime=${result.lifetimeSoftDeleted} logs=${result.logsDeleted}`
+      `[cleanup:${source}] trash files=${result.trashFiles} folders=${result.trashFolders} lifetime=${result.lifetimeSoftDeleted} logs=${result.logsDeleted} sessions=${result.expiredSessions} otp=${result.expiredOtpTokens}`
     );
     return result;
   } catch (error) {

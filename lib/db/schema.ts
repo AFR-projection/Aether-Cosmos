@@ -193,6 +193,8 @@ export const sessions = pgTable(
     index("sessions_user_id_idx").on(table.userId),
     index("sessions_expires_at_idx").on(table.expiresAt),
     index("sessions_last_active_idx").on(table.lastActiveAt),
+    // FK child index: a user delete must not scan every session row.
+    index("sessions_impersonating_idx").on(table.impersonatingUserId),
   ]
 );
 
@@ -390,6 +392,8 @@ export const archiveJobItems = pgTable(
   (table) => [
     uniqueIndex("archive_job_items_job_path_unique").on(table.archiveJobId, table.archivePath),
     index("archive_job_items_job_status_idx").on(table.archiveJobId, table.status),
+    // FK child index: a file delete must not scan every archive item.
+    index("archive_job_items_file_idx").on(table.fileId),
   ]
 );
 
@@ -439,6 +443,8 @@ export const deletionJobItems = pgTable(
   (table) => [
     uniqueIndex("deletion_job_items_job_object_unique").on(table.deletionJobId, table.objectKey),
     index("deletion_job_items_job_status_idx").on(table.deletionJobId, table.status),
+    // FK child index: a file delete must not scan every deletion item.
+    index("deletion_job_items_file_idx").on(table.fileId),
   ]
 );
 
@@ -479,6 +485,8 @@ export const shares = pgTable(
     index("shares_file_id_idx").on(table.fileId),
     index("shares_expires_idx").on(table.expiresAt),
     index("shares_max_access_idx").on(table.maxAccessCount),
+    // FK child index: a user delete must not scan every share.
+    index("shares_shared_by_idx").on(table.sharedBy),
   ]
 );
 
@@ -934,6 +942,26 @@ export const brainReviewStatusEnum = pgEnum("brain_review_status", [
   "resolved",
 ]);
 
+/**
+ * PHASE 2: Origin of a memory relationship — derived vs inferred.
+ * - derived: one signal family passed its gate (semantic OR tag OR entity OR project)
+ * - inferred: >= 2 independent signal families agreed (higher confidence)
+ */
+export const memoryRelationOriginEnum = pgEnum("memory_relation_origin", [
+  "derived",
+  "inferred",
+]);
+
+/**
+ * PHASE 2: Status of a derived relationship — applied vs suggested.
+ * - applied: readable by brain_related (confidence >= threshold)
+ * - suggested: scored but awaiting policy/human approval (invisible by default)
+ */
+export const memoryRelationStatusEnum = pgEnum("memory_relation_status", [
+  "applied",
+  "suggested",
+]);
+
 export const brains = pgTable(
   "brains",
   {
@@ -1071,6 +1099,10 @@ export const memories = pgTable(
     index("memories_superseded_by_idx").on(table.supersededById),
     // Temporal ranking + "what did I last touch" reads.
     index("memories_brain_recalled_idx").on(table.brainId, table.lastRecalledAt),
+    // FK child indexes: deleting a user or revoking an agent's key must not scan the
+    // whole memories table to check authorship.
+    index("memories_created_by_idx").on(table.createdBy),
+    index("memories_created_by_agent_idx").on(table.createdByAgent),
   ]
 );
 
@@ -1092,6 +1124,9 @@ export const memoryVersions = pgTable(
   (table) => [
     uniqueIndex("memory_versions_unique").on(table.memoryId, table.versionNumber),
     index("memory_versions_memory_idx").on(table.memoryId),
+    // FK child indexes for the two authorship columns.
+    index("memory_versions_changed_by_idx").on(table.changedBy),
+    index("memory_versions_changed_by_agent_idx").on(table.changedByAgent),
   ]
 );
 
@@ -1117,6 +1152,8 @@ export const memoryTagMap = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.memoryId, table.tagId] }),
+    // PHASE 2: reverse lookup for "which memories use tag X" candidate probe
+    index("memory_tag_map_tag_idx").on(table.tagId, table.memoryId),
   ]
 );
 
@@ -1236,6 +1273,9 @@ export const memoryLinks = pgTable(
     index("memory_links_source_idx").on(table.sourceMemoryId),
     index("memory_links_target_memory_idx").on(table.targetMemoryId),
     index("memory_links_target_entity_idx").on(table.targetEntityId),
+    // FK child indexes for the two authorship columns.
+    index("memory_links_created_by_idx").on(table.createdBy),
+    index("memory_links_created_by_agent_idx").on(table.createdByAgent),
     // Partial uniques: re-linking the same pair with the same verb updates rather
     // than piling up duplicates. Two indexes because only one target is ever set.
     uniqueIndex("memory_links_memory_unique")
@@ -1309,6 +1349,10 @@ export const memoryMentions = pgTable(
     index("memory_mentions_brain_idx").on(table.brainId),
     index("memory_mentions_memory_idx").on(table.memoryId),
     index("memory_mentions_entity_idx").on(table.brainId, table.entityId),
+    // FK child index: entity_id alone. The composite above leads with brain_id, which a
+    // foreign-key check on entity_id cannot use, so an entity delete or merge would
+    // otherwise scan every mention.
+    index("memory_mentions_entity_fk_idx").on(table.entityId),
     // Re-running enrichment on unchanged text must not duplicate spans.
     uniqueIndex("memory_mentions_span_unique").on(
       table.memoryId,
@@ -1440,6 +1484,138 @@ export const brainReviewItems = pgTable(
     uniqueIndex("brain_review_items_dedupe_unique").on(table.brainId, table.dedupeKey),
     index("brain_review_items_brain_status_idx").on(table.brainId, table.status, table.priority),
     index("brain_review_items_memory_idx").on(table.memoryId),
+  ]
+);
+
+/**
+ * PHASE 2: Derived memory relationships — algorithmic intelligence layer.
+ *
+ * This table stores relationships discovered by the relate.ts scoring engine, distinct
+ * from explicit user/agent assertions in memory_links. Every row carries full provenance
+ * (origin, confidence, evidence, reason, computedBy) so agents can distinguish stated
+ * facts from algorithmic inferences.
+ *
+ * Design invariants:
+ * - Undirected: sourceMemoryId < targetMemoryId enforced by CHECK, one row per pair
+ * - Tenant-isolated: brainId in every WHERE clause
+ * - Reconcilable: computedBy version key, so relate-v1 only touches its own rows
+ * - Idempotent: sourceHashA/B detect stale edges without re-scoring
+ * - Bounded: evidence is small structured data, never full memory content
+ *
+ * Readers:
+ * - brain_related: merges explicit + derived + retrieval, returns origin field
+ * - context-engine: includes derived with explicit=false and derived_ prefix
+ * - provenance/brain_explain: shows derivedRelationships with full evidence
+ *
+ * Non-readers (by design, explicit-only):
+ * - brain_path: reasoning chains must be explicit assertions
+ * - health-service: orphan/weak-cluster metrics count only explicit curation
+ * - export/import: derived edges are ephemeral, rebuilt from scratch on import
+ */
+export const memoryDerivedLinks = pgTable(
+  "memory_derived_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brainId: uuid("brain_id")
+      .notNull()
+      .references(() => brains.id, { onDelete: "cascade" }),
+
+    /**
+     * Canonical undirected pair: sourceMemoryId < targetMemoryId.
+     * Enforced by CHECK constraint. Lookup in both directions uses two indexes.
+     */
+    sourceMemoryId: uuid("source_memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+    targetMemoryId: uuid("target_memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+
+    /** derived (1 signal family) | inferred (>= 2 independent families) */
+    origin: memoryRelationOriginEnum("origin").notNull(),
+
+    /** applied (visible to brain_related) | suggested (awaiting policy/human) */
+    status: memoryRelationStatusEnum("status").notNull().default("applied"),
+
+    /** Dominant signal family: semantic | tag | entity | project */
+    relation: text("relation").notNull(),
+
+    /** Edge strength 0..1 from relate.ts blend */
+    weight: real("weight").notNull(),
+
+    /**
+     * Belief 0..1 — function of how many signal families agreed, NOT the weight.
+     * Used for APPLY vs SUGGEST policy threshold.
+     */
+    confidence: real("confidence").notNull(),
+
+    /**
+     * Bounded structured evidence, safe to send to agents:
+     * { signals: {...}, sharedTerms?: [], sharedTags?: [], sharedEntityIds?: [], similarity?: number }
+     * Never contains full memory content.
+     */
+    evidence: jsonb("evidence"),
+
+    /** Human-readable explanation <= 90 chars from relate.ts */
+    reason: text("reason").notNull(),
+
+    /**
+     * Scorer version, e.g. "relate-v1". Reconciliation deletes only rows with
+     * matching computedBy, so multiple algorithm versions can coexist safely.
+     */
+    computedBy: text("computed_by").notNull(),
+
+    /**
+     * memories.contentHash of each endpoint at compute time.
+     * Cheap staleness detection: hash mismatch → recompute without re-scoring.
+     */
+    sourceHashA: text("source_hash_a"),
+    sourceHashB: text("source_hash_b"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Undirected pair uniqueness at DB level
+    uniqueIndex("memory_derived_links_pair_unique").on(
+      table.brainId,
+      table.sourceMemoryId,
+      table.targetMemoryId
+    ),
+
+    // Directional lookup: "applied derived neighbors of memory X, by weight DESC"
+    index("memory_derived_links_source_idx").on(
+      table.brainId,
+      table.sourceMemoryId,
+      table.status,
+      table.weight
+    ),
+
+    // Reverse direction (undirected needs both for efficient UNION scan)
+    index("memory_derived_links_target_idx").on(
+      table.brainId,
+      table.targetMemoryId,
+      table.status,
+      table.weight
+    ),
+
+    // Reconciliation: "delete rows written by version V"
+    index("memory_derived_links_version_idx").on(table.brainId, table.computedBy),
+    // FK child indexes on both endpoints. Every index above leads with brain_id, which
+    // the ON DELETE CASCADE check cannot use, so hard-deleting one memory would scan
+    // every derived edge in the database.
+    index("memory_derived_links_source_memory_idx").on(table.sourceMemoryId),
+    index("memory_derived_links_target_memory_idx").on(table.targetMemoryId),
+
+    // Canonical ordering enforced
+    check("memory_derived_links_canonical", sql`"source_memory_id" < "target_memory_id"`),
+
+    // Range validation
+    check("memory_derived_links_weight", sql`"weight" >= 0 AND "weight" <= 1`),
+    check("memory_derived_links_confidence", sql`"confidence" >= 0 AND "confidence" <= 1`),
+
+    // No self-edges
+    check("memory_derived_links_no_self", sql`"source_memory_id" <> "target_memory_id"`),
   ]
 );
 

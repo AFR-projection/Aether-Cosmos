@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { relateMemories, STOP_WORDS, type RelateMemory } from "./relate";
+import { relateMemories, relateOne, STOP_WORDS, type RelateMemory } from "./relate";
 
 /**
  * Derived relationship inference — the module that turns isolated memories into
@@ -99,6 +99,37 @@ describe("relateMemories - basic behavior", () => {
     const rareEdge = result.edges.find((e) => e.source === "m1" && e.target === "m2");
     expect(rareEdge).toBeDefined();
     expect(rareEdge?.relation).toBe("tag");
+  });
+
+  it("creates no edge for a single tag that everything carries", () => {
+    // df 6 is past RARE_TAG_DF_ABS (4), so "notes" says nothing about any pair. Content
+    // is mutually distinct so the semantic family cannot rescue the pair either: one
+    // common tag is not a relationship, and the gate has to be the thing that says so.
+    const bodies = [
+      "hetzner firewall rules audited",
+      "gmail smtp credentials rotated",
+      "r2 bucket lifecycle policy",
+      "invoice pdf generator template",
+      "cron schedule for nightly digest",
+      "webhook retry backoff tuning",
+    ];
+    const memories = bodies.map((content, i) =>
+      memory({ id: `m${i + 1}`, title: `Entry ${i + 1}`, content, tags: ["notes"] })
+    );
+
+    expect(relateMemories(memories).edges).toEqual([]);
+  });
+
+  it("creates no edge for a shared project alone", () => {
+    // PRINSIP 14 in its strongest form: projectId is a boost applied to a pair that
+    // some other family already vouched for, never a family of its own. Two unrelated
+    // memories filed under one project stay unrelated.
+    const memories = [
+      memory({ id: "m1", title: "Firewall", content: "hetzner firewall rules audited", projectId: "proj1" }),
+      memory({ id: "m2", title: "Invoices", content: "invoice pdf generator template", projectId: "proj1" }),
+    ];
+
+    expect(relateMemories(memories).edges).toEqual([]);
   });
 });
 
@@ -417,6 +448,83 @@ describe("edge properties", () => {
 
     expect(result.candidates).toBeGreaterThan(0);
     expect(typeof result.candidates).toBe("number");
+  });
+});
+
+describe("relateOne - single-seed contract", () => {
+  // Three shared distinctive content terms + a distinct title word each, so the
+  // semantic gate passes and the pair carries some unique vocabulary too.
+  const seed = memory({
+    id: "seed",
+    title: "Alpha",
+    content: "postgresql migrations deployment strategy",
+  });
+  const candidate = memory({
+    id: "cand",
+    title: "Bravo",
+    content: "postgresql migrations deployment rollback",
+  });
+  // Candidates whose vocabulary is disjoint from the seed: they raise the document
+  // count without ever forming an edge with the seed.
+  const filler = [
+    memory({ id: "x1", title: "Redis", content: "redis caching layer configuration" }),
+    memory({ id: "x2", title: "Hooks", content: "webhook retry backoff tuning" }),
+    memory({ id: "x3", title: "Billing", content: "invoice pdf generator template" }),
+  ];
+
+  it("is deterministic: identical inputs produce identical output across runs", () => {
+    const run1 = relateOne(seed, [candidate, ...filler]);
+    const run2 = relateOne(seed, [candidate, ...filler]);
+    const run3 = relateOne(seed, [candidate, ...filler]);
+
+    expect(run1).toEqual(run2);
+    expect(run2).toEqual(run3);
+  });
+
+  it("scores only the seed's pairs, never contains full content, and gates noise", () => {
+    const results = relateOne(seed, [candidate, ...filler]);
+
+    // The disjoint filler shares no distinctive vocabulary, so no gate opens for it.
+    expect(results).toHaveLength(1);
+    const [edge] = results;
+    expect(edge.memoryA).toBe("seed");
+    expect(edge.memoryB).toBe("cand");
+    expect(edge.relation).toBe("semantic");
+    expect(edge.weight).toBeGreaterThan(0);
+    // Evidence is signal metadata only — never the memory bodies.
+    const evidenceText = JSON.stringify(edge.evidence);
+    expect(evidenceText).not.toContain("rollback");
+    expect(evidenceText).not.toContain("strategy");
+  });
+
+  it("shares one scoring formula with relateMemories on IDENTICAL inputs", () => {
+    // Same two documents both ways ⇒ same total, same df ⇒ scorePair must agree.
+    // This is the only guarantee the two entry points actually make.
+    const [oneEdge] = relateOne(seed, [candidate]);
+    const sweep = relateMemories([seed, candidate]);
+
+    expect(sweep.edges).toHaveLength(1);
+    expect(oneEdge.weight).toBe(sweep.edges[0].weight);
+    expect(oneEdge.relation).toBe(sweep.edges[0].relation);
+  });
+
+  it("computes DF LOCALLY over the candidate set, so it is NOT a full-brain score", () => {
+    // The corrected contract. The seed↔candidate pair is unchanged, but adding
+    // disjoint filler raises the document `total` while the shared terms' df stays
+    // 2. idf = ln(1 + total/df) therefore shifts, and — because rare and common
+    // terms shift by different factors — the L2-normalised cosine, and thus the
+    // weight, moves. If DF were global/brain-wide this weight would be constant.
+    const small = relateOne(seed, [candidate]);
+    const large = relateOne(seed, [candidate, ...filler]);
+
+    const smallEdge = small.find((e) => e.memoryB === "cand");
+    const largeEdge = large.find((e) => e.memoryB === "cand");
+
+    expect(smallEdge).toBeDefined();
+    expect(largeEdge).toBeDefined();
+    // Same pair, different weight: local DF, not the "byte-identical to a full-brain
+    // relateMemories() call" the docstring once wrongly claimed.
+    expect(largeEdge!.weight).not.toBe(smallEdge!.weight);
   });
 });
 

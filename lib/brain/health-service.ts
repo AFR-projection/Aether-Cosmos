@@ -1,5 +1,5 @@
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db as applicationDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import { memories, memoryLinks, brainEntities } from "@/lib/db/schema";
@@ -143,7 +143,7 @@ export async function analyzeBrainHealth(
         isNull(memories.deletedAt),
         isNull(memories.archivedAt),
         eq(memories.validityState, "active"),
-        sql`GREATEST(${memories.updatedAt}, COALESCE(${memories.lastAccessedAt}, ${memories.updatedAt})) < ${staleThreshold}`
+        sql`GREATEST(${memories.updatedAt}, COALESCE(${memories.lastAccessedAt}, ${memories.updatedAt})) < ${staleThreshold.toISOString()}::timestamptz`
       )
     );
 
@@ -346,7 +346,7 @@ export async function analyzeBrainHealth(
         and(
           eq(memories.brainId, brainId),
           isNull(memories.deletedAt),
-          sql`${memories.id} = ANY(${involvedIds})`
+          inArray(memories.id, involvedIds)
         )
       );
 
@@ -384,7 +384,13 @@ export async function analyzeBrainHealth(
     const orphanMemories = await db
       .select({ id: memories.id, title: memories.title })
       .from(memories)
-      .where(and(eq(memories.brainId, brainId), sql`${memories.id} = ANY(${orphanIds})`))
+      .where(and(eq(memories.brainId, brainId), inArray(memories.id, orphanIds)))
+      // A capped LIMIT with no ORDER BY hands back a nondeterministic subset: when a
+      // brain has more orphans than the issue budget, two identical calls could list
+      // different examples. `id` is unique, so it makes the truncation stable. The
+      // metric (`orphanMemories`) already counts every orphan; only the sample shown
+      // here is bounded.
+      .orderBy(asc(memories.id))
       .limit(maxIssues);
 
     for (const mem of orphanMemories) {
@@ -403,7 +409,9 @@ export async function analyzeBrainHealth(
     const weakMemories = await db
       .select({ id: memories.id, title: memories.title })
       .from(memories)
-      .where(and(eq(memories.brainId, brainId), sql`${memories.id} = ANY(${weakIds})`))
+      .where(and(eq(memories.brainId, brainId), inArray(memories.id, weakIds)))
+      // Stable truncation, same reasoning as the orphan sample above.
+      .orderBy(asc(memories.id))
       .limit(maxIssues - issues.length);
 
     for (const mem of weakMemories) {
@@ -431,6 +439,8 @@ export async function analyzeBrainHealth(
           sql`${memories.confidence} < ${lowConfidenceThreshold}`
         )
       )
+      // Stable truncation, same reasoning as the orphan sample above.
+      .orderBy(asc(memories.id))
       .limit(maxIssues - issues.length);
 
     for (const mem of lowConfMemories) {
@@ -458,6 +468,8 @@ export async function analyzeBrainHealth(
           eq(memories.confirmationCount, 0)
         )
       )
+      // Stable truncation, same reasoning as the orphan sample above.
+      .orderBy(asc(memories.id))
       .limit(maxIssues - issues.length);
 
     for (const mem of unconfMemories) {
@@ -482,9 +494,11 @@ export async function analyzeBrainHealth(
           isNull(memories.deletedAt),
           isNull(memories.archivedAt),
           eq(memories.validityState, "active"),
-          sql`GREATEST(${memories.updatedAt}, COALESCE(${memories.lastAccessedAt}, ${memories.updatedAt})) < ${staleThreshold}`
+          sql`GREATEST(${memories.updatedAt}, COALESCE(${memories.lastAccessedAt}, ${memories.updatedAt})) < ${staleThreshold.toISOString()}::timestamptz`
         )
       )
+      // Stable truncation, same reasoning as the orphan sample above.
+      .orderBy(asc(memories.id))
       .limit(maxIssues - issues.length);
 
     for (const mem of staleMemories) {

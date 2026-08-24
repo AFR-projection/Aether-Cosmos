@@ -1013,7 +1013,7 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
     "brain_related",
     {
       description:
-        "Find memories related to a given memory by combining direct links, graph proximity, semantic overlap, and shared entities. Returns a ranked list of related memories with explanations. Use to explore connections and discover relevant context.",
+        "Find memories related to a given memory. Merges asserted links, algorithmically derived relationships, graph proximity and retrieval into one ranked list. Every result carries `origin` — explicit (a user or agent stated it), inferred (several independent signals agreed), derived (one signal), graph (reachable via asserted links), retrieval (only answers a similar query) — plus `explicit`, and for derived results the weight, confidence, evidence and `status` behind them. A derived result with status `suggested` is below the auto-apply threshold: a hypothesis, ranked last among derived. Trust explicit over derived; treat derived as a hypothesis, not a fact.",
       inputSchema: z.object({
         ...brainIdArg,
         memoryId: z.string().uuid().describe("Memory to find relatives of."),
@@ -1031,16 +1031,23 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
           .max(4)
           .optional()
           .describe("Maximum graph distance (default 2)."),
+        appliedOnly: z
+          .boolean()
+          .optional()
+          .describe(
+            "Return only derived relationships that cleared the apply threshold, dropping `suggested` ones (default false)."
+          ),
       }),
     },
-    async ({ brainId, memoryId, maxResults, maxHops }) => {
+    async ({ brainId, memoryId, maxResults, maxHops, appliedOnly }) => {
       try {
         const grant = requireGrant(principal, brainId, "brain.read");
         const related = await getBrainRelatedMemories(
           grant.brainId,
           memoryId,
           maxResults ?? 20,
-          maxHops ?? 2
+          maxHops ?? 2,
+          appliedOnly ?? false
         );
 
         await audit(grant.brainId, "memory.related", {
@@ -1056,9 +1063,20 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
             title: r.title,
             type: r.type,
             score: r.score,
+            // Provenance first: an agent must be able to tell an assertion from a
+            // guess without reading the score band table.
+            origin: r.origin,
+            explicit: r.explicit,
             reason: r.reason,
             linkType: r.linkType,
             hops: r.hops,
+            weight: r.weight,
+            confidence: r.confidence,
+            // Derived only: `suggested` means the scorer stored it but does not
+            // stand behind it. Without this an agent cannot tell the two apart.
+            status: r.status,
+            evidence: r.evidence,
+            computedBy: r.computedBy,
           })),
         });
       } catch (error) {
@@ -1071,7 +1089,7 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
     "brain_explain",
     {
       description:
-        "Explain where a memory came from: its creation source, authorship, confirmation history, quality signals, update lineage, supersession chain, and source memories it was derived from. Full provenance audit trail.",
+        "Explain where a memory came from: its creation source, authorship, confirmation history, quality signals, update lineage, supersession chain, and source memories it was derived from. Also lists `algorithmicInferences` — relationships the system computed rather than anyone asserting, each with its evidence and scorer version. Full provenance audit trail.",
       inputSchema: z.object({
         ...brainIdArg,
         memoryId: z.string().uuid().describe("Memory to explain."),
@@ -1125,6 +1143,25 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
             supersededBy: provenance.supersededBy,
             supersedes: provenance.supersedes,
             sourceMemories: provenance.sourceMemories,
+          },
+          // Kept out of `relationships` deliberately: everything above is something a
+          // user or agent asserted, everything here is the system's own inference.
+          algorithmicInferences: {
+            note: "Computed by local scoring, not asserted by anyone. Treat as hypotheses.",
+            count: provenance.derivedRelationships.length,
+            relationships: provenance.derivedRelationships.map((r) => ({
+              id: r.id,
+              title: r.title,
+              origin: r.origin,
+              status: r.status,
+              relation: r.relation,
+              weight: r.weight,
+              confidence: r.confidence,
+              reason: r.reason,
+              evidence: r.evidence,
+              computedBy: r.computedBy,
+              computedAt: r.computedAt.toISOString(),
+            })),
           },
         });
       } catch (error) {

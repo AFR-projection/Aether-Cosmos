@@ -49,7 +49,10 @@ export type JobType =
   // Second Brain enrichment (P1). Both are idempotent: a duplicate job is a no-op
   // once the memory's content hash already matches what was enriched.
   | "enrich_memory"
-  | "enrich_brain";
+  | "enrich_brain"
+  // PHASE 2: Derived relationship computation. Idempotent via contentHash staleness check.
+  | "relate_memory"
+  | "relate_brain";
 
 export async function enqueueJob(
   type: JobType,

@@ -434,3 +434,149 @@ describe("explainMemoryProvenance — lineage", () => {
     expect(provenance?.sourceMemories).toEqual([]);
   });
 });
+
+/**
+ * PHASE 2. A provenance report that blurred "somebody said so" with "the scorer
+ * suspects so" would be exactly the wrong answer to "where did this come from?", so
+ * the computed edges get their own field, their evidence, and their scorer version.
+ */
+const DERIVED_TABLE = getTableName(schema.memoryDerivedLinks);
+
+function derivedRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "edge-1",
+    brainId: BRAIN,
+    sourceMemoryId: MEM,
+    targetMemoryId: OLDER,
+    origin: "derived",
+    status: "applied",
+    relation: "semantic",
+    weight: 0.51,
+    confidence: 0.4,
+    reason: "shared terms: hetzner, deploy",
+    evidence: { sharedTerms: ["hetzner", "deploy"], signalFamilyCount: 1 },
+    computedBy: "relate-v1",
+    updatedAt: t("2026-04-01T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+describe("explainMemoryProvenance — algorithmic inferences", () => {
+  it("reports a computed edge with the evidence needed to audit it", async () => {
+    const { db } = recordingDb({
+      [MEMORY_TABLE]: [[memoryRow()], [], [{ id: OLDER, title: "Meeting notes" }]],
+      [VERSION_TABLE]: [[], [{ count: 0 }]],
+      [LINK_TABLE]: [[]],
+      [DERIVED_TABLE]: [[derivedRow()]],
+    });
+
+    const provenance = await explainMemoryProvenance(db, BRAIN, MEM);
+
+    expect(provenance?.derivedRelationships).toEqual([
+      {
+        id: OLDER,
+        title: "Meeting notes",
+        origin: "derived",
+        status: "applied",
+        relation: "semantic",
+        weight: 0.51,
+        confidence: 0.4,
+        reason: "shared terms: hetzner, deploy",
+        evidence: { sharedTerms: ["hetzner", "deploy"], signalFamilyCount: 1 },
+        computedBy: "relate-v1",
+        computedAt: t("2026-04-01T00:00:00.000Z"),
+      },
+    ]);
+    // Lineage the user asserted stays empty: an inference never becomes lineage.
+    expect(provenance?.sourceMemories).toEqual([]);
+    expect(provenance?.supersedes).toEqual([]);
+  });
+
+  it("resolves the other endpoint whichever end of the edge this memory sits on", async () => {
+    const { db } = recordingDb({
+      [MEMORY_TABLE]: [[memoryRow()], [], [{ id: NEWER, title: "Newer note" }]],
+      [VERSION_TABLE]: [[], [{ count: 0 }]],
+      [LINK_TABLE]: [[]],
+      [DERIVED_TABLE]: [[derivedRow({ sourceMemoryId: NEWER, targetMemoryId: MEM })]],
+    });
+
+    const provenance = await explainMemoryProvenance(db, BRAIN, MEM);
+
+    expect(provenance?.derivedRelationships.map((r) => r.id)).toEqual([NEWER]);
+  });
+
+  it("reports suggestions too, because this is an audit surface", async () => {
+    const { db, selects } = recordingDb({
+      [MEMORY_TABLE]: [
+        [memoryRow()],
+        [],
+        [
+          { id: OLDER, title: "Meeting notes" },
+          { id: NEWER, title: "Newer note" },
+        ],
+      ],
+      [VERSION_TABLE]: [[], [{ count: 0 }]],
+      [LINK_TABLE]: [[]],
+      [DERIVED_TABLE]: [
+        [
+          derivedRow(),
+          derivedRow({
+            id: "edge-2",
+            targetMemoryId: NEWER,
+            origin: "inferred",
+            status: "suggested",
+          }),
+        ],
+      ],
+    });
+
+    const provenance = await explainMemoryProvenance(db, BRAIN, MEM);
+
+    expect(provenance?.derivedRelationships.map((r) => [r.id, r.status, r.origin])).toEqual([
+      [OLDER, "applied", "derived"],
+      [NEWER, "suggested", "inferred"],
+    ]);
+    // "The scorer suspected this but did not apply it" is information the reader wants,
+    // so unlike brain_related this read must not filter by status.
+    const [derivedCall] = selects.filter((call) => call.table === DERIVED_TABLE);
+    expect(describeSql(derivedCall.where)).not.toContain("applied");
+  });
+
+  it("omits an inference whose other endpoint this brain cannot see", async () => {
+    const { db } = recordingDb({
+      [MEMORY_TABLE]: [[memoryRow()], [], []],
+      [VERSION_TABLE]: [[], [{ count: 0 }]],
+      [LINK_TABLE]: [[]],
+      [DERIVED_TABLE]: [[derivedRow()]],
+    });
+
+    const provenance = await explainMemoryProvenance(db, BRAIN, MEM);
+
+    // Deleted, or in another brain: a dangling id is worse than silence.
+    expect(provenance?.derivedRelationships).toEqual([]);
+  });
+
+  it("fences the inference read to this brain and bounds it", async () => {
+    const { db, selects } = recordingDb({
+      [MEMORY_TABLE]: [[memoryRow()], [], []],
+      [VERSION_TABLE]: [[], [{ count: 0 }]],
+      [LINK_TABLE]: [[]],
+      [DERIVED_TABLE]: [[]],
+    });
+
+    await explainMemoryProvenance(db, BRAIN, MEM);
+
+    const [derivedCall] = selects.filter((call) => call.table === DERIVED_TABLE);
+    expect(describeSql(derivedCall.where)).toContain("brain_id");
+    expect(derivedCall.limit).toBe(40);
+  });
+
+  it("does not look for inferences in another brain's copy of the memory", async () => {
+    const { db, selects } = recordingDb({ [MEMORY_TABLE]: [[]] });
+
+    const provenance = await explainMemoryProvenance(db, OTHER_BRAIN, MEM);
+
+    expect(provenance).toBeNull();
+    expect(selects.filter((call) => call.table === DERIVED_TABLE)).toEqual([]);
+  });
+});

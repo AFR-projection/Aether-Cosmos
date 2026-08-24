@@ -186,6 +186,12 @@ function deleteChain(table: unknown) {
       call.where = condition;
       return chain;
     },
+    // PHASE 2: the derived-edge cleanup counts what it removed, so a delete has to
+    // be able to report rows the way the real driver does.
+    returning: () => {
+      call.returning = true;
+      return settle(call, rows[`__delete:${call.table}`]?.[0] ?? []);
+    },
     then<T>(resolve: (value: unknown[]) => T, reject?: (reason: unknown) => T) {
       return settle(call, []).then(resolve, reject);
     },
@@ -651,6 +657,211 @@ describe("deleteMemory", () => {
     const deleted = await deleteMemory({ brainId: BRAIN, memoryId: "m1" });
 
     expect(deleted).toBe(false);
+  });
+});
+
+describe("PHASE 2 lifecycle — when derived edges are asked for and thrown away", () => {
+  const DERIVED_TABLE = getTableName(schema.memoryDerivedLinks);
+  const LINK_TABLE = getTableName(schema.memoryLinks);
+
+  /** The cleanup is fire-and-forget; let its microtasks run before asserting. */
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** A memory whose stored hash matches its text, so no edit looks like a rewrite. */
+  const settledRow = (overrides: Record<string, unknown> = {}) =>
+    memoryRow({
+      title: "Deploy",
+      content: "...",
+      summary: null,
+      type: "fact",
+      contentHash: memoryContentHash({ type: "fact", title: "Deploy", content: "...", summary: null }),
+      ...overrides,
+    });
+
+  it("asks for enrichment on create and lets the worker chain relate", async () => {
+    rows[`__insert:${MEMORY_TABLE}`] = [[memoryRow()]];
+
+    await createMemory({
+      brainId: BRAIN,
+      principal: { userId: USER, agentId: null },
+      data: { title: "Deploy notes", content: "Always run migrations first" },
+    });
+
+    // PRINSIP 9: CREATE → enrichment → relate. Requesting relate here too would
+    // score the memory before it has entities or a summary to score with.
+    expect(enqueueJob).toHaveBeenCalledWith("enrich_memory", { brainId: BRAIN, memoryId: "m1" });
+    expect(enqueueJob).not.toHaveBeenCalledWith("relate_memory", expect.anything());
+  });
+
+  it("asks for relate directly when only the tags moved", async () => {
+    rows[MEMORY_TABLE] = [[settledRow()], []];
+    rows.__update = [[settledRow()]];
+    rows[TAG_TABLE] = [[{ id: "t1" }]];
+
+    await updateMemory({
+      brainId: BRAIN,
+      memoryId: "m1",
+      principal: { userId: USER, agentId: null },
+      data: { tags: ["hetzner"] },
+    });
+
+    // Tags are a signal family of their own and are not part of contentHash, so
+    // enrichment would never run and nothing would ever re-score this memory.
+    expect(enqueueJob).toHaveBeenCalledWith("relate_memory", { brainId: BRAIN, memoryId: "m1" });
+    expect(enqueueJob).not.toHaveBeenCalledWith("enrich_memory", expect.anything());
+  });
+
+  it("asks for relate directly when the project moved", async () => {
+    rows[MEMORY_TABLE] = [[settledRow()], []];
+    rows.__update = [[settledRow({ projectId: PROJECT })]];
+
+    await updateMemory({
+      brainId: BRAIN,
+      memoryId: "m1",
+      principal: { userId: USER, agentId: null },
+      data: { projectId: PROJECT, importance: 0.7 },
+    });
+
+    expect(enqueueJob).toHaveBeenCalledWith("relate_memory", { brainId: BRAIN, memoryId: "m1" });
+  });
+
+  it("accepts a patch that only moves the memory between projects", async () => {
+    rows[MEMORY_TABLE] = [[settledRow()], []];
+    rows.__update = [[settledRow({ projectId: PROJECT })]];
+
+    // Regression: `hasAnyChange` used to list every patchable field except
+    // `projectId`, so this exact call answered 400 even though the patch below it
+    // applies the column — and the PHASE 2 relate request was unreachable from the
+    // one path whose whole purpose is a changed project signal.
+    const updated = await updateMemory({
+      brainId: BRAIN,
+      memoryId: "m1",
+      principal: { userId: USER, agentId: null },
+      data: { projectId: PROJECT },
+    });
+
+    expect(updated.projectId).toBe(PROJECT);
+    const write = writeOf("update", MEMORY_TABLE)!;
+    expect(write.set).toMatchObject({ projectId: PROJECT });
+    expect(enqueueJob).toHaveBeenCalledWith("relate_memory", { brainId: BRAIN, memoryId: "m1" });
+  });
+
+  it("clears the project when the patch sets it to null", async () => {
+    rows[MEMORY_TABLE] = [[settledRow({ projectId: PROJECT })], []];
+    rows.__update = [[settledRow({ projectId: null })]];
+
+    // `null` is a value, `undefined` is silence: unfiling a memory has to be a real
+    // change too, or the fix above would only work in one direction.
+    await updateMemory({
+      brainId: BRAIN,
+      memoryId: "m1",
+      principal: { userId: USER, agentId: null },
+      data: { projectId: null },
+    });
+
+    expect(writeOf("update", MEMORY_TABLE)!.set).toMatchObject({ projectId: null });
+    expect(enqueueJob).toHaveBeenCalledWith("relate_memory", { brainId: BRAIN, memoryId: "m1" });
+  });
+
+  it("still rejects a patch that carries no fields at all", async () => {
+    rows[MEMORY_TABLE] = [[settledRow()], []];
+
+    await expect(
+      updateMemory({
+        brainId: BRAIN,
+        memoryId: "m1",
+        principal: { userId: USER, agentId: null },
+        data: {},
+      })
+    ).rejects.toThrow(BrainValidationError);
+  });
+
+  it("asks only for enrichment when the content itself changed", async () => {
+    rows[MEMORY_TABLE] = [[settledRow()], []];
+    rows.__update = [[settledRow({ content: "Now on Hetzner" })]];
+    rows[TAG_TABLE] = [[{ id: "t1" }]];
+
+    await updateMemory({
+      brainId: BRAIN,
+      memoryId: "m1",
+      principal: { userId: USER, agentId: null },
+      data: { content: "Now on Hetzner", tags: ["hetzner"] },
+    });
+
+    // The worker chains relate off a finished enrichment, so asking twice would only
+    // burn the dedupe slot the second pass needs.
+    expect(enqueueJob).toHaveBeenCalledWith("enrich_memory", { brainId: BRAIN, memoryId: "m1" });
+    expect(enqueueJob).not.toHaveBeenCalledWith("relate_memory", expect.anything());
+  });
+
+  it("re-scores nothing when the edit touches no signal family", async () => {
+    rows[MEMORY_TABLE] = [[settledRow()], []];
+    rows.__update = [[settledRow({ importance: 0.7 })]];
+
+    await updateMemory({
+      brainId: BRAIN,
+      memoryId: "m1",
+      principal: { userId: USER, agentId: null },
+      data: { importance: 0.7 },
+    });
+
+    expect(enqueueJob).not.toHaveBeenCalled();
+  });
+
+  it("drops the derived edges of a soft-deleted memory, in that brain only", async () => {
+    rows.__update = [[{ id: "m1" }]];
+    rows[`__delete:${DERIVED_TABLE}`] = [[{ id: "edge-1" }, { id: "edge-2" }]];
+
+    expect(await deleteMemory({ brainId: BRAIN, memoryId: "m1" })).toBe(true);
+    await settled();
+
+    // Soft delete leaves the row in place, so the FK cascade never fires and these
+    // rows would keep pointing at a memory no reader should surface.
+    const cleanup = writeOf("delete", DERIVED_TABLE)!;
+    expect(cleanup).toBeDefined();
+    const predicate = describeSql(cleanup.where);
+    expect(predicate).toContain(BRAIN);
+    expect(predicate).not.toContain(OTHER_BRAIN);
+    expect(predicate).toContain("source_memory_id");
+    expect(predicate).toContain("target_memory_id");
+  });
+
+  it("leaves the explicit links of a soft-deleted memory alone", async () => {
+    rows.__update = [[{ id: "m1" }]];
+
+    await deleteMemory({ brainId: BRAIN, memoryId: "m1" });
+    await settled();
+
+    // A restore has to revive what the user asserted; only the computed edges are
+    // cheap enough to throw away.
+    expect(writeOf("delete", LINK_TABLE)).toBeUndefined();
+  });
+
+  it("touches no derived edge when the delete matched nothing", async () => {
+    rows.__update = [[]];
+
+    expect(await deleteMemory({ brainId: BRAIN, memoryId: "m1" })).toBe(false);
+    await settled();
+
+    expect(writeOf("delete", DERIVED_TABLE)).toBeUndefined();
+  });
+
+  it("re-enriches, and so re-scores, a memory restored to an older version", async () => {
+    rows[MEMORY_TABLE] = [[memoryRow()], [memoryRow()], []];
+    rows[VERSION_TABLE] = [
+      [{ version: { id: "v1", versionNumber: 1, title: "Deploy notes", content: "Older body", summary: null, metadata: null } }],
+    ];
+    rows.__update = [[memoryRow({ content: "Older body", contentHash: "restored" })]];
+
+    await restoreMemoryVersion({
+      brainId: BRAIN,
+      memoryId: "m1",
+      versionId: "v1",
+      principal: { userId: USER, agentId: null },
+    });
+
+    // PRINSIP 9: RESTORE → recompute. It arrives via updateMemory's hash check.
+    expect(enqueueJob).toHaveBeenCalledWith("enrich_memory", { brainId: BRAIN, memoryId: "m1" });
   });
 });
 

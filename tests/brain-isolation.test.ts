@@ -87,17 +87,38 @@ describe("case 3 — every brain-table query is brain-scoped", () => {
     "brainEntities",
     "brainRelationships",
     "memoryLinks",
+    // PHASE 2: computed edges are brain-owned exactly like asserted ones.
+    "memoryDerivedLinks",
     "brainAuditLogs",
     "brainAgents",
   ];
 
-  it("every service file that touches a brain table also references brainId", () => {
+  /**
+   * A file "touches" a table when it names it in a Drizzle query position, not when
+   * prose happens to use the same English word — `lib/brain/graph/relate.ts` talks
+   * about "17 memories" in a comment and queries nothing.
+   *
+   * `\\b` deliberately, not `\b`: inside a template literal the single escape is a
+   * backspace character, which matches nothing and made this case vacuous.
+   */
+  const queries = (table: string) =>
+    new RegExp(`(?:from|into|insert|update|delete)\\(\\s*${table}\\b`);
+
+  it("every service file that queries a brain table also references brainId", () => {
     const offenders = brainServices
-      .filter((file) => BRAIN_TABLES.some((table) => new RegExp(`\b${table}\b`).test(file.source)))
+      .filter((file) => BRAIN_TABLES.some((table) => queries(table).test(file.source)))
       .filter((file) => !/brainId/.test(file.source))
       .map((file) => file.path);
 
     expect(offenders).toEqual([]);
+  });
+
+  it("actually finds the brain tables it claims to check", () => {
+    // Guards the assertion above against silently matching nothing again.
+    for (const table of BRAIN_TABLES) {
+      const touching = brainServices.filter((file) => queries(table).test(file.source));
+      expect(touching.length, `no service file queries ${table}`).toBeGreaterThan(0);
+    }
   });
 });
 

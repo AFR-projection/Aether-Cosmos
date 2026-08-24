@@ -1,8 +1,14 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as applicationDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
-import { brainEntities, memories, memoryLinks, memoryMentions } from "@/lib/db/schema";
+import {
+  brainEntities,
+  memories,
+  memoryDerivedLinks,
+  memoryLinks,
+  memoryMentions,
+} from "@/lib/db/schema";
 import { detectConflicts, type ConflictPair } from "./consolidation-service";
 import { STOP_WORDS } from "./graph/relate";
 import type { MemoryType } from "./constants";
@@ -88,6 +94,14 @@ export const CONTRADICTION_SECTION_SHARE = 0.1;
 export const PROVENANCE_SECTION_SHARE = 0.12;
 
 export const GRAPH_EDGE_MAX = 40;
+
+/**
+ * PHASE 2: ceiling on total edges (explicit + derived) in a context package.
+ *
+ * Above GRAPH_EDGE_MAX so derived edges have room to appear at all, but bounded: the
+ * graph section is a summary, and an agent given 200 edges is being given noise.
+ */
+export const DERIVED_EDGE_MAX = 60;
 export const GRAPH_ENTITY_MAX = 12;
 export const CONTRADICTION_MAX = 10;
 export const CONTEXT_OMITTED_MAX = 25;
@@ -170,12 +184,30 @@ export type ContextMemory = {
 
 export type ContextGraph = {
   /**
-   * Explicit memory→memory links where BOTH endpoints are in the package. An edge
-   * to something the caller cannot see is a dangling reference, not context.
+   * Memory→memory edges where BOTH endpoints are in the package. An edge to something
+   * the caller cannot see is a dangling reference, not context.
+   *
+   * Asserted links come first and carry `explicit: true`. Algorithmically derived
+   * edges follow with `explicit: false`, a `derived_`-prefixed `linkType`, and the
+   * weight/confidence behind them — an agent reading this package must never mistake
+   * "the scorer found these similar" for "somebody said these are related".
    */
-  edges: { sourceId: string; targetId: string; linkType: string }[];
+  edges: ContextEdge[];
   /** Entity nodes more than one selected memory mentions, most-shared first. */
   entities: { entityId: string; name: string; type: string; memoryIds: string[] }[];
+};
+
+export type ContextEdge = {
+  sourceId: string;
+  targetId: string;
+  /** Asserted link type, or `derived_<relation>` for a computed edge. */
+  linkType: string;
+  /** True only when a user or agent asserted this link. */
+  explicit: boolean;
+  /** Derived edges only: similarity strength 0..1. */
+  weight?: number;
+  /** Derived edges only: belief 0..1. */
+  confidence?: number;
 };
 
 export type ContextPackage = {
@@ -328,7 +360,61 @@ async function loadContextEdges(
     .filter((row): row is { sourceId: string; targetId: string; linkType: string } =>
       Boolean(row.targetId)
     )
-    .map((row) => ({ sourceId: row.sourceId, targetId: row.targetId, linkType: row.linkType }));
+    .map((row) => ({
+      sourceId: row.sourceId,
+      targetId: row.targetId,
+      linkType: row.linkType,
+      explicit: true,
+    }));
+}
+
+/**
+ * PHASE 2: derived edges whose two endpoints are both in the package.
+ *
+ * Read separately from the explicit links and given its own budget slice, so a brain
+ * with many computed edges cannot crowd out the asserted ones — the caller's
+ * asserted knowledge is always the part worth spending tokens on first.
+ *
+ * `applied` only: a suggestion below the apply threshold has not earned a place in an
+ * agent's working context.
+ */
+async function loadDerivedContextEdges(
+  db: ContextDb,
+  brainId: string,
+  ids: readonly string[],
+  limit: number
+): Promise<ContextGraph["edges"]> {
+  if (ids.length < 2 || limit <= 0) return [];
+  const selected = [...ids];
+
+  const rows = await db
+    .select({
+      sourceId: memoryDerivedLinks.sourceMemoryId,
+      targetId: memoryDerivedLinks.targetMemoryId,
+      relation: memoryDerivedLinks.relation,
+      weight: memoryDerivedLinks.weight,
+      confidence: memoryDerivedLinks.confidence,
+    })
+    .from(memoryDerivedLinks)
+    .where(
+      and(
+        eq(memoryDerivedLinks.brainId, brainId),
+        eq(memoryDerivedLinks.status, "applied"),
+        inArray(memoryDerivedLinks.sourceMemoryId, selected),
+        inArray(memoryDerivedLinks.targetMemoryId, selected)
+      )
+    )
+    .orderBy(desc(memoryDerivedLinks.weight), asc(memoryDerivedLinks.id))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    sourceId: row.sourceId,
+    targetId: row.targetId,
+    linkType: `derived_${row.relation}`,
+    explicit: false,
+    weight: row.weight,
+    confidence: row.confidence,
+  }));
 }
 
 /**
@@ -677,21 +763,33 @@ export async function buildContext(
 
   let graph: ContextGraph | null = null;
   if (params.includeGraph) {
-    const [edges, entities] = await Promise.all([
+    const [explicitEdges, entities] = await Promise.all([
       loadContextEdges(db, params.brainId, selectedIds),
       loadSharedEntities(db, params.brainId, selectedIds),
     ]);
+    // Asserted edges get first claim on the edge budget; derived edges fill whatever
+    // is left, so adding PHASE 2 can never displace knowledge the user put there.
+    const derivedEdges = await loadDerivedContextEdges(
+      db,
+      params.brainId,
+      selectedIds,
+      Math.max(0, DERIVED_EDGE_MAX - explicitEdges.length)
+    );
+    const edges = [...explicitEdges, ...derivedEdges];
     graph = { edges, entities };
 
     // Positions, not ids: both endpoints are listed above with their titles, so this
     // stays readable without spending tokens on repeating a UUID twice per edge.
     const lines = [
-      ...edges.map(
-        (edge) =>
-          `- [${positions.get(edge.sourceId)}] --${edge.linkType}--> [${positions.get(
-            edge.targetId
-          )}]`
-      ),
+      ...edges.map((edge) => {
+        const arrow = `- [${positions.get(edge.sourceId)}] --${edge.linkType}--> [${positions.get(
+          edge.targetId
+        )}]`;
+        // The suffix is the whole point: an agent reading this must be able to tell an
+        // assertion from a computed guess without consulting the schema.
+        if (edge.explicit) return arrow;
+        return `${arrow} (derived, w=${edge.weight?.toFixed(2)} c=${edge.confidence?.toFixed(2)})`;
+      }),
       ...entities.map((entity) => {
         const where = entity.memoryIds
           .map((id) => positions.get(id))

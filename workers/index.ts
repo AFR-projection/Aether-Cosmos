@@ -24,6 +24,7 @@ import {
 import { QUEUE_NAME } from "../lib/queue";
 import { runScheduledCleanups } from "./cleanup";
 import { enrichBrain, enrichMemory, ENRICH_SWEEP_LIMIT } from "../lib/brain/enrich/enrich-service";
+import { relateJobId, runRelateBrainJob, runRelateMemoryJob } from "../lib/brain/graph/relate-jobs";
 import { Queue } from "bullmq";
 import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
@@ -554,6 +555,37 @@ async function runEnrichMemory(brainId: string, memoryId: string): Promise<void>
   if (report.outcome === "failed") {
     throw new Error(`Enrichment failed for memory ${memoryId}: ${report.error ?? "unknown"}`);
   }
+
+  // PHASE 2, PRINSIP 9: CREATE → enrichment → relate. Chained here rather than fired
+  // from the write path so the entity mentions the scorer's strongest signal depends
+  // on already exist. `skipped` still chains: the memory is current but its
+  // *neighbours* may have moved since the last scoring pass.
+  if (report.outcome !== "missing") {
+    await enqueueRelate(brainId, memoryId);
+  }
+}
+
+/**
+ * Queue a derived-relationship pass. Fire-and-forget by design: relate is an
+ * optimisation over already-committed data, so Redis being down must not fail the
+ * enrichment that just succeeded. `jobId` collapses bursts.
+ */
+async function enqueueRelate(brainId: string, memoryId: string): Promise<void> {
+  if (!redisConnection) return;
+  const queue = new Queue(QUEUE_NAME, { connection: redisConnection });
+  try {
+    await queue.add(
+      "relate_memory",
+      { type: "relate_memory", brainId, memoryId },
+      { jobId: relateJobId(memoryId), removeOnComplete: 100, removeOnFail: 50 }
+    );
+  } catch (error) {
+    console.error(
+      `relate enqueue ${memoryId}: ${error instanceof Error ? error.message : "unknown"}`
+    );
+  } finally {
+    await queue.close();
+  }
 }
 
 /**
@@ -578,6 +610,72 @@ async function runEnrichBrain(brainId: string, limit?: number): Promise<void> {
     } finally {
       await queue.close();
     }
+  }
+}
+
+// ── PHASE 2: Derived relationship computation ────────────────────────────────
+
+/**
+ * Compute derived relationships for one memory.
+ *
+ * The work itself lives in `lib/brain/graph/relate-jobs`, which is reachable from a
+ * test; this wrapper is the operational shell around it — one log line of counts
+ * (never memory text) and a rethrow so BullMQ retries.
+ */
+async function runRelateMemory(brainId: string, memoryId: string): Promise<void> {
+  try {
+    const report = await runRelateMemoryJob(db, brainId, memoryId);
+
+    if (report.candidates === 0) {
+      console.log(`relate_memory ${memoryId}: no candidates, -${report.deleted}`);
+      return;
+    }
+
+    const { droppedTopK, droppedDegree, droppedGlobalCap } = report.pruned;
+    console.log(
+      `relate_memory ${memoryId}: candidates=${report.candidates} scored=${report.scored} ` +
+        `survived=${report.survived} +${report.inserted}~${report.updated}-${report.deleted} ` +
+        `pruned=topk:${droppedTopK}/degree:${droppedDegree}/cap:${droppedGlobalCap}`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    console.error(`relate_memory ${memoryId}: failed - ${message}`);
+    throw error; // BullMQ will retry
+  }
+}
+
+/**
+ * Bounded backfill sweep: enqueue one relate_memory job per memory in the brain.
+ *
+ * Selection, the batch cap and the dedupe key live in `relate-jobs`; this wrapper owns
+ * the queue: it opens one `Queue`, hands the sweep an enqueue callback, and closes it
+ * whatever happens. With no Redis configured the sweep still runs and reports what it
+ * found, which keeps a queue-less deployment from turning a sweep into an error.
+ */
+async function runRelateBrain(brainId: string, limit?: number): Promise<void> {
+  if (!redisConnection) {
+    const report = await runRelateBrainJob(db, brainId, limit, null);
+    console.log(`relate_brain ${brainId}: ${report.found} memories, queue unavailable`);
+    return;
+  }
+
+  const queue = new Queue(QUEUE_NAME, { connection: redisConnection });
+  try {
+    const report = await runRelateBrainJob(db, brainId, limit, async (memoryId, jobId) => {
+      await queue.add(
+        "relate_memory",
+        { type: "relate_memory", brainId, memoryId },
+        { jobId, removeOnComplete: 100, removeOnFail: 50 }
+      );
+    });
+
+    if (report.found === 0) {
+      console.log(`relate_brain ${brainId}: 0 memories, queue ready`);
+      return;
+    }
+    console.log(`relate_brain ${brainId}: enqueued=${report.enqueued}/${report.found}`);
+  } finally {
+    await queue.close();
   }
 }
 
@@ -641,6 +739,17 @@ const worker = new Worker(
       case "enrich_brain":
         if (data.brainId) {
           await runEnrichBrain(data.brainId, data.limit);
+        }
+        break;
+      case "relate_memory":
+        // Both IDs required, same safety as enrich_memory
+        if (data.brainId && data.memoryId) {
+          await runRelateMemory(data.brainId, data.memoryId);
+        }
+        break;
+      case "relate_brain":
+        if (data.brainId) {
+          await runRelateBrain(data.brainId, data.limit);
         }
         break;
     }

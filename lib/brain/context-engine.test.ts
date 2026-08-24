@@ -42,6 +42,7 @@ type FakeRows = {
   candidates?: unknown[];
   context?: unknown[];
   contextEdges?: unknown[];
+  derivedEdges?: unknown[];
   sharedEntities?: unknown[];
 };
 
@@ -64,6 +65,8 @@ function fakeDb(rows: FakeRows): Fake {
       // projects `source` and consumes one hop per read.
       return has("sourceId") ? (rows.contextEdges ?? []) : (hops.shift() ?? []);
     }
+    // PHASE 2: computed edges live in their own table, read only for the graph.
+    if (spec.table === "memory_derived_links") return rows.derivedEdges ?? [];
     if (spec.table === "memories") {
       if (has("lexicalRank")) return rows.lexical ?? [];
       // `content` is projected by exactly one read: the shortlist text loader.
@@ -361,11 +364,12 @@ describe("buildContext — the rendered package", () => {
 });
 
 describe("buildContext — graph, contradictions, provenance", () => {
-  const graphed = () =>
+  const graphed = (derivedEdges: unknown[] = []) =>
     fakeDb({
       lexical: [lexicalRow("m00", 0.9), lexicalRow("m01", 0.8)],
       context: [textRow("m00"), textRow("m01")],
       contextEdges: [{ sourceId: "m00", targetId: "m01", linkType: "supersedes" }],
+      derivedEdges,
       sharedEntities: [
         { entityId: "e1", name: "PostgreSQL", type: "technology", memoryIds: ["m01", "m00"] },
       ],
@@ -381,6 +385,7 @@ describe("buildContext — graph, contradictions, provenance", () => {
     expect(
       reads.filter((read) => read.table === "memory_links" && read.columns.includes("sourceId"))
     ).toEqual([]);
+    expect(reads.filter((read) => read.table === "memory_derived_links")).toEqual([]);
     expect(result.contextText).not.toContain("Knowledge graph:");
   });
 
@@ -394,13 +399,45 @@ describe("buildContext — graph, contradictions, provenance", () => {
     });
 
     expect(result.graph?.edges).toEqual([
-      { sourceId: "m00", targetId: "m01", linkType: "supersedes" },
+      { sourceId: "m00", targetId: "m01", linkType: "supersedes", explicit: true },
     ]);
     // Sorted, so the same graph never renders two different ways.
     expect(result.graph?.entities[0].memoryIds).toEqual(["m00", "m01"]);
     expect(result.contextText).toContain("Knowledge graph:");
     expect(result.contextText).toContain("- [1] --supersedes--> [2]");
     expect(result.contextText).toContain("- PostgreSQL (technology) mentioned in [1], [2]");
+  });
+
+  it("labels a computed edge as derived and never as an assertion", async () => {
+    const { db } = graphed([
+      { sourceId: "m00", targetId: "m01", relation: "semantic", weight: 0.62, confidence: 0.45 },
+    ]);
+    const result = await buildContext(db, {
+      brainId: BRAIN,
+      task: "postgres",
+      includeGraph: true,
+      tokenBudget: 4_000,
+      now: NOW,
+    });
+
+    // Asserted first, computed second, and the two are distinguishable both in the
+    // structured graph and in the rendered text (PRINSIP 3).
+    expect(result.graph?.edges).toEqual([
+      { sourceId: "m00", targetId: "m01", linkType: "supersedes", explicit: true },
+      {
+        sourceId: "m00",
+        targetId: "m01",
+        linkType: "derived_semantic",
+        explicit: false,
+        weight: 0.62,
+        confidence: 0.45,
+      },
+    ]);
+    expect(result.contextText).toContain(
+      "- [1] --derived_semantic--> [2] (derived, w=0.62 c=0.45)"
+    );
+    // The asserted edge is rendered bare: no derived suffix may attach to it.
+    expect(result.contextText).toContain("- [1] --supersedes--> [2]\n");
   });
 
   it("reports a contradiction without resolving it", async () => {

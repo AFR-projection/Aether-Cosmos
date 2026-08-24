@@ -12,6 +12,12 @@ import {
   type RetrievalCandidate,
   type RetrievalFeatures,
 } from "./score";
+import {
+  processQuery,
+  buildEnhancedQuery,
+  extractEntityMatchWords,
+  type ProcessedQuery,
+} from "./query-understanding";
 
 /**
  * Hybrid retrieval — the candidate-gathering half of ranking (P2).
@@ -172,6 +178,8 @@ export type RetrieveParams = {
 export type RetrievalResult = {
   brainId: string;
   query: string | null;
+  /** Processed query structure (content words, phrases, intent) */
+  processedQuery: ProcessedQuery | null;
   /** Entity nodes the query resolved to. The denominator of `entityOverlap`. */
   queryEntities: { id: string; name: string; type: string }[];
   /** Candidates contributed per leg, before the merge. Diagnostics and benchmarks. */
@@ -231,6 +239,9 @@ function visibilityScope(params: RetrieveParams): SQL[] {
 
 /**
  * The query's words, as entity-name evidence.
+ *
+ * DEPRECATED: Use extractEntityMatchWords(processQuery(query)) instead.
+ * Kept for backward compatibility with direct callers.
  *
  * Stop words come from `graph/relate.ts` — the same bilingual list entity
  * extraction rejects, because two lists would drift and a drifted list is how
@@ -534,6 +545,11 @@ function baseFeatures(memory: CandidateMemory): RetrievalFeatures {
  * A request with no query and no seeds returns nothing rather than "the whole brain
  * ranked by quality" — with no match evidence at all, quality is not relevance, and
  * `score.ts` caps such a candidate at {@link QUALITY_SHARE} for exactly that reason.
+ *
+ * ENHANCED with query understanding layer (P1):
+ * - Processes natural language queries (removes imperatives, detects phrases)
+ * - Builds enhanced query for FTS (phrase boosting)
+ * - Extracts entity match words (more permissive than content words)
  */
 export async function retrieveMemories(
   db: RetrievalDb,
@@ -548,14 +564,18 @@ export async function retrieveMemories(
     Math.max(0, Math.trunc(params.maxHops ?? GRAPH_MAX_HOPS)),
     GRAPH_MAX_HOPS
   );
-  const query = params.query?.trim() || null;
-  const words = query ? queryWords(query) : [];
+  const rawQuery = params.query?.trim() || null;
+
+  // PHASE 1: Query Understanding
+  const processed = rawQuery ? processQuery(rawQuery) : null;
+  const query = processed ? buildEnhancedQuery(processed) : null;
+  const entityWords = processed ? extractEntityMatchWords(processed) : [];
 
   const [semanticAvailable, lexical, entityResolved] = await Promise.all([
     embeddingsAvailable(),
     query && hasSearchTerms(query) ? lexicalLeg(db, params, query) : Promise.resolve([]),
     (async () => {
-      const entities = await resolveQueryEntities(db, params.brainId, words);
+      const entities = await resolveQueryEntities(db, params.brainId, entityWords);
       const hits = await entityLeg(db, params, entities.map((entity) => entity.id));
       return { entities, hits };
     })(),
@@ -657,7 +677,8 @@ export async function retrieveMemories(
 
   return {
     brainId: params.brainId,
-    query,
+    query: rawQuery,
+    processedQuery: processed,
     queryEntities,
     legCounts,
     candidates: ranked.length,

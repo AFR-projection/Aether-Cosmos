@@ -1,5 +1,5 @@
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { and, asc, desc, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db as applicationDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import { memories, memoryVersions } from "@/lib/db/schema";
@@ -341,7 +341,7 @@ export async function getSupersededChains(
       supersededById: memories.supersededById,
     })
     .from(memories)
-    .where(and(eq(memories.brainId, brainId), sql`${memories.id} = ANY(${replacementIds})`));
+    .where(and(eq(memories.brainId, brainId), inArray(memories.id, replacementIds)));
 
   const replacementMap = new Map<string, TemporalMemory>();
   for (const row of replacementRows) {
