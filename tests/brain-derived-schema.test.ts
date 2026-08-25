@@ -279,8 +279,6 @@ describe("STEP 8 — a guess never reaches an explicit-only surface", () => {
   const EXPLICIT_ONLY = [
     // A reasoning chain must be defensible hop by hop.
     ["lib/brain/graph/path-service.ts", "brain_path"],
-    // An orphan is a memory nobody linked, not one the scorer failed to match.
-    ["lib/brain/health-service.ts", "health metrics"],
     // An archive carries user-owned data; derived edges rebuild themselves.
     ["lib/brain/export-service.ts", "export"],
     ["lib/brain/import-service.ts", "import"],
@@ -303,6 +301,10 @@ describe("STEP 8 — a guess never reaches an explicit-only surface", () => {
       "lib/brain/graph/related-service.ts",
       "lib/brain/context-engine.ts",
       "lib/brain/provenance-service.ts",
+      // health-service reads applied derived edges ONLY to ANNOTATE the orphan count
+      // (see the "orphan count is explicit-only" test below); it never lets a guess
+      // change which memories are orphans.
+      "lib/brain/health-service.ts",
       "lib/db/schema.ts",
     ];
 
@@ -312,5 +314,24 @@ describe("STEP 8 — a guess never reaches an explicit-only surface", () => {
       .sort();
 
     expect(found).toEqual([...READERS].sort());
+  });
+
+  /**
+   * health-service MAY read the derived table, but only to explain the orphan count —
+   * never to change it. This is the real invariant PRINSIP 4 protects for that surface:
+   * an orphan is still a memory with no *explicit* link, and a derived guess can only add
+   * the softer "connected by similarity" annotation on top.
+   */
+  it("health metrics keeps the orphan count explicit-only, annotating with derived edges", () => {
+    const source = readFileSync(join(ROOT, "lib", "brain", "health-service.ts"), "utf8");
+
+    // The orphan set is the degree-0 slice of the EXPLICIT link graph…
+    expect(source).toMatch(/orphanIds\s*=\s*activeMemoryIds\.filter\(\(id\)\s*=>\s*degreeOf\(id\)\s*===\s*0\)/);
+    // …and the reported metric is exactly that set's size — not a derived-adjusted number.
+    expect(source).toMatch(/orphanMemories:\s*orphanIds\.length/);
+    // Derived edges are read applied-only (a suggestion is not a connection) and are used
+    // only to FILTER the already-computed orphan set into an annotation, never to build it.
+    expect(source).toMatch(/memoryDerivedLinks\.status[^)]*"applied"/);
+    expect(source).toMatch(/orphanConnectedViaDerived\s*=\s*orphanIds\.filter\(/);
   });
 });

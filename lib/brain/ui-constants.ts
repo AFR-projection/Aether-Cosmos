@@ -65,3 +65,37 @@ export const BRAIN_SCOPE_LABELS: Record<string, { label: string; description: st
     description: "Merge duplicate memories and resolve flagged conflicts",
   },
 };
+
+/**
+ * Scopes that let an agent destroy or exfiltrate the brain. The UI marks these
+ * so a user ticking through a list notices them instead of granting them out of
+ * momentum — they are also the two the API leaves out of the defaults.
+ */
+export const BRAIN_RISKY_SCOPES = new Set(["brain.delete", "brain.export"]);
+
+/**
+ * Human sentences for brain_audit_logs.operation. Shared by the activity log and
+ * the agents roster so the same event never gets two different names.
+ */
+export const BRAIN_OPERATION_COPY: Record<string, string> = {
+  "memory.create": "Created a memory",
+  "memory.update": "Updated a memory",
+  "memory.delete": "Deleted a memory",
+  "memory.restore": "Restored a memory version",
+  "memory.search": "Searched the brain",
+  "memory.recall": "Recalled context",
+  "entity.upsert": "Recorded an entity",
+  "entity.update": "Updated an entity",
+  "entity.delete": "Deleted an entity",
+  "relationship.upsert": "Linked two entities",
+  "relationship.delete": "Removed a link",
+  "project.create": "Created a project",
+  "project.update": "Updated a project",
+  "project.delete": "Deleted a project",
+  "brain.update": "Changed brain settings",
+  "brain.export": "Exported the brain",
+  "agent.create": "Connected an agent",
+  "agent.revoke": "Revoked an agent",
+  "agent.scopes": "Changed agent permissions",
+  "agent.access_revoke": "Removed an agent from this brain",
+};

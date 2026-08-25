@@ -2,10 +2,9 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Brain as BrainIcon, Plus, Search, X } from "lucide-react";
+import { Brain as BrainIcon, Check, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { EmptyState } from "@/components/ui/empty-state";
 import { BrainShell } from "@/components/brain/brain-shell";
 import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
 import { MemoryCard } from "@/components/brain/memory-card";
@@ -110,7 +109,7 @@ export default function BrainMemoriesPage() {
           </BrainPanel>
         )}
 
-        <div className="rounded-2xl border border-border/50 bg-surface p-4">
+        <div className="brain-surface p-4">
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <Input
@@ -118,7 +117,7 @@ export default function BrainMemoriesPage() {
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search memories…"
               aria-label="Search memories"
-              className="border-0 bg-transparent focus-visible:ring-0"
+              className="h-9 border-0 bg-transparent px-0 focus-visible:border-0 focus-visible:ring-0"
             />
             {hasFilters && (
               <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
@@ -128,7 +127,7 @@ export default function BrainMemoriesPage() {
             )}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/40 pt-3">
             <FilterSelect
               label="Type"
               value={type}
@@ -162,14 +161,16 @@ export default function BrainMemoriesPage() {
                 })),
               ]}
             />
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="brain-scope brain-scope--inline ml-auto">
               <input
                 type="checkbox"
                 checked={archived}
                 onChange={(event) => setArchived(event.target.checked)}
-                className="h-3.5 w-3.5 rounded border-border/60 accent-[var(--accent)]"
               />
-              Archived only
+              <span className="brain-scope__box" aria-hidden="true">
+                <Check />
+              </span>
+              <span className="brain-scope__label">Archived only</span>
             </label>
           </div>
         </div>
@@ -196,26 +197,30 @@ export default function BrainMemoriesPage() {
               )}
             </div>
           ) : (
-            <EmptyState
-              icon={BrainIcon}
-              title={hasFilters ? "Nothing matches those filters" : "No memories yet"}
-              description={
-                hasFilters
+            <div className="brain-empty">
+              <span className="brain-empty__icon">
+                <BrainIcon className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <p className="brain-empty__title">
+                {hasFilters ? "Nothing matches those filters" : "No memories yet"}
+              </p>
+              <p className="brain-empty__body">
+                {hasFilters
                   ? "Try a different search term, or clear the filters."
-                  : "Write the first thing this brain should remember permanently."
-              }
-              action={
-                hasFilters ? (
-                  <Button size="sm" variant="secondary" onClick={clearFilters}>
-                    Clear filters
-                  </Button>
-                ) : (
-                  <Button size="sm" onClick={() => setCreating(true)}>
-                    Write a memory
-                  </Button>
-                )
-              }
-            />
+                  : "Write the first thing this brain should remember permanently."}
+              </p>
+              {hasFilters ? (
+                <Button size="sm" variant="secondary" className="mt-1" onClick={clearFilters}>
+                  <X className="h-4 w-4" aria-hidden="true" />
+                  Clear filters
+                </Button>
+              ) : (
+                <Button size="sm" className="mt-1" onClick={() => setCreating(true)}>
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  Write a memory
+                </Button>
+              )}
+            </div>
           ))}
       </div>
     </BrainShell>
@@ -240,7 +245,7 @@ function FilterSelect({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-label={label}
-        className="h-8 rounded-lg border border-border/60 bg-surface px-2 text-xs text-foreground focus-visible:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/15"
+        className="h-8 cursor-pointer rounded-lg border border-border/60 bg-surface px-2 text-xs text-foreground transition-colors hover:border-accent/30 focus-visible:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/15"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

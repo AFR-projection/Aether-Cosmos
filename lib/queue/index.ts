@@ -52,7 +52,11 @@ export type JobType =
   | "enrich_brain"
   // PHASE 2: Derived relationship computation. Idempotent via contentHash staleness check.
   | "relate_memory"
-  | "relate_brain";
+  | "relate_brain"
+  // P9: Semantic embedding. Idempotent via (embedding_model, embedding_updated_at) staleness;
+  // both are no-ops when no embedding provider is configured.
+  | "embed_memory"
+  | "embed_brain";
 
 export async function enqueueJob(
   type: JobType,

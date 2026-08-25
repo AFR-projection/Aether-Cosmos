@@ -135,6 +135,8 @@ const CANDIDATES = `${MEMORY}#id,type,title,content,summary`;
 const TITLES = `${MEMORY}#id,title`;
 const LOW_CONFIDENCE = `${MEMORY}#id,title,confidence`;
 const STALE = `${MEMORY}#id,title,updatedAt`;
+/** Applied derived edges (relate-v1), read from the separate memory_derived_links table. */
+const DERIVED = `${getTableName(schema.memoryDerivedLinks)}#source,target`;
 
 type CountName =
   | "total"
@@ -168,6 +170,7 @@ const memoryLink = (source: string, target: string | null, linkType = "related_t
   targetMemoryId: target,
   linkType,
 });
+const derivedLink = (source: string, target: string) => ({ source, target });
 
 describe("analyzeBrainHealth — metrics", () => {
   it("reports each class of memory from its own count and derives links per memory", async () => {
@@ -304,6 +307,42 @@ describe("analyzeBrainHealth — structure", () => {
 
     const { metrics } = await analyzeBrainHealth(db, BRAIN);
     expect(metrics.orphanMemories).toBe(1);
+  });
+
+  it("keeps an explicit orphan orphan, but reports it as connected by a derived edge", async () => {
+    // A—B—C explicit; D has no explicit link but a relate-v1 derived edge to A.
+    const { db } = recordingDb({
+      [COUNTS]: counts({ total: 4, active: 4 }),
+      [ACTIVE_IDS]: [ids(A, B, C, D)],
+      [GRAPH_LINKS]: [[memoryLink(A, B), memoryLink(B, C)]],
+      [DERIVED]: [[derivedLink(D, A)]],
+      [TITLES]: [[titled(D, "Island")], [titled(A, "One"), titled(C, "Three")]],
+    });
+
+    const { metrics, issues } = await analyzeBrainHealth(db, BRAIN);
+    // The curation signal is unchanged: D still has no explicit link.
+    expect(metrics.orphanMemories).toBe(1);
+    // But the derived breakdown explains it instead of contradicting brain_get_related.
+    expect(metrics.derivedConnectedMemories).toBe(2); // D and A
+    expect(metrics.orphanConnectedViaDerived).toBe(1); // D
+    expect(metrics.fullyIsolatedMemories).toBe(0);
+    expect(issues.find((issue) => issue.type === "orphan")?.reason).toContain("derived similarity");
+  });
+
+  it("counts an orphan with no derived edge as fully isolated", async () => {
+    const { db } = recordingDb({
+      [COUNTS]: counts({ total: 4, active: 4 }),
+      [ACTIVE_IDS]: [ids(A, B, C, D)],
+      [GRAPH_LINKS]: [[memoryLink(A, B), memoryLink(B, C)]],
+      // No derived rows at all.
+      [TITLES]: [[titled(D, "Island")], [titled(A, "One"), titled(C, "Three")]],
+    });
+
+    const { metrics, issues } = await analyzeBrainHealth(db, BRAIN);
+    expect(metrics.orphanMemories).toBe(1);
+    expect(metrics.orphanConnectedViaDerived).toBe(0);
+    expect(metrics.fullyIsolatedMemories).toBe(1);
+    expect(issues.find((issue) => issue.type === "orphan")?.reason).toContain("fully isolated");
   });
 
   it("reads only this brain's memory-anchored links to build the graph", async () => {

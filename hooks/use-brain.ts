@@ -435,6 +435,9 @@ export function useAgents(brainId: string | undefined) {
         defaultScopes: string[];
         maxAgents: number;
       }>(`/api/brain/${brainId}/agents`),
+    // The roster doubles as a live connection list, so keep it fresh. React
+    // Query pauses polling on a hidden tab, so an idle background tab is free.
+    refetchInterval: 15_000,
   });
 }
 
@@ -483,13 +486,17 @@ export function useConnectInfo(brainId: string | undefined) {
   });
 }
 
-export function useBrainAudit(brainId: string | undefined, limit = 40) {
+/**
+ * @param refetchMs how often to re-poll. The agents page derives live presence
+ *   from this feed, so it asks for a tighter interval than the read-only views.
+ */
+export function useBrainAudit(brainId: string | undefined, limit = 40, refetchMs = 30_000) {
   return useQuery({
     enabled: !!brainId,
     queryKey: ["brain", brainId, "audit", limit],
     queryFn: () =>
       get<{ entries: BrainAuditEntry[] }>(`/api/brain/${brainId}/audit?limit=${limit}`),
-    refetchInterval: 30_000,
+    refetchInterval: refetchMs,
   });
 }
 

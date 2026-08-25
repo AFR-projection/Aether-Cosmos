@@ -2,7 +2,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db as applicationDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
-import { memories, memoryLinks, brainEntities } from "@/lib/db/schema";
+import { memories, memoryLinks, brainEntities, memoryDerivedLinks } from "@/lib/db/schema";
 import {
   buildUndirectedGraph,
   computeDegrees,
@@ -35,6 +35,21 @@ export type BrainHealthMetrics = {
   orphanMemories: number;
   weaklyConnectedMemories: number;
   isolatedClusters: number;
+
+  // Derived connectivity (relate-v1). These EXPLAIN the orphan count, they do not
+  // change it: `orphanMemories` still counts memories with no *explicit* (curated)
+  // link, because that is the curation-debt signal review-service acts on. A memory
+  // can be an explicit orphan and still be richly connected by derived similarity
+  // edges — these three fields make that visible instead of contradictory.
+  //
+  //  - derivedConnectedMemories : active memories with >=1 applied derived edge.
+  //  - orphanConnectedViaDerived: explicit orphans that DO have a derived edge —
+  //    "uncurated but connected".
+  //  - fullyIsolatedMemories    : orphans with neither an explicit nor a derived
+  //    edge — the memories that are actually alone.
+  derivedConnectedMemories: number;
+  orphanConnectedViaDerived: number;
+  fullyIsolatedMemories: number;
 
   // Quality
   lowConfidenceMemories: number;
@@ -240,6 +255,28 @@ export async function analyzeBrainHealth(
   const orphanIds = activeMemoryIds.filter((id) => degreeOf(id) === 0);
   const weakIds = activeMemoryIds.filter((id) => degreeOf(id) === 1);
 
+  // Derived connectivity, read from the SEPARATE memory_derived_links table (relate-v1).
+  // Only `applied` edges count — a `suggested` edge is a proposal, not a connection.
+  // This never touches the explicit orphan computation above; it only annotates it, so
+  // the health report can say "orphan, but connected by similarity" instead of looking
+  // like it contradicts brain_get_related.
+  const activeIdSetForDerived = new Set(activeMemoryIds);
+  const derivedRows = await db
+    .select({
+      source: memoryDerivedLinks.sourceMemoryId,
+      target: memoryDerivedLinks.targetMemoryId,
+    })
+    .from(memoryDerivedLinks)
+    .where(and(eq(memoryDerivedLinks.brainId, brainId), eq(memoryDerivedLinks.status, "applied")));
+
+  const derivedConnectedIds = new Set<string>();
+  for (const row of derivedRows) {
+    if (activeIdSetForDerived.has(row.source)) derivedConnectedIds.add(row.source);
+    if (activeIdSetForDerived.has(row.target)) derivedConnectedIds.add(row.target);
+  }
+  const orphanConnectedViaDerived = orphanIds.filter((id) => derivedConnectedIds.has(id)).length;
+  const fullyIsolatedMemories = orphanIds.length - orphanConnectedViaDerived;
+
   // Isolated clusters: connected components across the active memories. Every
   // orphan is a component of its own, so a brain with no links at all reports one
   // cluster per memory — which is the honest reading of "nothing is connected".
@@ -399,7 +436,9 @@ export async function analyzeBrainHealth(
         severity: "medium",
         memoryId: mem.id,
         memoryTitle: mem.title,
-        reason: "No connections to other memories or entities.",
+        reason: derivedConnectedIds.has(mem.id)
+          ? "No explicit (curated) links — connected only by derived similarity."
+          : "No explicit or derived connections; fully isolated.",
       });
     }
   }
@@ -534,6 +573,9 @@ export async function analyzeBrainHealth(
       orphanMemories: orphanIds.length,
       weaklyConnectedMemories: weakIds.length,
       isolatedClusters,
+      derivedConnectedMemories: derivedConnectedIds.size,
+      orphanConnectedViaDerived,
+      fullyIsolatedMemories,
       lowConfidenceMemories: lowConfidenceCount.count,
       unconfirmedMemories: unconfirmedCount.count,
       agentCreatedMemories: agentCreatedCount.count,

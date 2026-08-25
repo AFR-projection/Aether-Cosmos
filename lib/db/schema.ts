@@ -29,6 +29,43 @@ const tsvector = customType<{ data: string }>({
   },
 });
 
+/**
+ * Default embedding width — the native output of the default model
+ * (`openai/text-embedding-3-small`). It seeds a fresh config row and nothing more:
+ * it is NOT a hard column constraint. OpenRouter models produce different widths
+ * (voyage-code-4 → 1024, others → 256/512/2048…), and the actual width is auto-detected
+ * at the settings "Test"/Save step and stored per-config, so any model works.
+ */
+export const EMBEDDING_DIMENSIONS = 1536;
+
+/**
+ * pgvector `vector` column type for semantic embeddings (Second Brain 2.0, P9).
+ *
+ * The column is DIMENSION-FLEXIBLE (no `(N)` typmod): whichever OpenRouter model the
+ * operator configures, its native width is stored as-is. A fixed `vector(N)` would reject
+ * every model that does not emit exactly N dimensions; flexibility is what lets all models
+ * work. The tradeoff is no HNSW/ANN index (that needs a fixed width) — retrieval uses an
+ * exact `<=>` scan, which is bounded per brain and fine at this scale. The driver serialises
+ * `number[]` → the `'[a,b,c]'` text literal pgvector parses; most writes/reads go through raw
+ * `::vector` SQL, but the typed column lets the query builder reference it (`isNotNull`, ANN
+ * ordering) without stringly-typed column names.
+ */
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return "vector";
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(",")}]`;
+  },
+  fromDriver(value: string): number[] {
+    return value
+      .slice(1, -1)
+      .split(",")
+      .filter((part) => part.length > 0)
+      .map(Number);
+  },
+});
+
 export const userRoleEnum = pgEnum("user_role", ["master", "user"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "suspended"]);
 /** Lifecycle of a file's backing object. Only `ready` is user-visible/downloadable. */
@@ -1074,6 +1111,17 @@ export const memories = pgTable(
     /** Extra surface forms for this memory's subject, used by mention detection. */
     aliases: text("aliases").array(),
 
+    // ── Second Brain 2.0: semantic embedding (P9) ─────────────────────────
+    /**
+     * Dense vector for semantic retrieval. NULL until an embedding provider is
+     * configured and the embed job has run — the semantic leg simply abstains for
+     * rows without one, so an un-embedded brain degrades to lexical+graph, never fails.
+     */
+    embedding: vector("embedding"),
+    /** Which model produced {@link embedding}. Drives idempotent re-embedding on model change. */
+    embeddingModel: text("embedding_model"),
+    embeddingUpdatedAt: timestamp("embedding_updated_at", { withTimezone: true }),
+
     searchVector: tsvector("search_vector").generatedAlwaysAs(
       (): SQL =>
         sql`setweight(to_tsvector('simple', coalesce(${memories.title}, '')), 'A') || setweight(to_tsvector('simple', coalesce(${memories.content}, '')), 'B')`
@@ -1105,6 +1153,32 @@ export const memories = pgTable(
     index("memories_created_by_agent_idx").on(table.createdByAgent),
   ]
 );
+
+/**
+ * Global (single-row) configuration for the semantic embedding provider (P9).
+ *
+ * One row, `id = "default"`, mirroring {@link systemSettings}. The API key is a
+ * server-wide secret with cost + privacy impact, so it is stored ENCRYPTED at rest
+ * (AES-256-GCM via lib/email/crypto.ts) in `api_key_encrypted` and is NEVER returned
+ * to any client — the GET surface exposes only `{provider, model, enabled, hasApiKey}`.
+ * Writes are gated behind master auth, exactly like the Gmail sender secret.
+ */
+export const brainEmbeddingSettings = pgTable("brain_embedding_settings", {
+  id: text("id").primaryKey().default("default"),
+  /** Provider identifier, e.g. "openrouter". */
+  provider: text("provider").notNull().default("openrouter"),
+  /** Embedding model, e.g. "openai/text-embedding-3-small". */
+  model: text("model").notNull().default("openai/text-embedding-3-small"),
+  /** AES-256-GCM ciphertext of the API key. NULL when unset. Never leaves the server. */
+  apiKeyEncrypted: text("api_key_encrypted"),
+  /** Auto-detected native width of the configured model. Used to validate that returned
+   *  vectors stay a consistent width; the column itself is dimension-flexible. */
+  dimensions: integer("dimensions").notNull().default(1536),
+  /** Master switch. When false the semantic leg abstains regardless of key presence. */
+  enabled: boolean("enabled").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const memoryVersions = pgTable(
   "memory_versions",

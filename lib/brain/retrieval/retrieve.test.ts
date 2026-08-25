@@ -16,6 +16,7 @@ import {
   PROVENANCE_QUALITY,
   PROVENANCE_QUALITY_DEFAULT,
   RESULT_LIMIT_MAX,
+  SEMANTIC_CANDIDATE_LIMIT,
   entityNamePattern,
   provenanceQuality,
   queryWords,
@@ -43,6 +44,8 @@ type FakeRows = {
   /** One entry per graph hop, in order. */
   links?: unknown[][];
   loaded?: unknown[];
+  /** Rows the semantic ANN leg returns via db.execute (shape `{id, similarity}`). */
+  semantic?: unknown[];
 };
 
 type Fake = { db: PostgresJsDatabase<typeof schema>; reads: QuerySpec[] };
@@ -101,6 +104,12 @@ function fakeDb(rows: FakeRows): Fake {
   const db = {
     select: () => builder({ table: "", joined: false, grouped: false, limited: false }),
     selectDistinct: () => builder({ table: "", joined: false, grouped: false, limited: false }),
+    // The semantic leg runs its ANN search through a raw execute — a separate channel
+    // from the leg-by-table builder above, so it never disturbs the counter routing.
+    execute: async () => {
+      reads.push({ table: "memories:semantic", joined: false, grouped: false, limited: true });
+      return (rows.semantic ?? []) as unknown[];
+    },
   };
   return { db: db as unknown as PostgresJsDatabase<typeof schema>, reads };
 }
@@ -519,6 +528,73 @@ describe("retrieveMemories — merging the legs", () => {
   });
 });
 
+describe("retrieveMemories — the semantic leg", () => {
+  const stubProvider = (over: Partial<{ available: boolean; embed: () => Promise<Float32Array[]> }> = {}) =>
+    setEmbeddingProviderForTests({
+      model: "test-encoder",
+      dimensions: 3,
+      available: async () => over.available ?? true,
+      embed: over.embed ?? (async () => [Float32Array.from([0.1, 0.2, 0.3])]),
+    });
+
+  it("votes with the cosine similarity and blends alongside the lexical leg", async () => {
+    stubProvider();
+    const { db, reads } = fakeDb({
+      lexical: [{ ...memoryRow("m1"), lexicalRank: 0.5 }],
+      loaded: [memoryRow("m2")],
+      semantic: [
+        { id: "m1", similarity: 0.92 },
+        { id: "m2", similarity: 0.81 },
+      ],
+    });
+
+    const result = await retrieveMemories(db, { brainId: BRAIN, query: "vector search", now: NOW });
+
+    expect(result.semanticAvailable).toBe(true);
+    expect(result.legCounts.semantic).toBe(2);
+    const m1 = result.results.find((row) => row.id === "m1")!;
+    const m2 = result.results.find((row) => row.id === "m2")!;
+    // m1 was found by both legs; m2 only by the semantic ANN and still enters the pool.
+    expect(m1.legs).toEqual(["lexical", "semantic"]);
+    expect(m1.features.semanticSimilarity).toBe(0.92);
+    expect(m2.legs).toEqual(["semantic"]);
+    expect(m2.features.semanticSimilarity).toBe(0.81);
+    expect(m1.score.whyMatched).toContain("semantic");
+    // The ANN ran exactly once, through the raw execute channel.
+    expect(reads.filter((read) => read.table === "memories:semantic")).toHaveLength(1);
+  });
+
+  it("abstains without throwing when the provider fails to embed the query", async () => {
+    stubProvider({ embed: async () => { throw new Error("network down"); } });
+    const { db, reads } = fakeDb({
+      lexical: [{ ...memoryRow("m1"), lexicalRank: 0.5 }],
+      semantic: [{ id: "m1", similarity: 0.99 }],
+    });
+
+    const result = await retrieveMemories(db, { brainId: BRAIN, query: "vector search", now: NOW });
+
+    // Provider is configured, so the flag is true, but the leg contributed nothing and
+    // retrieval degraded to lexical — no execute ran, no semantic vote landed.
+    expect(result.semanticAvailable).toBe(true);
+    expect(result.legCounts.semantic).toBe(0);
+    expect(result.results.map((row) => row.id)).toEqual(["m1"]);
+    expect(reads.filter((read) => read.table === "memories:semantic")).toHaveLength(0);
+  });
+
+  it("does not run when no provider is configured", async () => {
+    const { db, reads } = fakeDb({
+      lexical: [{ ...memoryRow("m1"), lexicalRank: 0.5 }],
+      semantic: [{ id: "m1", similarity: 0.99 }],
+    });
+
+    const result = await retrieveMemories(db, { brainId: BRAIN, query: "vector search", now: NOW });
+
+    expect(result.semanticAvailable).toBe(false);
+    expect(result.legCounts.semantic).toBe(0);
+    expect(reads.filter((read) => read.table === "memories:semantic")).toHaveLength(0);
+  });
+});
+
 describe("the SQL keeps retrieval's invariants", () => {
   const source = readFileSync("lib/brain/retrieval/retrieve.ts", "utf8");
 
@@ -536,6 +612,21 @@ describe("the SQL keeps retrieval's invariants", () => {
     expect(source).toContain("eq(brainEntities.brainId, brainId)");
   });
 
+  it("keeps the semantic ANN search brain-scoped in the same WHERE as the ORDER BY", () => {
+    // ISOLATION: a vector index must never range across tenants. The brain_id predicate
+    // has to sit in the SAME WHERE clause as `ORDER BY embedding <=>`, or a nearest
+    // neighbour from another brain could rank first. Assert both live in semanticLeg.
+    const leg = source.slice(
+      source.indexOf("async function semanticLeg"),
+      source.indexOf("function uniqueIds")
+    );
+    expect(leg).toContain("eq(memories.brainId, params.brainId)");
+    expect(leg).toContain("ORDER BY ${distance} ASC");
+    expect(leg).toContain("WHERE ${sql.join(filters");
+    // The leg abstains rather than throwing when the provider fails.
+    expect(leg).toContain("return [];");
+  });
+
   it("re-applies the visibility scope when loading ids from a join table", () => {
     const loader = source.slice(
       source.indexOf("async function loadCandidateRows"),
@@ -550,8 +641,9 @@ describe("the SQL keeps retrieval's invariants", () => {
     expect(source).toContain("limit(ENTITY_CANDIDATE_LIMIT)");
     expect(source).toContain("limit(GRAPH_EDGE_LIMIT)");
     expect(source).toContain("limit(QUERY_ENTITY_LIMIT)");
+    expect(source).toContain("LIMIT ${SEMANTIC_CANDIDATE_LIMIT}");
     expect(CANDIDATE_POOL_MAX).toBe(
-      LEXICAL_CANDIDATE_LIMIT + ENTITY_CANDIDATE_LIMIT + GRAPH_CANDIDATE_LIMIT
+      LEXICAL_CANDIDATE_LIMIT + ENTITY_CANDIDATE_LIMIT + GRAPH_CANDIDATE_LIMIT + SEMANTIC_CANDIDATE_LIMIT
     );
     expect(GRAPH_MAX_HOPS).toBeLessThanOrEqual(2);
     expect(RESULT_LIMIT_MAX).toBeLessThanOrEqual(CANDIDATE_POOL_MAX);

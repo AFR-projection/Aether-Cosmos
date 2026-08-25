@@ -2815,3 +2815,710 @@ body {
   .dashboard-file-row:hover,
   .dashboard-file-row:hover .dashboard-file-row__arrow { transform: none; }
 }
+
+/* ── Second Brain ─────────────────────────────────────────────────────────
+   Shared visual language for every /brain page. The brain is the technical
+   surface of the product, so it leans denser and more instrument-like than the
+   file manager: hairline rims tinted with the accent, inset top highlights that
+   read as milled metal, and mono type for anything numeric.
+
+   Only what Tailwind cannot express lives here — presence rings, the activity
+   sparkline, the scope toggle, the segmented control. Layout and spacing stay
+   in the components as utilities, matching the rest of the brain pages. */
+.brain-page {
+  --brain-panel: color-mix(in srgb, var(--surface) 94%, var(--background));
+  --brain-panel-soft: color-mix(in srgb, var(--surface-hover) 55%, transparent);
+  --brain-rim: color-mix(in srgb, var(--border) 86%, var(--accent) 14%);
+  --brain-rim-strong: color-mix(in srgb, var(--accent) 26%, var(--border));
+  --brain-muted: color-mix(in srgb, var(--muted-foreground) 82%, transparent);
+  --brain-accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+  --brain-inset: inset 0 1px 0 color-mix(in srgb, var(--surface-elevated) 65%, transparent);
+  position: relative;
+  isolation: isolate;
+}
+
+/* One soft accent bloom behind the header. Blurred once, never animated, so it
+   costs nothing per frame while giving the page a lit-from-behind depth. */
+.brain-page::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -7rem;
+  right: 4%;
+  width: 26rem;
+  height: 22rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  filter: blur(80px);
+  pointer-events: none;
+}
+/* ── Page header ── */
+.brain-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--accent);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.brain-kicker svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.brain-title {
+  margin: 0.55rem 0 0;
+  color: var(--foreground);
+  font-size: clamp(1.75rem, 3.4vw, 2.6rem);
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  line-height: 1.02;
+}
+
+.brain-lede {
+  max-width: 44rem;
+  margin: 0.6rem 0 0;
+  color: var(--brain-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+/* ── Section rail ─────────────────────────────────────────────────────────
+   A single recessed track holding the tabs. The active tab is a raised pill
+   rather than a colour swap, so the current section is legible at a glance even
+   for a user who cannot separate the accent from the muted text. */
+.brain-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.28rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 1rem;
+  background: var(--brain-panel-soft);
+}
+.brain-rail__link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0 0.75rem;
+  border-radius: 0.78rem;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 550;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 180ms ease, background-color 180ms ease;
+}
+
+.brain-rail__link svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+}
+
+.brain-rail__link:hover {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  color: var(--foreground);
+}
+
+.brain-rail__link[aria-current="page"] {
+  background: var(--surface);
+  border: 1px solid var(--brain-rim-strong);
+  padding-inline: calc(0.75rem - 1px);
+  color: var(--foreground);
+  box-shadow: var(--brain-inset), var(--shadow-sm);
+}
+
+.brain-rail__link[aria-current="page"] svg { color: var(--accent); }
+
+.brain-rail__link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* ── Panels & metrics ── */
+.brain-surface {
+  border: 1px solid var(--brain-rim);
+  border-radius: 1.35rem;
+  background: var(--brain-panel);
+  box-shadow: var(--brain-inset), var(--shadow-sm);
+}
+
+.brain-surface--flush {
+  border-radius: 1.15rem;
+  background: var(--brain-panel-soft);
+  box-shadow: none;
+}
+
+/* Panels that hold something the user must act on before it disappears. */
+.brain-surface--warn {
+  border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+  background: color-mix(in srgb, var(--warning) 5%, var(--brain-panel));
+}
+
+/* ── Tones ──
+   Tailwind utilities live in a cascade layer, so the unlayered .brain-* rules
+   here always win a border/background fight. Tone overrides therefore go through
+   an attribute rather than a utility class. */
+[data-tone] { --tone: var(--muted-foreground); }
+[data-tone="success"] { --tone: var(--success); }
+[data-tone="warning"] { --tone: var(--warning); }
+[data-tone="danger"] { --tone: var(--danger); }
+[data-tone="info"] { --tone: var(--info); }
+[data-tone="accent"] { --tone: var(--accent); }
+
+.brain-metric {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 1.15rem;
+  background: var(--brain-panel-soft);
+}
+
+.brain-metric > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--brain-muted);
+  font-size: 0.64rem;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.brain-metric > span:first-child svg {
+  width: 0.82rem;
+  height: 0.82rem;
+  color: var(--accent);
+}
+
+.brain-metric strong {
+  color: var(--foreground);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 1.45rem;
+  font-weight: 650;
+  letter-spacing: -0.05em;
+  line-height: 1.1;
+}
+
+.brain-metric small {
+  color: var(--brain-muted);
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+/* ── Presence ─────────────────────────────────────────────────────────────
+   One attribute drives every presence affordance on a card: the dot, the avatar
+   ring and the pill all read `--presence`. Colour is never the only signal —
+   each tier also carries a distinct word ("Connected", "Idle", "Dormant",
+   "Never connected", "Revoked") and only the live tier animates. */
+[data-presence] { --presence: var(--muted-foreground); }
+[data-presence="live"] { --presence: var(--success); }
+[data-presence="idle"] { --presence: var(--warning); }
+[data-presence="dormant"] { --presence: var(--info); }
+[data-presence="never"] { --presence: var(--muted-foreground); }
+[data-presence="revoked"] { --presence: var(--danger); }
+
+.brain-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem 0.2rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--presence) 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--presence) 12%, transparent);
+  color: var(--presence);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.brain-presence__dot {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* Only a genuinely connected agent gets the expanding ring — motion here means
+   "traffic right now", so spending it on an idle agent would be a lie. */
+[data-presence="live"] .brain-presence__dot::after {
+  content: "";
+  position: absolute;
+  inset: -0.18rem;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+  animation: dot-ripple 1.9s ease-out infinite;
+}
+
+.brain-presence__age {
+  color: color-mix(in srgb, var(--presence) 78%, var(--foreground));
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.63rem;
+  font-weight: 500;
+}
+/* ── Agent card ── */
+.brain-agent {
+  position: relative;
+  display: grid;
+  gap: 0.9rem;
+  overflow: hidden;
+  padding: 1.1rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 1.35rem;
+  background: var(--brain-panel);
+  box-shadow: var(--brain-inset), var(--shadow-sm);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.brain-agent:hover {
+  border-color: color-mix(in srgb, var(--presence) 34%, var(--brain-rim));
+  box-shadow: var(--brain-inset), var(--shadow-md);
+}
+
+/* Left edge reads as a status gutter — the tier colour without a coloured card. */
+.brain-agent::before {
+  content: "";
+  position: absolute;
+  top: 1.1rem;
+  bottom: 1.1rem;
+  left: 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(180deg, var(--presence), transparent);
+  opacity: 0.75;
+}
+
+.brain-agent[data-presence="revoked"] { opacity: 0.72; }
+
+.brain-agent__avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.6rem;
+  height: 2.6rem;
+  border: 1px solid color-mix(in srgb, var(--presence) 38%, transparent);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--presence) 13%, var(--brain-panel-soft));
+  color: color-mix(in srgb, var(--presence) 80%, var(--foreground));
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+.brain-agent__name {
+  display: block;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.92rem;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brain-agent__op {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.15rem;
+  color: var(--brain-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Chips ── */
+.brain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.12rem 0.42rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 0.45rem;
+  color: var(--brain-muted);
+  font-size: 0.65rem;
+  font-weight: 520;
+  white-space: nowrap;
+}
+
+.brain-chip svg { width: 0.7rem; height: 0.7rem; }
+
+.brain-chip--on {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--brain-accent-soft);
+  color: var(--accent);
+}
+
+.brain-chip--mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.brain-chip[data-tone] {
+  border-color: color-mix(in srgb, var(--tone) 32%, transparent);
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+  color: var(--tone);
+}
+/* ── Activity ticks ───────────────────────────────────────────────────────
+   A bucketed bar strip drawn from the audit trail the page already fetches.
+   Each tick fills from the bottom via a hard-stop gradient, so one element per
+   bucket paints the whole chart — no nested spans, no layout per frame.
+
+   The strip is decorative in the accessibility sense: the same numbers are
+   stated in text next to it, and the wrapper carries an aria-label, so nothing
+   here is the only way to learn how busy an agent has been. */
+.brain-ticks {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 1.6rem;
+  color: var(--accent);
+}
+
+.brain-ticks > i {
+  display: block;
+  flex: 1 1 0;
+  min-width: 2px;
+  height: 100%;
+  border-radius: 1.5px;
+  background: linear-gradient(
+    to top,
+    currentColor calc(var(--v, 0) * 100%),
+    color-mix(in srgb, currentColor 13%, transparent) calc(var(--v, 0) * 100%)
+  );
+}
+
+/* Newest bucket is the one the user cares about; give it the full accent. */
+.brain-ticks > i:last-child { background-size: 100% 100%; opacity: 1; }
+.brain-ticks > i:not(:last-child) { opacity: 0.72; }
+
+.brain-ticks--compact {
+  height: 0.85rem;
+  gap: 1.5px;
+  color: var(--presence, var(--accent));
+}
+
+.brain-ticks__axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+  color: var(--brain-muted);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+}
+/* ── Scope toggle ─────────────────────────────────────────────────────────
+   A real checkbox, visually hidden but focusable, so keyboard and screen-reader
+   users get native semantics while the label renders as a selectable card. */
+.brain-scope {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 0.95rem;
+  background: var(--brain-panel-soft);
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.brain-scope:hover { border-color: color-mix(in srgb, var(--accent) 26%, var(--brain-rim)); }
+
+/* Sits in a filter row next to selects rather than in a grid of permissions. */
+.brain-scope--inline {
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.6rem;
+}
+
+.brain-scope--inline .brain-scope__box { margin-top: 0; }
+
+.brain-scope:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--brain-accent-soft);
+}
+
+.brain-scope:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.brain-scope input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.brain-scope__box {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.08rem;
+  border: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius: 0.35rem;
+  color: transparent;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.brain-scope__box svg { width: 0.7rem; height: 0.7rem; }
+
+.brain-scope:has(input:checked) .brain-scope__box {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.brain-scope__label {
+  display: block;
+  color: var(--foreground);
+  font-size: 0.76rem;
+  font-weight: 570;
+}
+
+.brain-scope__hint {
+  display: block;
+  margin-top: 0.12rem;
+  color: var(--brain-muted);
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+/* Scopes that hand out real power are named as such rather than looking like
+   any other row the user can tick without thinking. */
+.brain-scope[data-risk="high"] .brain-scope__label::after {
+  content: "sensitive";
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.08em;
+}
+
+/* ── Segmented control ── */
+.brain-seg {
+  display: inline-flex;
+  gap: 0.12rem;
+  padding: 0.2rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 0.8rem;
+  background: var(--brain-panel-soft);
+}
+
+.brain-seg__btn {
+  min-height: 1.85rem;
+  padding: 0 0.62rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+  font-weight: 570;
+  cursor: pointer;
+  transition: background-color 170ms ease, color 170ms ease;
+}
+.brain-seg__btn:hover { color: var(--foreground); }
+
+.brain-seg__btn[aria-selected="true"],
+.brain-seg__btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--brain-inset), var(--shadow-sm);
+}
+
+.brain-seg__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Code block ── */
+.brain-code {
+  overflow: auto;
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--background-secondary) 70%, var(--brain-panel));
+  color: var(--foreground);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.brain-code--secret {
+  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
+  background: color-mix(in srgb, var(--warning) 7%, var(--brain-panel));
+  word-break: break-all;
+}
+
+/* A key on screen is a key someone can photograph. Masked until asked for. */
+.brain-code--masked {
+  color: transparent;
+  text-shadow: 0 0 0.5rem color-mix(in srgb, var(--foreground) 55%, transparent);
+  user-select: none;
+}
+
+/* ── Timeline (activity log) ── */
+.brain-timeline {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 1.1rem;
+  list-style: none;
+}
+.brain-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  left: 0.22rem;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    var(--brain-rim) 12%,
+    var(--brain-rim) 88%,
+    transparent
+  );
+}
+
+.brain-timeline__item { position: relative; padding: 0.5rem 0; }
+
+.brain-timeline__item::before {
+  content: "";
+  position: absolute;
+  top: 1rem;
+  left: -1.1rem;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--brain-rim-strong);
+  box-shadow: 0 0 0 3px var(--background);
+}
+
+.brain-timeline__item[data-actor="agent"]::before { background: var(--accent); }
+
+.brain-timeline__day {
+  margin: 0.9rem 0 0.1rem;
+  color: var(--brain-muted);
+  font-size: 0.64rem;
+  font-weight: 620;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+/* ── Live sync readout ──
+   Tells the user the roster is being refreshed and when it last happened, so a
+   quiet screen reads as "nothing is happening" rather than "this is broken". */
+.brain-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid var(--brain-rim);
+  border-radius: 999px;
+  background: var(--brain-panel-soft);
+  color: var(--brain-muted);
+  font-size: 0.66rem;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.brain-sync__dot {
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 999px;
+  background: var(--success);
+}
+
+.brain-sync[data-state="syncing"] .brain-sync__dot { animation: halo-breathe 1.1s ease-in-out infinite; }
+.brain-sync[data-state="paused"] .brain-sync__dot { background: var(--muted-foreground); }
+.brain-sync[data-state="error"] { border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+.brain-sync[data-state="error"] .brain-sync__dot { background: var(--danger); }
+
+.brain-sync__time {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.63rem;
+  color: var(--foreground);
+}
+
+/* ── Empty state ── */
+.brain-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 2.4rem 1.25rem;
+  border: 1px dashed var(--brain-rim);
+  border-radius: 1.35rem;
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+  text-align: center;
+}
+.brain-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--brain-rim);
+  background: var(--brain-accent-soft);
+  color: var(--accent);
+}
+
+.brain-empty__title { color: var(--foreground); font-size: 0.88rem; font-weight: 600; }
+.brain-empty__body { max-width: 26rem; color: var(--brain-muted); font-size: 0.76rem; line-height: 1.6; }
+
+/* ── Responsive ──
+   375px is the narrowest phone we support; the fleet cards and metric grids
+   collapse to one column before anything can overflow horizontally. */
+@media (max-width: 30rem) {
+  .brain-page::before { display: none; }
+  .brain-rail { width: 100%; overflow-x: auto; }
+  .brain-agent { padding: 0.9rem; }
+  .brain-metric strong { font-size: 1.25rem; }
+  .brain-code { font-size: 0.65rem; }
+}
+
+@media (max-width: 48rem) {
+  .brain-title { letter-spacing: -0.035em; }
+  .brain-seg { width: 100%; }
+  .brain-seg__btn { flex: 1 1 0; }
+}
+
+/* ── lite mode / reduced motion ──
+   The presence ripple is the only looping animation added here; both escape
+   hatches stop it while keeping the dot itself (colour + label survive). */
+.lite .brain-presence__dot::after,
+.lite .brain-sync__dot { animation: none !important; }
+.lite .brain-page::before { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .brain-presence__dot::after,
+  .brain-sync__dot { animation: none !important; }
+  .brain-rail__link,
+  .brain-agent,
+  .brain-seg__btn,
+  .brain-scope { transition: none !important; }
+}

@@ -5,12 +5,11 @@ import { useState } from "react";
 import { FolderKanban, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { EmptyState } from "@/components/ui/empty-state";
 import { BrainShell } from "@/components/brain/brain-shell";
 import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
 import { useDialogs } from "@/components/ui/dialog-prompts";
 import { notify } from "@/lib/system/notify-store";
-import { cn, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { PROJECT_STATUS_OPTIONS } from "@/lib/brain/ui-constants";
 import {
   useActiveBrain,
@@ -22,10 +21,10 @@ import {
 } from "@/hooks/use-brain";
 
 const STATUS_TONE: Record<BrainProject["status"], string> = {
-  active: "bg-success/10 text-success",
-  paused: "bg-warning/10 text-warning",
-  done: "bg-accent/10 text-accent",
-  archived: "bg-muted/40 text-muted-foreground",
+  active: "success",
+  paused: "warning",
+  done: "accent",
+  archived: "muted",
 };
 
 export default function BrainProjectsPage() {
@@ -140,34 +139,32 @@ export default function BrainProjectsPage() {
           (projects.data.projects.length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2">
               {projects.data.projects.map((project) => (
-                <article
-                  key={project.id}
-                  className="rounded-2xl border border-border/50 bg-surface p-4"
-                >
+                <article key={project.id} className="brain-surface flex flex-col gap-2 p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
+                    <h3 className="min-w-0 text-sm font-semibold text-foreground">
+                      {project.name}
+                    </h3>
                     <span
-                      className={cn(
-                        "rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-                        STATUS_TONE[project.status]
-                      )}
+                      className="brain-chip brain-chip--mono shrink-0"
+                      data-tone={STATUS_TONE[project.status]}
                     >
                       {project.status}
                     </span>
                   </div>
 
                   {project.description && (
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                    <p className="line-clamp-2 text-sm text-muted-foreground">
                       {project.description}
                     </p>
                   )}
 
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {project.memoryCount} memor{project.memoryCount === 1 ? "y" : "ies"} · updated{" "}
-                    {formatDate(project.updatedAt, "short")}
+                  <p className="mt-auto pt-1 text-xs text-muted-foreground">
+                    <span className="font-mono text-foreground">{project.memoryCount}</span> memor
+                    {project.memoryCount === 1 ? "y" : "ies"} · updated{" "}
+                    {formatDate(project.updatedAt, "medium")}
                   </p>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
                     <Button asChild variant="secondary" size="sm">
                       <Link href={`/brain/memories?project=${project.id}`}>Open memories</Link>
                     </Button>
@@ -192,7 +189,7 @@ export default function BrainProjectsPage() {
                           }
                         )
                       }
-                      className="h-8 rounded-lg border border-border/60 bg-surface px-2 text-xs text-foreground focus-visible:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/15"
+                      className="h-8 cursor-pointer rounded-lg border border-border/60 bg-surface px-2 text-xs text-foreground transition-colors hover:border-accent/30 focus-visible:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/15"
                     >
                       {PROJECT_STATUS_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -214,16 +211,20 @@ export default function BrainProjectsPage() {
               ))}
             </div>
           ) : (
-            <EmptyState
-              icon={FolderKanban}
-              title="No projects yet"
-              description="A project groups the memories of one piece of work, so an agent can load just that context."
-              action={
-                <Button size="sm" onClick={() => setCreating(true)}>
-                  Create a project
-                </Button>
-              }
-            />
+            <div className="brain-empty">
+              <span className="brain-empty__icon">
+                <FolderKanban className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <p className="brain-empty__title">No projects yet</p>
+              <p className="brain-empty__body">
+                A project groups the memories of one piece of work, so an agent can load just that
+                context.
+              </p>
+              <Button size="sm" className="mt-1" onClick={() => setCreating(true)}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Create a project
+              </Button>
+            </div>
           ))}
       </div>
     </BrainShell>

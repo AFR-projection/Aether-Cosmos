@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BrainShell } from "@/components/brain/brain-shell";
 import { BrainLoading, BrainPanel } from "@/components/brain/brain-states";
+import { EmbeddingSettingsCard } from "@/components/brain/embedding-settings-card";
 import { notify } from "@/lib/system/notify-store";
 import { apiFetch } from "@/lib/api/client";
 import { formatDate } from "@/lib/utils";
@@ -150,9 +151,16 @@ export default function BrainSettingsPage() {
                 placeholder="What is this brain for?"
               />
             </div>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="brain-chip brain-chip--mono" data-tone={brain.status === "active" ? "success" : "muted"}>
+                {brain.status}
+              </span>
+              {brain.isDefault && (
+                <span className="brain-chip brain-chip--mono" data-tone="accent">
+                  default
+                </span>
+              )}
               Created {formatDate(brain.createdAt, "medium")}
-              {brain.isDefault ? " · default brain" : ""}
             </p>
             <div className="flex justify-end">
               <Button type="submit" size="sm" disabled={!name.trim() || updateBrain.isPending}>
@@ -212,13 +220,19 @@ export default function BrainSettingsPage() {
           <BrainPanel icon={Plus} title={`Your brains (${brains.length})`}>
             <ul className="space-y-1.5">
               {brains.map((option) => (
-                <li key={option.id} className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-sm text-foreground">
-                    {option.name}
+                <li
+                  key={option.id}
+                  className="brain-surface--flush flex items-center justify-between gap-2 px-3 py-2"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate text-sm text-foreground">{option.name}</span>
                     {option.isDefault && (
-                      <span className="ml-2 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-accent">
+                      <span className="brain-chip brain-chip--mono shrink-0" data-tone="accent">
                         default
                       </span>
+                    )}
+                    {option.id === brain.id && (
+                      <span className="brain-chip brain-chip--mono shrink-0">current</span>
                     )}
                   </span>
                   {option.id !== brain.id && (
@@ -247,6 +261,10 @@ export default function BrainSettingsPage() {
             </form>
           </BrainPanel>
         </div>
+      </div>
+
+      <div className="mt-5">
+        <EmbeddingSettingsCard />
       </div>
     </BrainShell>
   );

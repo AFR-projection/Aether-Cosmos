@@ -46,7 +46,14 @@ const brainServices = readAll(
 );
 
 /** Routes that are not scoped to a single brain, and so cannot check one. */
-const NON_BRAIN_SCOPED = new Set(["app/api/brain/route.ts", "app/api/brain/mcp/route.ts"]);
+const NON_BRAIN_SCOPED = new Set([
+  "app/api/brain/route.ts",
+  "app/api/brain/mcp/route.ts",
+  // Global, master-gated embedding-provider config (single row, no brain id): server-wide
+  // secret + model, authorized by requireMasterOrApiKey exactly like the Gmail sender.
+  "app/api/brain/embedding-settings/route.ts",
+  "app/api/brain/embedding-settings/test/route.ts",
+]);
 
 describe("case 1 — every brain-scoped route authorizes before it reads", () => {
   it("calls a requireBrain* helper", () => {

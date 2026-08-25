@@ -3,7 +3,8 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/lib/db/schema";
 import { brainEntities, memories, memoryLinks, memoryMentions } from "@/lib/db/schema";
 import { ftsAnyMatchOn, ftsAnyRankOn, ftsMatchOn, ftsRankOn, hasSearchTerms } from "@/lib/search/fts";
-import { embeddingsAvailable } from "../embedding/provider";
+import type { EmbeddingProvider, EmbeddingVector } from "../embedding/provider";
+import { getEmbeddingProvider } from "../embedding/resolve";
 import { STOP_WORDS } from "../graph/relate";
 import type { MemoryType } from "../constants";
 import {
@@ -63,8 +64,13 @@ export const RETRIEVAL_VERSION = "retrieve-v1";
 export const LEXICAL_CANDIDATE_LIMIT = 60;
 export const ENTITY_CANDIDATE_LIMIT = 40;
 export const GRAPH_CANDIDATE_LIMIT = 60;
+/** Nearest-neighbour rows the semantic leg contributes (P9). Abstains when disabled. */
+export const SEMANTIC_CANDIDATE_LIMIT = 60;
 export const CANDIDATE_POOL_MAX =
-  LEXICAL_CANDIDATE_LIMIT + ENTITY_CANDIDATE_LIMIT + GRAPH_CANDIDATE_LIMIT;
+  LEXICAL_CANDIDATE_LIMIT +
+  ENTITY_CANDIDATE_LIMIT +
+  GRAPH_CANDIDATE_LIMIT +
+  SEMANTIC_CANDIDATE_LIMIT;
 
 /** How many entity nodes one query may resolve to. */
 export const QUERY_ENTITY_LIMIT = 12;
@@ -189,7 +195,11 @@ export type RetrievalResult = {
   results: RankedMemory[];
   /** The next-best candidates that did not fit `limit`, bounded and still ranked. */
   omitted: RankedMemory[];
-  /** False when no embedding provider is configured — the semantic leg abstained. */
+  /**
+   * True only when an embedding provider is configured AND this request carried a
+   * query for it to embed. A seed-only or empty request reports false: the semantic
+   * leg has no query text to run against, so it abstains regardless of configuration.
+   */
   semanticAvailable: boolean;
 };
 
@@ -573,6 +583,66 @@ export function provenanceQuality(sourceType: string): number {
   return PROVENANCE_QUALITY[sourceType] ?? PROVENANCE_QUALITY_DEFAULT;
 }
 
+/**
+ * Semantic leg (P9): approximate-nearest-neighbour over `memories.embedding`.
+ *
+ * The query text is embedded at request time with the SAME provider the write path
+ * used, so index and query live in one vector space. A provider failure (network,
+ * timeout, quota) makes the leg abstain — it returns no rows and the request degrades
+ * to lexical + entity + graph, exactly as a deployment with embeddings turned off does.
+ * It never throws.
+ *
+ * ISOLATION: `brain_id` sits in the SAME WHERE clause as the ANN `ORDER BY embedding
+ * <=> $vec`, so the nearest-neighbour search can only ever range over this tenant's
+ * rows — the one invariant a vector index must never break. The visibility filters
+ * (deleted/archived/type/project) mirror {@link visibilityScope} so the semantic leg
+ * cannot surface a row the other legs would have hidden.
+ *
+ * `<=>` is pgvector cosine DISTANCE; similarity is `1 - distance`, which is the cosine
+ * in [-1, 1] that `score.ts` expects (it clamps a negative to "unrelated").
+ */
+async function semanticLeg(
+  db: RetrievalDb,
+  params: RetrieveParams,
+  provider: EmbeddingProvider,
+  rawQuery: string
+): Promise<{ memoryId: string; similarity: number }[]> {
+  let vector: EmbeddingVector | undefined;
+  try {
+    [vector] = await provider.embed([rawQuery]);
+  } catch {
+    return [];
+  }
+  if (!vector || vector.length === 0) return [];
+
+  const literal = `[${Array.from(vector).join(",")}]`;
+  const distance = sql`${memories.embedding} <=> ${literal}::vector`;
+
+  const filters: SQL[] = [
+    eq(memories.brainId, params.brainId),
+    isNull(memories.deletedAt),
+    sql`${memories.embedding} IS NOT NULL`,
+  ];
+  if (!params.includeArchived) filters.push(isNull(memories.archivedAt));
+  if (params.types && params.types.length > 0) {
+    filters.push(inArray(memories.type, [...params.types]));
+  }
+  if (params.projectId) filters.push(eq(memories.projectId, params.projectId));
+
+  const rows = await db.execute(sql`
+    SELECT ${memories.id} AS id, 1 - (${distance}) AS similarity
+    FROM ${memories}
+    WHERE ${sql.join(filters, sql` AND `)}
+    ORDER BY ${distance} ASC
+    LIMIT ${SEMANTIC_CANDIDATE_LIMIT}
+  `);
+
+  return (rows as unknown as Array<{ id: string; similarity: number | string }>).map((row) => ({
+    memoryId: row.id,
+    similarity: Number(row.similarity),
+  }));
+}
+
 function uniqueIds(ids: readonly (string | null | undefined)[]): string[] {
   const seen = new Set<string>();
   for (const id of ids) if (id) seen.add(id);
@@ -630,14 +700,27 @@ export async function retrieveMemories(
   const query = processed ? buildEnhancedQuery(processed) : null;
   const entityWords = processed ? extractEntityMatchWords(processed) : [];
 
-  const [semanticAvailable, lexicalPrecise, entityResolved] = await Promise.all([
-    embeddingsAvailable(),
+  // The semantic leg embeds the query text, so it can only contribute when there IS a
+  // query. Resolving the provider reads the embedding config, so gate that read on
+  // `rawQuery`: a seed-only `brain_related` request — or an empty one — does no config
+  // I/O and reports the leg as unavailable, because it genuinely cannot run. Resolve
+  // once and reuse for both the availability flag and the embedding. Never throws
+  // (see resolve.ts).
+  const provider = rawQuery ? await getEmbeddingProvider(db) : null;
+  const semanticAvailable = provider ? await provider.available() : false;
+
+  const [lexicalPrecise, entityResolved, semanticHits] = await Promise.all([
     query && hasSearchTerms(query) ? lexicalLeg(db, params, query) : Promise.resolve([]),
     (async () => {
       const entities = await resolveQueryEntities(db, params.brainId, entityWords);
       const hits = await entityLeg(db, params, entities.map((entity) => entity.id));
       return { entities, hits };
     })(),
+    // Embed the raw natural-language query, not the FTS-enhanced one: the vector space
+    // was built from memory prose, not tsquery syntax. Abstains when disabled or empty.
+    semanticAvailable && provider && rawQuery
+      ? semanticLeg(db, params, provider, rawQuery)
+      : Promise.resolve([] as { memoryId: string; similarity: number }[]),
   ]);
   const { entities: queryEntities, hits: entityHits } = entityResolved;
 
@@ -681,9 +764,11 @@ export async function retrieveMemories(
   const loaded = new Map<string, CandidateMemory>(
     lexical.map((row) => [row.memory.id, row.memory])
   );
-  const missing = uniqueIds([...entityHits.map((hit) => hit.memoryId), ...reached.keys()]).filter(
-    (id) => !loaded.has(id) && !excluded.has(id)
-  );
+  const missing = uniqueIds([
+    ...entityHits.map((hit) => hit.memoryId),
+    ...reached.keys(),
+    ...semanticHits.map((hit) => hit.memoryId),
+  ]).filter((id) => !loaded.has(id) && !excluded.has(id));
   for (const row of await loadCandidateRows(db, params, missing)) loaded.set(row.id, row);
 
   const pool = new Map<string, MemoryCandidate>();
@@ -691,8 +776,8 @@ export async function retrieveMemories(
     lexical: 0,
     entity: 0,
     graph: 0,
-    // Abstains until an embedding provider exists (P9). Reported so a deployment can
-    // see at a glance whether the leg is contributing.
+    // P9: contributes once an embedding provider is configured; abstains (stays 0)
+    // otherwise. Reported so a deployment can see at a glance whether the leg voted.
     semantic: 0,
   };
 
@@ -756,6 +841,18 @@ export async function retrieveMemories(
     if (hop.hops === 1) candidate.features.relationshipStrength = 1;
     candidate.legs.push("graph");
     legCounts.graph += 1;
+  }
+
+  // Semantic votes. `similarity` is the cosine in [-1, 1]; score.ts clamps a negative
+  // to "unrelated" rather than a negative vote. A memory can carry this alongside a
+  // lexical/entity/graph vote — the weighted mean then blends the evidence.
+  for (const hit of semanticHits) {
+    const memory = loaded.get(hit.memoryId);
+    if (!memory || excluded.has(hit.memoryId)) continue;
+    const candidate = candidateFor(memory);
+    candidate.features.semanticSimilarity = hit.similarity;
+    candidate.legs.push("semantic");
+    legCounts.semantic += 1;
   }
 
   const ranked = rankCandidates([...pool.values()], { now });

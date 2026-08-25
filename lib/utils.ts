@@ -25,6 +25,11 @@ export function formatDate(date: Date | string, variant?: "short" | "medium"): s
   }).format(new Date(date));
 }
 
+/** Clock time only. Used where the surrounding UI already states the day. */
+export function formatTime(date: Date | string): string {
+  return new Intl.DateTimeFormat("id-ID", { timeStyle: "short" }).format(new Date(date));
+}
+
 export function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 255);
 }

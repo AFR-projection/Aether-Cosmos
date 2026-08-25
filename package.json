@@ -19,6 +19,7 @@
     "reset-master-password": "tsx scripts/reset-master-password.ts",
     "worker": "tsx workers/index.ts",
     "brain:backfill-relate": "tsx scripts/brain-backfill-relate.ts",
+    "brain:backfill-embed": "tsx scripts/brain-backfill-embed.ts",
     "deploy:up": "docker compose -f docker/docker-compose.yml up -d --build",
     "deploy:down": "docker compose -f docker/docker-compose.yml down",
     "deploy:logs": "docker compose -f docker/docker-compose.yml logs -f",

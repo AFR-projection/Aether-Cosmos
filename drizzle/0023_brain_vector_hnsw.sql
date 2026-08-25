@@ -1,0 +1,22 @@
+-- Migration: 0023_brain_vector_hnsw
+-- Date: 2026-08-25
+--
+-- Second Brain 2.0 — P9 semantic embeddings: the approximate-nearest-neighbour index.
+--
+-- Run this AFTER 0022 and AFTER a first backfill (npm run brain:backfill-embed), so the
+-- index is built over real vectors rather than a mostly-NULL column.
+--
+-- Apply:    npx tsx scripts/apply-migration.ts drizzle/0023_brain_vector_hnsw.sql
+-- Rollback: npx tsx scripts/apply-migration.ts drizzle/0023_brain_vector_hnsw_rollback.sql
+--
+-- CONCURRENTLY so building the index never takes an ACCESS EXCLUSIVE lock on `memories`
+-- and never blocks reads or writes. This statement therefore CANNOT run inside a
+-- transaction block — keep this file to exactly one statement so apply-migration.ts
+-- (which sends the file as a single simple query) does not wrap it in an implicit
+-- transaction.
+--
+-- cosine distance (`vector_cosine_ops`) matches the `<=>` operator the semantic leg
+-- orders by. m=16 / ef_construction=64 are pgvector's balanced defaults: good recall
+-- at a modest build cost, appropriate for a per-user brain rather than a billion-row set.
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "memories_embedding_hnsw_idx" ON "memories" USING hnsw ("embedding" vector_cosine_ops) WITH (m = 16, ef_construction = 64);

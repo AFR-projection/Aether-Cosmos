@@ -1,6 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
+import { RotateCw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -9,10 +10,9 @@ export function BrainLoading({ label, rows = 3 }: { label: string; rows?: number
   return (
     <div className="space-y-3" aria-busy="true" aria-label={label}>
       {Array.from({ length: rows }, (_, row) => (
-        <div
-          key={row}
-          className="h-20 animate-pulse rounded-2xl border border-border/40 bg-surface"
-        />
+        <div key={row} className="brain-surface h-20 overflow-hidden">
+          <span className="skeleton block h-full w-full rounded-[1.35rem]" />
+        </div>
       ))}
     </div>
   );
@@ -28,11 +28,15 @@ export function BrainErrorState({
   return (
     <div
       role="alert"
-      className="rounded-2xl border border-danger/20 bg-danger/5 p-6 text-sm text-foreground"
+      className="rounded-[1.35rem] border border-danger/25 bg-danger/5 p-6 text-sm text-foreground"
     >
-      <p className="font-medium">{message}</p>
+      <p className="flex items-center gap-2 font-medium">
+        <TriangleAlert className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+        {message}
+      </p>
       {onRetry && (
         <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={onRetry}>
+          <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
           Try again
         </Button>
       )}
@@ -55,16 +59,13 @@ export function BrainPanel({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      className={cn(
-        "rounded-2xl border border-border/50 bg-surface p-5 shadow-md transition-shadow hover:shadow-lg",
-        className
-      )}
-    >
+    <section className={cn("brain-surface p-5", className)}>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <Icon className="h-4 w-4 text-accent" aria-hidden="true" />
-          {title}
+        <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-accent/25 bg-accent/10">
+            <Icon className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+          </span>
+          <span className="truncate">{title}</span>
         </h2>
         {action}
       </div>

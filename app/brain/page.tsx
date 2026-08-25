@@ -1,13 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { Bot, Brain as BrainIcon, Boxes, Plug, Sparkles } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  Archive,
+  Bot,
+  Boxes,
+  Brain as BrainIcon,
+  FolderKanban,
+  Plug,
+  Sparkles,
+  User,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { BrainShell } from "@/components/brain/brain-shell";
 import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
 import { MemoryCard } from "@/components/brain/memory-card";
 import { formatDate } from "@/lib/utils";
+import { BRAIN_OPERATION_COPY } from "@/lib/brain/ui-constants";
 import {
   useActiveBrain,
   useBrainAudit,
@@ -15,12 +25,25 @@ import {
   useProjects,
 } from "@/hooks/use-brain";
 
-function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function StatTile({
+  icon: Icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background-secondary/40 p-4">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-foreground">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+    <div className="brain-metric">
+      <span>
+        <Icon aria-hidden="true" />
+        {label}
+      </span>
+      <strong>{value}</strong>
+      {hint && <small>{hint}</small>}
     </div>
   );
 }
@@ -56,22 +79,27 @@ export default function BrainOverviewPage() {
 
       {brain && overview.data && (
         <div className="space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile
+              icon={BrainIcon}
               label="Memories"
               value={overview.data.stats.memoryCount.toLocaleString()}
               hint="live, not archived"
             />
             <StatTile
+              icon={Archive}
               label="Archived"
               value={overview.data.stats.archivedCount.toLocaleString()}
               hint="kept, out of the way"
             />
             <StatTile
+              icon={FolderKanban}
               label="Projects"
               value={(projects.data?.projects.length ?? 0).toLocaleString()}
+              hint="threads of work"
             />
             <StatTile
+              icon={Boxes}
               label="Agents"
               value={overview.data.stats.agentCount.toLocaleString()}
               hint="with access to this brain"
@@ -98,16 +126,18 @@ export default function BrainOverviewPage() {
                   ))}
                 </div>
               ) : (
-                <EmptyState
-                  icon={BrainIcon}
-                  title="This brain is empty"
-                  description="Write your first memory, or connect an agent and let it remember for you."
-                  action={
-                    <Button asChild size="sm">
-                      <Link href="/brain/memories?new=1">Write a memory</Link>
-                    </Button>
-                  }
-                />
+                <div className="brain-empty">
+                  <span className="brain-empty__icon">
+                    <BrainIcon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <p className="brain-empty__title">This brain is empty</p>
+                  <p className="brain-empty__body">
+                    Write your first memory, or connect an agent and let it remember for you.
+                  </p>
+                  <Button asChild size="sm" className="mt-1">
+                    <Link href="/brain/memories?new=1">Write a memory</Link>
+                  </Button>
+                </div>
               )}
             </BrainPanel>
 
@@ -128,15 +158,27 @@ export default function BrainOverviewPage() {
                   <ol className="space-y-2.5">
                     {audit.data.entries.map((entry) => (
                       <li key={entry.id} className="flex items-start gap-2.5">
-                        <span className="mt-0.5 rounded-lg bg-accent/10 p-1.5" aria-hidden="true">
-                          <Bot className="h-3 w-3 text-accent" />
+                        <span
+                          className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg ${
+                            entry.principalType === "agent"
+                              ? "bg-accent/10 text-accent"
+                              : "bg-muted/40 text-muted-foreground"
+                          }`}
+                          aria-hidden="true"
+                        >
+                          {entry.principalType === "agent" ? (
+                            <Bot className="h-3 w-3" />
+                          ) : (
+                            <User className="h-3 w-3" />
+                          )}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-xs font-medium text-foreground">
-                            {entry.operation}
+                            {BRAIN_OPERATION_COPY[entry.operation] ?? entry.operation}
                           </span>
                           <span className="block text-[11px] text-muted-foreground">
-                            {entry.principalType} · {formatDate(entry.createdAt, "short")}
+                            {entry.principalType === "agent" ? "agent" : "you"} ·{" "}
+                            {formatDate(entry.createdAt, "medium")}
                           </span>
                         </span>
                       </li>

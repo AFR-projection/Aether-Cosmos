@@ -25,6 +25,8 @@ import { QUEUE_NAME } from "../lib/queue";
 import { runScheduledCleanups } from "./cleanup";
 import { enrichBrain, enrichMemory, ENRICH_SWEEP_LIMIT } from "../lib/brain/enrich/enrich-service";
 import { relateJobId, runRelateBrainJob, runRelateMemoryJob } from "../lib/brain/graph/relate-jobs";
+import { runEmbedBrainJob, runEmbedMemoryJob } from "../lib/brain/embedding/embed-jobs";
+import { getEmbeddingProvider } from "../lib/brain/embedding/resolve";
 import { Queue } from "bullmq";
 import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
@@ -679,6 +681,69 @@ async function runRelateBrain(brainId: string, limit?: number): Promise<void> {
   }
 }
 
+// ── P9: Semantic embedding ───────────────────────────────────────────────────
+
+/**
+ * Embed one memory. The work lives in `lib/brain/embedding/embed-jobs`; this wrapper is
+ * the operational shell — one log line of status only (never memory text) and a rethrow
+ * so BullMQ retries a genuine failure. A no-op outcome (no provider, fresh, empty) is a
+ * normal completion, not an error.
+ */
+async function runEmbedMemory(brainId: string, memoryId: string): Promise<void> {
+  try {
+    const report = await runEmbedMemoryJob(db, brainId, memoryId);
+    console.log(
+      `embed_memory ${memoryId}: embedded=${report.embedded} skipped=${report.skipped}` +
+        (report.reason ? ` reason=${report.reason}` : "")
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    console.error(`embed_memory ${memoryId}: failed - ${message}`);
+    throw error; // BullMQ will retry
+  }
+}
+
+/**
+ * Bounded backfill sweep: enqueue one embed_memory job per memory in the brain.
+ *
+ * Selection, the batch cap and the dedupe key live in `embed-jobs`; this wrapper owns
+ * the queue exactly like `runRelateBrain`. With no provider configured the sweep is
+ * pointless, so it short-circuits before touching the queue — a deployment with
+ * embeddings off never enqueues embed work.
+ */
+async function runEmbedBrain(brainId: string, limit?: number): Promise<void> {
+  const provider = await getEmbeddingProvider(db);
+  if (!(await provider.available())) {
+    console.log(`embed_brain ${brainId}: no embedding provider configured, nothing to do`);
+    return;
+  }
+
+  if (!redisConnection) {
+    const report = await runEmbedBrainJob(db, brainId, limit, null);
+    console.log(`embed_brain ${brainId}: ${report.found} memories, queue unavailable`);
+    return;
+  }
+
+  const queue = new Queue(QUEUE_NAME, { connection: redisConnection });
+  try {
+    const report = await runEmbedBrainJob(db, brainId, limit, async (memoryId, jobId) => {
+      await queue.add(
+        "embed_memory",
+        { type: "embed_memory", brainId, memoryId },
+        { jobId, removeOnComplete: 100, removeOnFail: 50 }
+      );
+    });
+
+    if (report.found === 0) {
+      console.log(`embed_brain ${brainId}: 0 memories, queue ready`);
+      return;
+    }
+    console.log(`embed_brain ${brainId}: enqueued=${report.enqueued}/${report.found}`);
+  } finally {
+    await queue.close();
+  }
+}
+
 const worker = new Worker(
   QUEUE_NAME,
   async (job) => {
@@ -750,6 +815,17 @@ const worker = new Worker(
       case "relate_brain":
         if (data.brainId) {
           await runRelateBrain(data.brainId, data.limit);
+        }
+        break;
+      case "embed_memory":
+        // Both IDs required, same safety as enrich_memory / relate_memory.
+        if (data.brainId && data.memoryId) {
+          await runEmbedMemory(data.brainId, data.memoryId);
+        }
+        break;
+      case "embed_brain":
+        if (data.brainId) {
+          await runEmbedBrain(data.brainId, data.limit);
         }
         break;
     }

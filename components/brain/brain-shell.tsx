@@ -55,20 +55,16 @@ export function BrainShell({
   const { brain, brains, select } = useActiveBrain();
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="brain-page mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
+      <header className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              <BrainIcon className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+            <p className="brain-kicker">
+              <BrainIcon aria-hidden="true" />
               Second Brain
             </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-              {title}
-            </h1>
-            {description && (
-              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p>
-            )}
+            <h1 className="brain-title">{title}</h1>
+            {description && <p className="brain-lede">{description}</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <BrainSelector brain={brain} brains={brains} onSelect={select} />
@@ -76,8 +72,8 @@ export function BrainShell({
           </div>
         </div>
 
-        <nav aria-label="Second Brain sections" className="-mx-1 overflow-x-auto">
-          <ul className="flex min-w-max items-center gap-1 px-1">
+        <nav aria-label="Second Brain sections" className="-mx-1 overflow-x-auto no-scrollbar">
+          <ul className="brain-rail mx-1 min-w-max">
             {sections.map((section) => {
               const Icon = section.icon;
               const active = section.exact
@@ -110,15 +106,12 @@ export function BrainShell({
                         : undefined
                     }
                     className={cn(
-                      "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                      "brain-rail__link",
                       // Without this a double-click highlights the label text.
-                      section.popOut && "select-none",
-                      active
-                        ? "bg-accent/10 text-accent"
-                        : "text-muted-foreground hover:bg-accent/5 hover:text-foreground"
+                      section.popOut && "select-none"
                     )}
                   >
-                    <Icon className="h-4 w-4" aria-hidden="true" />
+                    <Icon aria-hidden="true" />
                     {section.label}
                   </Link>
                 </li>

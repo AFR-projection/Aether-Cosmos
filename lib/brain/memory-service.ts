@@ -31,6 +31,7 @@ import {
 import { memoryContentHash } from "./enrich/enrich-service";
 import { deleteDerivedEdgesFor } from "./graph/derived-link-service";
 import { relateJobId } from "./graph/relate-jobs";
+import { embedJobId } from "./embedding/embed-jobs";
 import { enqueueJob } from "@/lib/queue";
 
 /**
@@ -64,6 +65,22 @@ function requestEnrichment(brainId: string, memoryId: string): void {
  */
 function requestRelate(brainId: string, memoryId: string): void {
   void enqueueJob("relate_memory", { brainId, memoryId }, { jobId: relateJobId(memoryId) }).catch(() => {});
+}
+
+/**
+ * P9: Ask the worker to (re-)embed a memory for semantic retrieval.
+ *
+ * Same fire-and-forget contract as enrichment and relate: the row is already
+ * committed, and with no embedding provider configured the job is a cheap no-op. Fired
+ * only when the embed input (title/summary/content) could have changed, since that is
+ * the exact text `embeddingInput()` hashes into a vector — a re-tag or archive does not
+ * move it.
+ *
+ * `jobId` dedupe collapses burst edits into one pass; the job's own
+ * (embedding_model, embedding_updated_at) freshness guard makes a duplicate cheap.
+ */
+function requestEmbed(brainId: string, memoryId: string): void {
+  void enqueueJob("embed_memory", { brainId, memoryId }, { jobId: embedJobId(memoryId) }).catch(() => {});
 }
 
 /**
@@ -236,6 +253,7 @@ export async function createMemory(params: {
   });
 
   requestEnrichment(brainId, created.id);
+  requestEmbed(brainId, created.id);
   return created;
 }
 
@@ -473,6 +491,14 @@ export async function updateMemory(params: {
   // chains relate itself, so asking twice would only burn a dedupe slot.
   else if (data.tags !== undefined || data.projectId !== undefined) {
     requestRelate(brainId, memoryId);
+  }
+
+  // Semantic re-embed is keyed on the embed input (title/summary/content) specifically,
+  // not on `contentHash` (which also covers `type`) or on any-change: a re-tag, archive
+  // or importance tweak leaves the vector's text untouched. Independent of enrichment
+  // because the vector does not depend on entities or links.
+  if (data.title !== undefined || data.content !== undefined || data.summary !== undefined) {
+    requestEmbed(brainId, memoryId);
   }
   return result;
 }
