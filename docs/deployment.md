@@ -49,9 +49,11 @@ ssh ubuntu@YOUR-VPS-IP
 # root instead would leave every file, including .env, owned by root.
 sudo mkdir -p /opt/aether-cosmos
 sudo chown "$USER:$USER" /opt/aether-cosmos
-
-git clone <repo-url> /opt/aether-cosmos
 cd /opt/aether-cosmos
+
+# Into "." — the URL and the destination on one line is the shape that breaks
+# when a terminal wraps a pasted block, and the clone then lands in $HOME.
+git clone <repo-url> .
 chmod +x install.sh deploy.sh update.sh
 
 cp .env.example .env
@@ -59,6 +61,10 @@ nano .env          # DATABASE_URL, R2 credentials, domain — see step 4
 
 ./install.sh
 ```
+
+Run these one line at a time. Pasting the whole block at once works only if
+nothing wraps: a broken line turns `git clone <url> /opt/aether-cosmos` into a
+clone into `$HOME` followed by bash trying to execute the directory.
 
 The steps below explain each part.
 
@@ -112,14 +118,19 @@ sudo apt update && sudo apt install -y git curl
 # "could not create work tree dir '/opt/aether-cosmos': Permission denied".
 sudo mkdir -p /opt/aether-cosmos
 sudo chown "$USER:$USER" /opt/aether-cosmos
-
-git clone <repo-url> /opt/aether-cosmos
 cd /opt/aether-cosmos
+
+git clone <repo-url> .
 chmod +x install.sh deploy.sh update.sh
 
 cp .env.example .env
 nano .env
 ```
+
+`cp` failing with `cannot stat '.env.example'` means the clone did not land
+here — check `ls` before blaming the file. `nano` then happily opens a new empty
+`.env`, which is why an empty editor is the symptom of a failed clone rather
+than a missing template.
 
 A production `.env` looks like this:
 
