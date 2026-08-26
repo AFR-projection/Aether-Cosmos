@@ -70,8 +70,8 @@ npm run db:studio  # Drizzle Studio
 
 ## Production
 
-One command on a fresh Ubuntu VPS — installs Docker, clones, asks four questions,
-issues the certificate, builds, and health-checks:
+One command on a fresh Ubuntu VPS — installs Docker, clones, opens `.env` in an
+editor for you to fill in, issues the certificate, builds, and health-checks:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash

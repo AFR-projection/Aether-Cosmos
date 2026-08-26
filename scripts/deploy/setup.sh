@@ -7,7 +7,8 @@
 # Everything the repo's own install.sh cannot do, because it all has to happen
 # before the repo exists on the machine: apt prerequisites, Docker, the firewall,
 # the install directory and its ownership, the clone, and the `aether` command.
-# Then it hands over to ./install.sh, which does the rest.
+# Then it copies .env.example to .env, opens it in nano so the operator fills it in
+# themselves, and hands over to ./install.sh.
 #
 # Deliberately standalone — it duplicates a few helpers from common.sh rather than
 # sourcing it, because on a fresh VPS there is nothing to source yet.
@@ -18,6 +19,7 @@
 #   AETHER_REPO=<git url>   AETHER_BRANCH=<branch>   AETHER_DIR=<path>
 #   AETHER_NO_FIREWALL=1    leave ufw alone
 #   AETHER_NO_INSTALL=1     stop after the clone, do not run install.sh
+#   AETHER_WIZARD=1         ask the questions instead of opening .env in an editor
 
 set -euo pipefail
 
@@ -68,10 +70,16 @@ RUN_GROUP="$(id -gn "$RUN_USER")"
 as_user() {
   # Files under $DIR must belong to $RUN_USER, .env above all: a root-owned .env is
   # unreadable to the person who later needs to edit it.
+  #
+  # Dropping privileges only happens when we are root (`sudo bash setup.sh`), and
+  # $SUDO is empty there — so this cannot go through $SUDO. runuser is the util-linux
+  # tool for exactly this and needs no password; sudo -u is the fallback.
   if [[ "$(id -un)" == "$RUN_USER" ]]; then
     "$@"
+  elif command -v runuser >/dev/null 2>&1; then
+    runuser -u "$RUN_USER" -- "$@"
   else
-    $SUDO -u "$RUN_USER" "$@"
+    sudo -u "$RUN_USER" "$@"
   fi
 }
 
@@ -184,10 +192,12 @@ next_steps() {
   echo -e "  ${BOLD}Next:${NC}"
   echo "    cd $DIR"
   if [[ ! -f "$DIR/.env" ]]; then
-    echo "    ./install.sh --wizard      # answer the prompts, it writes .env for you"
-    echo "    #  or: cp .env.example .env && nano .env && ./install.sh"
+    echo "    cp .env.example .env"
+    echo "    nano .env                  # isi DATABASE_URL, R2, domain, admin"
+    echo "    ./install.sh"
   else
-    echo "    aether update              # pull, rebuild, migrate, verify"
+    echo "    nano .env                  # cek isinya"
+    echo "    ./install.sh               # atau: aether update kalau sudah pernah jalan"
   fi
   printf "${DIM}%s${NC}\n" "$RULE"
   echo
@@ -200,7 +210,7 @@ if [[ -n "${AETHER_NO_INSTALL:-}" ]]; then
 fi
 
 if [[ ! -r /dev/tty ]]; then
-  warn "No terminal available, so the wizard cannot ask you anything here"
+  warn "Tidak ada terminal di sini, jadi .env tidak bisa dibuka untuk diedit"
   next_steps
   exit 0
 fi
@@ -215,30 +225,77 @@ fi
 
 PUBLIC_IP="$(curl -sf --max-time 5 ifconfig.me 2>/dev/null || curl -sf --max-time 5 icanhazip.com 2>/dev/null || echo unknown)"
 
+# ── .env, written by hand ─────────────────────────────────────────────────────
+# No wizard on this path. The operator types the file themselves, which is the flow
+# they can re-run, diff, and fix later with plain `nano .env` — `--wizard` stays
+# available for anyone who wants the questions, but it is opt-in now.
+if [[ -n "${AETHER_WIZARD:-}" ]]; then
+  set +e
+  bash "$DIR/install.sh" --wizard
+  INSTALL_STATUS=$?
+  set -e
+  if [[ $EUID -eq 0 && "$RUN_USER" != "root" ]]; then
+    $SUDO chown -R "$RUN_USER:$RUN_GROUP" "$DIR" 2>/dev/null || true
+  fi
+  exit $INSTALL_STATUS
+fi
+
+if [[ ! -f "$DIR/.env" ]]; then
+  as_user cp "$DIR/.env.example" "$DIR/.env"
+  as_user chmod 600 "$DIR/.env"
+  ok ".env dibuat dari .env.example"
+else
+  ok ".env sudah ada — dibuka untuk dicek"
+fi
+
+# ${EDITOR} if the operator has one, otherwise nano. Installed on demand: an image
+# without nano would otherwise drop into vi, which is a bad surprise mid-install.
+EDITOR_CMD="${EDITOR:-nano}"
+if ! command -v "${EDITOR_CMD%% *}" >/dev/null 2>&1; then
+  apt_get install -y -qq nano >/dev/null 2>&1 || true
+  command -v nano >/dev/null 2>&1 && EDITOR_CMD="nano" || EDITOR_CMD="vi"
+fi
+
 echo
-echo -e "  The wizard will now ask for four things. Have them ready:"
+echo -e "  ${BOLD}Isi 7 baris ini di .env${NC} — sisanya sudah benar apa adanya:"
 echo
-echo -e "    ${BOLD}1.${NC} A domain whose A record already points at ${BOLD}${PUBLIC_IP}${NC}"
-echo -e "    ${BOLD}2.${NC} Your Neon PostgreSQL connection string   ${DIM}https://neon.tech${NC}"
-echo -e "    ${BOLD}3.${NC} Cloudflare R2 keys and bucket             ${DIM}dash.cloudflare.com → R2${NC}"
-echo -e "    ${BOLD}4.${NC} An admin username and password           ${DIM}min. 10 characters${NC}"
+echo -e "    ${BOLD}DEPLOY_DOMAIN${NC}          domain yang A record-nya sudah ke ${BOLD}${PUBLIC_IP}${NC}"
+echo -e "    ${BOLD}NEXT_PUBLIC_APP_URL${NC}    https://<domain yang sama>"
+echo -e "    ${BOLD}CERTBOT_EMAIL${NC}          email kamu (buat notifikasi SSL kedaluwarsa)"
+echo -e "    ${BOLD}DATABASE_URL${NC}           connection string Neon, 1 baris penuh ${DIM}(…sslmode=require)${NC}"
+echo -e "    ${BOLD}R2_*${NC}                   Account ID, Access Key ID, Secret, bucket, public URL"
+echo -e "    ${BOLD}MASTER_USERNAME${NC}        username admin"
+echo -e "    ${BOLD}MASTER_PASSWORD${NC}        password admin, min 10 karakter"
 echo
-echo -e "  ${DIM}Nothing is sent anywhere: they go into $DIR/.env on this machine.${NC}"
+echo -e "  ${DIM}SESSION_SECRET digenerate otomatis, biarkan saja.${NC}"
+echo -e "  ${DIM}Semua nilai tetap di $DIR/.env pada mesin ini, tidak dikirim ke mana pun.${NC}"
+if [[ "$EDITOR_CMD" == "nano" ]]; then
+  echo
+  echo -e "  ${DIM}Di nano: edit → ${BOLD}Ctrl+O${NC}${DIM} Enter untuk simpan → ${BOLD}Ctrl+X${NC}${DIM} untuk keluar.${NC}"
+fi
 echo
 
-REPLY_GO=""
-read -rp "  Continue now? [Y/n] " REPLY_GO </dev/tty || true
-case "${REPLY_GO,,}" in
-  n|no)
-    next_steps
-    exit 0
-    ;;
-esac
+read -rp "  Enter untuk buka .env di ${EDITOR_CMD} (Ctrl+C untuk batal) " _ </dev/tty || true
+
+# stdin is the curl pipe under `curl … | bash`, so the editor must be handed the real
+# terminal or it exits immediately. TERM can be unset in a non-login shell; nano
+# refuses to start without one.
+as_user env TERM="${TERM:-xterm}" "$EDITOR_CMD" "$DIR/.env" </dev/tty >/dev/tty 2>&1 || \
+  warn "Editor keluar dengan error — isi .env dicek ulang oleh install.sh"
+
+echo
+ok ".env disimpan — lanjut deploy"
 
 set +e
-bash "$DIR/install.sh" --wizard
+bash "$DIR/install.sh"
 INSTALL_STATUS=$?
 set -e
+
+if [[ $INSTALL_STATUS -ne 0 ]]; then
+  echo
+  fail "Deploy berhenti. Perbaiki .env lalu jalankan ulang — tidak perlu setup dari awal:"
+  echo "    cd $DIR && nano .env && ./install.sh"
+fi
 
 # `sudo curl … | sudo bash` leaves root-owned files behind; put them back before
 # handing the machine over, or the operator cannot edit their own .env.

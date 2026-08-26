@@ -202,6 +202,113 @@ env_set_line() {
   printf '%s=%s\n' "$key" "$val" >> "$ENV_FILE"
 }
 
+# Set a key in place, or append it when it is absent. Appending a second copy is not
+# good enough: env_get takes the FIRST match while docker compose takes the LAST, so
+# a duplicate key means the script and the container disagree about its value.
+# Duplicates already in the file are collapsed onto the first occurrence.
+env_put() {
+  local key=$1 val tmp line replaced=0
+  val="$(sanitize_env_value "$2")"
+  if [[ ! -f "$ENV_FILE" ]] || ! grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    env_set_line "$key" "$val"
+    return 0
+  fi
+  tmp="$(mktemp)"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${key}="* ]]; then
+      if [[ $replaced -eq 0 ]]; then
+        printf '%s=%s\n' "$key" "$val" >> "$tmp"
+        replaced=1
+      fi
+      continue
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$ENV_FILE"
+  # Copy the contents rather than mv the file: .env keeps its owner and 0600 mode,
+  # and mktemp's 0600-root file does not land on top of the operator's .env.
+  cat "$tmp" > "$ENV_FILE"
+  rm -f "$tmp"
+}
+
+# True when a value is still one of the literal examples from .env.example. Matched
+# exactly, not by substring: a real Neon URL or R2 key must never be mistaken for a
+# placeholder and block a deploy that would have worked.
+env_is_placeholder() {
+  case "${1:-}" in
+    postgresql://user:pass@*|postgres://user:pass@*) return 0 ;;
+    change-me-openssl-rand-hex-32) return 0 ;;
+    change-this-strong-password-min-10-chars) return 0 ;;
+    your_account_id|your_access_key|your_secret_key) return 0 ;;
+    aether.example.com|https://aether.example.com|http://aether.example.com) return 0 ;;
+    admin@example.com) return 0 ;;
+    https://pub-xxxx.r2.dev) return 0 ;;
+  esac
+  return 1
+}
+
+# Hand-written .env is the supported path, so fill in everything that can be derived
+# instead of failing validation over it. Only values nobody can guess — database, R2,
+# domain, admin, certbot email — are left to the operator.
+autofill_env() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  local domain url secret k v
+
+  domain="$(env_get DEPLOY_DOMAIN)"
+  url="$(env_get NEXT_PUBLIC_APP_URL)"
+  env_is_placeholder "$domain" && domain=""
+  env_is_placeholder "$url" && url=""
+
+  # Either one is enough; the other follows from it.
+  if [[ -z "$domain" && -n "$url" ]]; then
+    domain="${url#http*://}"
+    domain="${domain%%/*}"
+    env_put DEPLOY_DOMAIN "$domain"
+    ok "DEPLOY_DOMAIN diisi dari NEXT_PUBLIC_APP_URL: $domain"
+  elif [[ -n "$domain" && -z "$url" ]]; then
+    env_put NEXT_PUBLIC_APP_URL "https://${domain}"
+    ok "NEXT_PUBLIC_APP_URL diisi dari DEPLOY_DOMAIN: https://${domain}"
+  fi
+
+  # SESSION_SECRET is generated, never typed. Written ONLY when missing, still the
+  # placeholder, or too short to be accepted — replacing a live one would make every
+  # saved Gmail App Password and the brain embedding key undecryptable.
+  secret="$(env_get SESSION_SECRET)"
+  if [[ -z "$secret" ]] || env_is_placeholder "$secret" || (( ${#secret} < 32 )); then
+    if [[ -n "$secret" ]] && ! env_is_placeholder "$secret"; then
+      warn "SESSION_SECRET kurang dari 32 karakter — diganti yang baru."
+      warn "Kalau ini deployment lama: input ulang Gmail App Password (Admin → Email) dan API key embedding."
+    fi
+    env_put SESSION_SECRET "$(gen_secret)"
+    ok "SESSION_SECRET digenerate otomatis (64 hex)"
+  fi
+
+  # One correct answer each for this stack, so a missing line is never worth an error.
+  # R2_BUCKET_NAME is deliberately NOT in here: the bucket name is part of every
+  # object's address, so guessing one would hide an existing deployment's files.
+  while IFS='=' read -r k v; do
+    [[ -n "$k" ]] || continue
+    [[ -z "$(env_get "$k")" ]] || continue
+    env_put "$k" "$v"
+    ok "Default dipakai: ${k}=${v}"
+  done <<'ENV_DEFAULTS'
+NODE_ENV=production
+COOKIE_SECURE=true
+HSTS_ENABLED=true
+REDIS_URL=redis://redis:6379
+REDIS_DISABLED=false
+ENV_DEFAULTS
+}
+
+# 64 hex characters. openssl is on every Ubuntu image worth deploying to, but a
+# missing one must not be what kills an install — hence the urandom fallback.
+gen_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  else
+    head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+  fi
+}
+
 # Fix broken wizard output (multiline quoted values) → KEY=value per line
 normalize_env_file() {
   [[ -f "$ENV_FILE" ]] || return 0

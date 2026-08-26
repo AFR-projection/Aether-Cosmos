@@ -64,6 +64,26 @@ validate_database_url() {
   fi
 }
 
+validate_no_placeholders() {
+  log "Checking nilai contoh yang belum diganti..."
+  local bad=0 v
+  for v in DATABASE_URL SESSION_SECRET MASTER_PASSWORD \
+           R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_PUBLIC_URL \
+           NEXT_PUBLIC_APP_URL DEPLOY_DOMAIN CERTBOT_EMAIL; do
+    # Key name only — the value may be a live credential and this output ends up in
+    # scrollback, SSH logs, and screen shares.
+    if env_is_placeholder "${!v:-}"; then
+      fail "$v masih nilai contoh dari .env.example — ganti dengan punya sendiri"
+      bad=1
+    fi
+  done
+  if [[ $bad -eq 1 ]]; then
+    VALIDATION_FAILED=1
+  else
+    ok "Tidak ada nilai contoh yang tertinggal"
+  fi
+}
+
 validate_r2() {
   log "Checking R2 credentials..."
   load_env
@@ -76,6 +96,20 @@ validate_r2() {
   done
   [[ $missing -eq 1 ]] && { VALIDATION_FAILED=1; return; }
   check_mark 0 "R2 variables OK"
+
+  # Cloudflare hands out 32-hex Account ID / Access Key ID and a 64-hex Secret.
+  # Pasting the Access Key ID into both fields is the single most common mistake and
+  # otherwise only surfaces after a 7-minute build. Length only, never the value.
+  local spec key expect actual
+  for spec in R2_ACCOUNT_ID:32 R2_ACCESS_KEY_ID:32 R2_SECRET_ACCESS_KEY:64; do
+    key="${spec%%:*}"
+    expect="${spec##*:}"
+    actual="${!key:-}"
+    actual="${#actual}"
+    if [[ "$actual" != "$expect" ]]; then
+      check_warn 1 "$key panjangnya $actual karakter, biasanya $expect — pastikan tidak tertukar/terpotong"
+    fi
+  done
 
   local endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
   init_docker 2>/dev/null || true
@@ -155,6 +189,7 @@ run_validate() {
   [[ -f "$ENV_FILE" ]] || die "File .env tidak ada. cp .env.example .env lalu isi manual."
   normalize_env_file
   load_env
+  validate_no_placeholders
   validate_required_env
   validate_domain_format
   validate_app_url

@@ -51,8 +51,6 @@ setup_ssl() {
   # "certificate not found" one line after certbot said it had saved it.
   root_test_f "${cert_dir}/fullchain.pem" || die "SSL certificate not found at ${cert_dir}"
 
-  [[ -f "${cert_dir}/fullchain.pem" ]] || die "SSL certificate not found at ${cert_dir}"
-
   ok "SSL certificate ready"
 
   setup_renewal_hook "$domain"

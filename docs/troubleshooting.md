@@ -81,9 +81,8 @@ aether logs worker
 
 Usual causes:
 
-- `.env` is missing or malformed — the installer creates it; manual edits sometimes
-  introduce a stray quote or missing `=`. Run `./install.sh --fix-env` or
-  `./install.sh --force-wizard` to regenerate it.
+- `.env` is missing or malformed — a stray quote or a missing `=` from an edit. Run
+  `./install.sh --fix-env` to normalise it, or `nano .env` and fix the line.
 - `DATABASE_URL` is unreachable — test it with `psql`.
 - Docker permissions — the installer adds your user to the `docker` group, but the
   session must be restarted (`exit`, then SSH back in) for the group membership to

@@ -60,9 +60,14 @@ curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/s
 ```
 
 That is the whole install. It installs git and Docker, opens ports 80/443, clones
-the repository to `/opt/aether-cosmos`, installs the `aether` command, and then
-asks you four questions (domain, database, R2, admin account) before building and
-starting everything. Expect 5–10 minutes, most of it the container build.
+the repository to `/opt/aether-cosmos`, installs the `aether` command, copies
+`.env.example` to `.env` and opens it in `nano` for you to fill in (domain,
+database, R2, admin account), then builds and starts everything. Expect 5–10
+minutes, most of it the container build.
+
+You write `.env` yourself, so you can re-open it with `nano .env` and re-run
+`./install.sh` as many times as it takes — nothing is hidden in a wizard's state.
+`SESSION_SECRET` is the one value you leave alone: the install generates it.
 
 It is safe to re-run: an existing checkout takes the update path instead of being
 cloned over.
@@ -83,6 +88,7 @@ AETHER_DIR=/srv/aether  bash setup.sh   # install somewhere else
 AETHER_BRANCH=dev       bash setup.sh   # a different branch
 AETHER_NO_FIREWALL=1    bash setup.sh   # leave ufw alone
 AETHER_NO_INSTALL=1     bash setup.sh   # clone and stop, configure by hand
+AETHER_WIZARD=1         bash setup.sh   # answer prompts instead of editing .env
 ```
 
 ### Doing it by hand instead
@@ -107,7 +113,9 @@ cd /opt/aether-cosmos
 # when a terminal wraps a pasted block, and the clone then lands in $HOME.
 git clone https://github.com/AFR-projection/Aether-Cosmos.git .
 
-./install.sh --wizard      # or: cp .env.example .env && nano .env && ./install.sh
+cp .env.example .env
+nano .env                  # domain, DATABASE_URL, R2, admin — leave SESSION_SECRET
+./install.sh
 ```
 
 Pasting that whole block at once works only if nothing wraps: a broken line turns
@@ -202,25 +210,31 @@ being installed. `aether` is the surface worth remembering.
 
 ---
 
-## What the installer asks for
+## What you fill into `.env`
 
 Four things. Have them open in a browser tab before you start.
 
-**1. Domain and email** — a bare hostname, and an address Let's Encrypt can warn
+**1. Domain and email** — `DEPLOY_DOMAIN` (a bare hostname), `NEXT_PUBLIC_APP_URL`
+(`https://` + that hostname), and `CERTBOT_EMAIL`, an address Let's Encrypt can warn
 about expiry.
 
-**2. `DATABASE_URL`** — copy it from the Neon dashboard exactly as given.
+**2. `DATABASE_URL`** — copy it from the Neon dashboard exactly as given, on one
+line, ending in `sslmode=require`.
 
 **3. R2 credentials** — account ID, access key ID, secret access key, bucket name,
-and the bucket's public URL.
+and the bucket's public URL. The account ID and access key ID are 32 hex characters,
+the secret is 64 — the install warns when a length looks wrong, because pasting the
+access key ID into both fields is the usual mistake.
 
 **4. Admin account** — username and a password of at least 10 characters. This
 becomes the master account.
 
-The wizard writes them to `/opt/aether-cosmos/.env` and generates `SESSION_SECRET`
-itself. Nothing leaves the machine.
+Everything else in `.env.example` is already correct. `SESSION_SECRET` is generated
+for you when it is still the placeholder, and `NEXT_PUBLIC_APP_URL` /
+`DEPLOY_DOMAIN` are derived from each other when only one is set. Nothing leaves the
+machine.
 
-### Or write `.env` yourself
+The bootstrap opens the file for you, but the sequence by hand is the same:
 
 ```bash
 cd /opt/aether-cosmos
@@ -233,6 +247,20 @@ nano .env
 here — check `ls` before blaming the file. `nano` then happily opens a new empty
 `.env`, which is why an empty editor is the symptom of a failed clone rather
 than a missing template.
+
+### If the install stops at validation
+
+Nothing is lost and there is no need to start over. Fix the line it named and run
+the same command again:
+
+```bash
+cd /opt/aether-cosmos
+nano .env
+./install.sh
+```
+
+`masih nilai contoh dari .env.example` means that key is still the template value.
+`aether doctor` runs the same checks on their own, without building anything.
 
 A production `.env` looks like this:
 
@@ -417,18 +445,18 @@ The installer falls back to `sudo docker` when it has to.
 
 ### `.env` is malformed (stray quote or newline inside a value)
 
-An older version of the wizard could produce:
+A value pasted across two lines produces:
 
 ```env
 R2_SECRET_ACCESS_KEY="
 acf230cb..."
 ```
 
-Repair it in place, or regenerate it:
+Repair it in place, or edit it yourself:
 
 ```bash
-./install.sh --fix-env         # repair
-./install.sh --force-wizard    # start over from the wizard
+./install.sh --fix-env    # normalise to KEY=value, fill defaults, re-validate
+nano .env                 # or just fix the line, then ./install.sh
 ```
 
 ### Uploads fail with a CORS error

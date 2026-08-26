@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --fix-env    Perbaiki .env rusak (multiline/quote)"
       echo "  --skip-ssl   Skip SSL (testing saja)"
       echo ""
-      echo "  VPS baru dari nol (install Docker, clone, lalu wizard):"
+      echo "  VPS baru dari nol (install Docker, clone, buka .env, deploy):"
       echo "    curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash"
       echo ""
       echo "  Setelah terinstall semuanya lewat satu perintah: aether help"
@@ -51,6 +51,7 @@ main() {
   if [[ $FIX_ENV -eq 1 ]]; then
     [[ -f "$ENV_FILE" ]] || die "No .env to fix"
     normalize_env_file
+    autofill_env
     load_env
     bash "$SCRIPT_DIR/validate.sh"
     exit $?
@@ -63,6 +64,9 @@ main() {
     require_env_file
     ok "Using .env"
     normalize_env_file
+    # Fill in what can be derived from what the operator typed, so a hand-written
+    # .env does not fail validation over NODE_ENV or a missing SESSION_SECRET.
+    autofill_env
   fi
 
   load_env
