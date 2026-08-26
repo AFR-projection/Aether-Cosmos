@@ -1,8 +1,8 @@
-# Web Application Security Assessment — StorageByAFR / Aether Cosmos ByAFR
+# Web Application Security Assessment — Aether Cosmos ByAFR
 
 | | |
 |---|---|
-| **Target** | StorageByAFR / Aether Cosmos ByAFR — Next.js 16 App Router, PostgreSQL (Neon), Cloudflare R2, Redis |
+| **Target** | Aether Cosmos ByAFR — Next.js 16 App Router, PostgreSQL (Neon), Cloudflare R2, Redis |
 | **Scope** | Full source tree at `C:\Users\User\Documents\StrogeByAFR` (branch `main`, v0.4.0) — authentication, session management, authorization, upload/download, public sharing, admin console, OAuth 2.1 + API keys, and the Second Brain MCP surface |
 | **Authorization** | Owner-authorized white-box review. No third-party system was touched. |
 | **Method** | OWASP WSTG, adapted to source-level review (see *Methodology*) |

@@ -51,7 +51,12 @@ export function resolvePublicOrigin(request?: Request): string {
   }
 
   if (envUrl) return envUrl;
-  return "https://storage.dataku.id";
+  // Last resort: nothing in the env, no usable request headers. It must be a
+  // host this deployment actually controls, never a leftover domain — this
+  // value ends up in the OAuth discovery documents and in authorize redirects,
+  // so a stale hostname here hands users off to somewhere else entirely.
+  // Same default as `oauthBaseUrl` in lib/oauth/constants.ts.
+  return "http://localhost:3000";
 }
 
 export function isHttpsPublicUrl(): boolean {

@@ -26,7 +26,7 @@ Complete guide for installing and configuring Aether Cosmos ByAFR for local deve
 
 ```bash
 git clone <repo-url>
-cd storage-by-afr
+cd Aether-Cosmos
 npm install
 ```
 
@@ -102,7 +102,7 @@ Use configuration from `docker/r2-cors.json`:
 Or via Wrangler CLI:
 
 ```bash
-wrangler r2 bucket cors set strogebyafr --file docker/r2-cors.json
+wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
 ```
 
 ### 5. Start Development

@@ -72,7 +72,9 @@ run_wizard() {
   require_nonempty "R2 Access Key ID" R2_ACCESS_KEY_ID
   prompt_secret_into "R2 Secret Access Key" R2_SECRET_ACCESS_KEY
   require_secret_nonempty "R2 Secret Access Key" R2_SECRET_ACCESS_KEY
-  prompt_into "R2 Bucket name" R2_BUCKET_NAME "storage-by-afr"
+  # Default hanya untuk install baru. Deployment yang sudah jalan WAJIB
+  # mengetik nama bucket lamanya — nama bucket bagian dari alamat objek.
+  prompt_into "R2 Bucket name" R2_BUCKET_NAME "aether-cosmos"
   prompt_into "R2 Public URL (https://pub-xxx.r2.dev)" R2_PUBLIC_URL
   require_nonempty "R2 Public URL" R2_PUBLIC_URL
 

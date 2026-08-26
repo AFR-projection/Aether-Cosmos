@@ -47,7 +47,7 @@ const focus = vi.fn();
 /** A window just complete enough for the three globals this module touches. */
 function stubWindow(availWidth: number, availHeight: number): void {
   vi.stubGlobal("window", {
-    location: { origin: "https://storage.byafr.dev" },
+    location: { origin: "https://aether.byafr.dev" },
     screen: { availWidth, availHeight },
     open,
   });
@@ -127,7 +127,7 @@ describe("memoryHref", () => {
 describe("nodeShareUrl", () => {
   it("is absolute and reopens the graph centred on the node", () => {
     expect(nodeShareUrl(BRAIN, node({ id: "memory-9" }))).toBe(
-      `https://storage.byafr.dev${GRAPH_POPUP_PATH}?brain=${BRAIN}&focus=memory-9`
+      `https://aether.byafr.dev${GRAPH_POPUP_PATH}?brain=${BRAIN}&focus=memory-9`
     );
   });
 

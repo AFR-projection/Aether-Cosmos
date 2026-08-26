@@ -44,8 +44,8 @@ The whole sequence, if you already know what goes in `.env`:
 
 ```bash
 ssh ubuntu@YOUR-VPS-IP
-git clone <repo-url> /opt/storage-by-afr
-cd /opt/storage-by-afr
+git clone <repo-url> /opt/aether-cosmos
+cd /opt/aether-cosmos
 chmod +x install.sh deploy.sh update.sh
 
 cp .env.example .env
@@ -87,8 +87,8 @@ will time out even though `ufw` looks correct.
 ssh ubuntu@YOUR-VPS-IP
 sudo apt update && sudo apt install -y git curl
 
-git clone <repo-url> /opt/storage-by-afr
-cd /opt/storage-by-afr
+git clone <repo-url> /opt/aether-cosmos
+cd /opt/aether-cosmos
 chmod +x install.sh deploy.sh update.sh
 
 cp .env.example .env
@@ -107,7 +107,7 @@ DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 R2_ACCOUNT_ID=...
 R2_ACCESS_KEY_ID=...
 R2_SECRET_ACCESS_KEY=...
-R2_BUCKET_NAME=strogebyafr
+R2_BUCKET_NAME=aether-cosmos
 R2_PUBLIC_URL=https://pub-xxxx.r2.dev
 
 MASTER_USERNAME=admin
@@ -211,7 +211,7 @@ it survives restarts.
 Three lines, no extra steps:
 
 ```bash
-cd /opt/storage-by-afr
+cd /opt/aether-cosmos
 git pull            # fetch the latest code
 ./update.sh         # backup → validate → rebuild → sync schema → health check
 ```
@@ -219,7 +219,7 @@ git pull            # fetch the latest code
 `./update.sh` runs `git pull` itself, so this is equivalent:
 
 ```bash
-cd /opt/storage-by-afr && ./update.sh
+cd /opt/aether-cosmos && ./update.sh
 ```
 
 It backs up `.env` and the Nginx config, rebuilds the containers, syncs the
@@ -252,7 +252,7 @@ Three ways out, in order of preference:
 **2. Stash and rebase** — keeps the local changes:
 
 ```bash
-cd /opt/storage-by-afr
+cd /opt/aether-cosmos
 git stash                       # set local changes aside
 git fetch origin
 git rebase origin/main          # or origin/master
@@ -263,7 +263,7 @@ git stash pop                   # reapply; resolve conflicts by hand if any
 **3. Manual reset** — same effect as option 1, done explicitly:
 
 ```bash
-cd /opt/storage-by-afr
+cd /opt/aether-cosmos
 git fetch origin
 git reset --hard origin/main    # discards all local changes
 ./update.sh

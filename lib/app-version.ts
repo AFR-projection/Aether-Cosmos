@@ -24,10 +24,14 @@ export const APP_VERSION_LABEL = `v${APP_VERSION}`;
  *   - the mail key-derivation salt in `lib/email/crypto.ts` — changing it makes
  *     every stored Gmail App Password undecryptable, and it is invisible to users;
  *   - the `storagebyafr:` DOM event in `lib/system/quick-actions.ts` and the
- *     `sbyafr_*` storage keys in `lib/activity/*` — renaming these silently drops
+ *     `sbyafr_*` storage keys in `lib/activity/*` and
+ *     `components/files/activity-center.tsx` — renaming these silently drops
  *     state users already have saved in their browser;
- *   - the deployment identifiers (the PM2 process, the npm package name, the
- *     `/opt/storage-by-afr` path, the R2 bucket) — renaming those breaks the live VPS;
+ *   - the deployment identifiers (the PM2 process in `ecosystem.config.js`, the
+ *     npm package name, the R2 bucket) — renaming those breaks the live VPS or,
+ *     for the bucket, makes every existing object unreachable. The install
+ *     directory is not one of them: the deploy scripts derive `$ROOT` from their
+ *     own location, so it only ever appears as an example in `docs/`;
  *   - `drizzle/*.sql` files that have already been applied.
  * Those are infrastructure, not brand.
  */

@@ -34,7 +34,7 @@ Redis or R2 being down degrades the product; it does not lose data.
 ## Project layout
 
 ```
-storage-by-afr/
+aether-cosmos/
 ├── app/                    # App Router: pages + REST API routes
 │   ├── api/                #   every endpoint (app/api/**/route.ts)
 │   ├── files/              #   file browser
