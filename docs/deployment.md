@@ -44,12 +44,18 @@ The whole sequence, if you already know what goes in `.env`:
 
 ```bash
 ssh ubuntu@YOUR-VPS-IP
+
+# /opt belongs to root, so hand the directory over before cloning — cloning as
+# root instead would leave every file, including .env, owned by root.
+sudo mkdir -p /opt/aether-cosmos
+sudo chown "$USER:$USER" /opt/aether-cosmos
+
 git clone <repo-url> /opt/aether-cosmos
 cd /opt/aether-cosmos
 chmod +x install.sh deploy.sh update.sh
 
 cp .env.example .env
-nano .env          # DATABASE_URL, R2 credentials, domain — see step 3
+nano .env          # DATABASE_URL, R2 credentials, domain — see step 4
 
 ./install.sh
 ```
@@ -62,9 +68,9 @@ In your DNS panel:
 
 | Type | Name | Value |
 |------|------|-------|
-| A | `storage` (or `@`) | YOUR-VPS-IP |
+| A | `aether` (or `@`) | YOUR-VPS-IP |
 
-Propagation takes 5–30 minutes. Verify before continuing — `ping storage.example.com`
+Propagation takes 5–30 minutes. Verify before continuing — `ping aether.example.com`
 must resolve to the VPS IP. Certificate issuance fails if it does not.
 
 ### Step 2 — Open the firewall
@@ -81,11 +87,31 @@ Cloud providers (AWS, Tencent, GCP, …) have a second firewall in the console. 
 ports 80 and 443 in that **security group** as well, or the certificate request
 will time out even though `ufw` looks correct.
 
-### Step 3 — Write `.env` and install
+### Step 3 — Install Docker
+
+`./install.sh` builds and runs everything in containers, so Docker and the Compose
+plugin have to exist first. It refuses to start without them.
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"
+newgrp docker            # or log out and back in
+docker compose version   # must print a version
+```
+
+Without the group membership the scripts still work — they fall back to
+`sudo docker` and say so — but every container command then needs sudo.
+
+### Step 4 — Write `.env` and install
 
 ```bash
 ssh ubuntu@YOUR-VPS-IP
 sudo apt update && sudo apt install -y git curl
+
+# /opt belongs to root. Without this the clone fails with
+# "could not create work tree dir '/opt/aether-cosmos': Permission denied".
+sudo mkdir -p /opt/aether-cosmos
+sudo chown "$USER:$USER" /opt/aether-cosmos
 
 git clone <repo-url> /opt/aether-cosmos
 cd /opt/aether-cosmos
@@ -99,8 +125,8 @@ A production `.env` looks like this:
 
 ```env
 NODE_ENV=production
-DEPLOY_DOMAIN=storage.example.com
-CERTBOT_EMAIL=admin@storage.example.com
+DEPLOY_DOMAIN=aether.example.com
+CERTBOT_EMAIL=admin@aether.example.com
 
 DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 
@@ -114,7 +140,7 @@ MASTER_USERNAME=admin
 MASTER_PASSWORD=password-at-least-10-characters
 SESSION_SECRET=random-64-character-hex
 
-NEXT_PUBLIC_APP_URL=https://storage.example.com
+NEXT_PUBLIC_APP_URL=https://aether.example.com
 COOKIE_SECURE=true
 HSTS_ENABLED=true
 REDIS_URL=redis://redis:6379
@@ -124,6 +150,12 @@ REDIS_DISABLED=false
 > **`DATABASE_URL` must be one unbroken line** exactly as Neon gives it. A value
 > wrapped by the editor into `...?sslmode>` is the single most common cause of a
 > failed deploy.
+
+> **`DEPLOY_DOMAIN` is a bare hostname**, no `https://` and no trailing path.
+> `NEXT_PUBLIC_APP_URL` is the one that carries the scheme. With a scheme in
+> `DEPLOY_DOMAIN`, `validate.sh` rejects the format, and if it got past there
+> Nginx would emit `server_name https://…`, certbot would be handed
+> `-d https://…`, and the health check would build `https://https://…`.
 
 Every variable, including the optional ones, is documented in
 [Getting Started § Environment variables](getting-started.md#environment-variables-reference).
@@ -161,9 +193,9 @@ A successful run ends with a health report; the labels are `Redis`, `App`,
 ```
 
 `Email` warns rather than fails on a fresh install — see
-[Step 6](#step-6--add-an-email-sender-otp-delivery).
+[Step 7](#step-7--add-an-email-sender-otp-delivery).
 
-### Step 4 — Configure R2 CORS
+### Step 5 — Configure R2 CORS
 
 Browser uploads go straight to R2, so the bucket must accept your origin.
 Uploads fail with a CORS error until this is done.
@@ -175,13 +207,13 @@ Uploads fail with a CORS error until this is done.
 wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
 ```
 
-### Step 5 — Allowlist the VPS in Neon (if required)
+### Step 6 — Allowlist the VPS in Neon (if required)
 
 Neon projects with IP restrictions enabled reject the VPS until it is listed:
 Neon Dashboard → Project → Settings → **IP Allow** → add the VPS public IP. The
 installer prints the IP it connected from when the check fails.
 
-### Step 6 — Add an email sender (OTP delivery)
+### Step 7 — Add an email sender (OTP delivery)
 
 Registration codes, verification codes, and notifications go out over SMTP using
 Gmail senders you add yourself. Until at least one sender is verified, the health
@@ -368,7 +400,7 @@ Repair it in place, or regenerate it:
 ### Uploads fail with a CORS error
 
 - The R2 bucket CORS policy must list your HTTPS origin (see
-  [Step 4](#step-4--configure-r2-cors)).
+  [Step 5](#step-5--configure-r2-cors)).
 - `NEXT_PUBLIC_APP_URL` must match the URL in the browser's address bar.
 
 ### Encrypted files ask for a passphrase and are excluded from ZIPs

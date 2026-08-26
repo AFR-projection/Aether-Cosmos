@@ -205,13 +205,13 @@ its own. Details in
 
 ```bash
 # Discover what a key can do
-curl -H "Authorization: Bearer sk_…" https://storage.example.com/api/v1/me
+curl -H "Authorization: Bearer sk_…" https://aether.example.com/api/v1/me
 
 # List files
-curl -H "Authorization: Bearer sk_…" https://storage.example.com/api/files
+curl -H "Authorization: Bearer sk_…" https://aether.example.com/api/files
 
 # Fetch the OpenAPI document
-curl -H "Authorization: Bearer sk_…" https://storage.example.com/api/v1/openapi
+curl -H "Authorization: Bearer sk_…" https://aether.example.com/api/v1/openapi
 ```
 
 A master key (`skm_`) receives the admin paths in the OpenAPI document as well; a

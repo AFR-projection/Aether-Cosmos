@@ -52,7 +52,7 @@ run_wizard() {
   echo "Tekan Enter untuk nilai default (jika ada)."
   echo
 
-  prompt_into "Domain (contoh: storage.example.com)" DEPLOY_DOMAIN
+  prompt_into "Domain (contoh: aether.example.com)" DEPLOY_DOMAIN
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN#https://}"
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN#http://}"
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN%%/*}"

@@ -4,7 +4,7 @@ import { MASTER_API_ENDPOINTS } from "@/lib/api/master-v1-docs";
 import { APP_NAME } from "@/lib/app-version";
 
 export function buildOpenApiSpec(includeAdmin = false) {
-  const baseUrl = appPublicUrl() || "https://storage.example.com";
+  const baseUrl = appPublicUrl() || "https://aether.example.com";
   const endpoints = includeAdmin
     ? [...API_V1_ENDPOINTS, ...MASTER_API_ENDPOINTS.filter((e) => e.path.startsWith("/api/admin"))]
     : API_V1_ENDPOINTS;
