@@ -1,26 +1,12 @@
-const MAGIC_BYTES: Record<string, number[][]> = {
-  "image/jpeg": [[0xff, 0xd8, 0xff]],
-  "image/png": [[0x89, 0x50, 0x4e, 0x47]],
-  "image/gif": [[0x47, 0x49, 0x46, 0x38]],
-  "image/webp": [[0x52, 0x49, 0x46, 0x46]],
-  "image/bmp": [[0x42, 0x4d]],
-  "video/mp4": [[0x00, 0x00, 0x00]],
-  "video/webm": [[0x1a, 0x45, 0xdf, 0xa3]],
-  "video/quicktime": [[0x00, 0x00, 0x00]],
-  "video/x-msvideo": [[0x52, 0x49, 0x46, 0x46]],
-  "audio/mpeg": [[0xff, 0xfb], [0xff, 0xf3], [0xff, 0xf2], [0x49, 0x44, 0x33]],
-  "audio/wav": [[0x52, 0x49, 0x46, 0x46]],
-  "audio/ogg": [[0x4f, 0x67, 0x67, 0x53]],
-  "audio/webm": [[0x1a, 0x45, 0xdf, 0xa3]],
-  "audio/mp4": [[0x00, 0x00, 0x00]],
-  "application/pdf": [[0x25, 0x50, 0x44, 0x46]],
-  "application/zip": [[0x50, 0x4b, 0x03, 0x04]],
-  "application/x-rar-compressed": [[0x52, 0x61, 0x72, 0x21]],
-  "application/x-7z-compressed": [[0x37, 0x7a, 0xbc, 0xaf]],
-  "application/msword": [[0xd0, 0xcf, 0x11, 0xe0]],
-  "application/vnd.ms-excel": [[0xd0, 0xcf, 0x11, 0xe0]],
-  "application/vnd.ms-powerpoint": [[0xd0, 0xcf, 0x11, 0xe0]],
-};
+/*
+ * There used to be a MAGIC_BYTES lookup table here, unreferenced by anything and
+ * already out of step with the detector below it — it claimed `video/mp4` starts with
+ * `00 00 00` (the real check is the `ftyp` box at offset 4) and listed
+ * `application/vnd.ms-excel` separately when a CFB header cannot tell Word from Excel.
+ * A second, wrong copy of the signatures is worse than none, and the table's shape
+ * cannot express the offsets these formats actually need, so the checks in
+ * `detectMimeFromBytes` are the only source of truth.
+ */
 
 export interface FileValidationResult {
   valid: boolean;
@@ -34,12 +20,12 @@ export function validateFileMagicBytes(
 ): FileValidationResult {
   const bytes = new Uint8Array(buffer);
 
-  // File terlalu kecil — skip validation, biarkan saja
+  // Too few bytes to sniff — nothing to check, let it through.
   if (bytes.length < 4) {
     return { valid: true, detectedMime: null };
   }
 
-  // Text types — tidak ada magic bytes yang reliable, langsung valid
+  // Text types have no reliable magic bytes, so they are taken at their word.
   if (
     claimedMimeType.startsWith("text/") ||
     claimedMimeType === "application/json" ||
@@ -49,21 +35,20 @@ export function validateFileMagicBytes(
     return { valid: true, detectedMime: claimedMimeType };
   }
 
-  // Coba deteksi magic bytes
   const detected = detectMimeFromBytes(bytes);
 
-  // Jika tidak bisa deteksi — tidak masalah, biarkan saja
+  // Unrecognised signature is not a problem in itself — most formats aren't listed here.
   if (!detected) {
     return { valid: true, detectedMime: null };
   }
 
-  // Jika terdeteksi dan cocok dengan claimed MIME — valid
+  // Detected and consistent with what the client claimed.
   if (isMimeMatch(detected, claimedMimeType)) {
     return { valid: true, detectedMime: detected };
   }
 
-  // Mismatch — tapi TETAP izinkan upload (hanya log warning)
-  // Contoh: user klaim "application/octet-stream" tapi isinya JPEG → tidak masalah
+  // A mismatch still uploads — it is reported as a warning, not a refusal. A client that
+  // says "application/octet-stream" for a JPEG is being vague, not malicious.
   return {
     valid: true,
     detectedMime: detected,

@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { webhooks } from "@/lib/db/schema";
+import { parseWebhookUrl } from "@/lib/webhooks/ssrf";
 
 export const WEBHOOK_EVENTS = ["upload", "delete", "share"] as const;
 export type WebhookEventName = (typeof WEBHOOK_EVENTS)[number];
@@ -82,29 +83,14 @@ export async function deleteWebhook(userId: string, id: string): Promise<boolean
 }
 
 /**
- * Basic SSRF/format guard for user-supplied callback URLs: HTTPS only in
- * production-ish contexts, and reject obvious internal targets. http://localhost
- * stays allowed so developers can test locally.
+ * Synchronous shape check kept for callers that only need to reject a malformed
+ * or obviously-internal URL without touching DNS.
+ *
+ * It is NOT sufficient on its own: a hostname that resolves to a private
+ * address passes here. Anything that is about to open a socket must go through
+ * `assertSafeWebhookTarget` / `fetchWebhook` in `lib/webhooks/ssrf.ts`.
  */
 export function validateWebhookUrl(raw: string): { ok: true; url: string } | { ok: false; error: string } {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return { ok: false, error: "Invalid URL" };
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    return { ok: false, error: "URL must use http or https" };
-  }
-  const host = url.hostname.toLowerCase();
-  const isLoopback =
-    host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
-  if (url.protocol === "http:" && !isLoopback) {
-    return { ok: false, error: "Use https for non-local URLs" };
-  }
-  // Block link-local / metadata endpoints outright.
-  if (host === "169.254.169.254" || host.endsWith(".internal")) {
-    return { ok: false, error: "That host is not allowed" };
-  }
-  return { ok: true, url: url.toString() };
+  const parsed = parseWebhookUrl(raw);
+  return parsed.ok ? { ok: true, url: parsed.url } : { ok: false, error: parsed.error };
 }

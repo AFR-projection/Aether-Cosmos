@@ -1,6 +1,6 @@
 # API Reference
 
-The REST API of Storage ByAFR: how requests authenticate, what every response
+The REST API of Aether Cosmos ByAFR: how requests authenticate, what every response
 looks like, and which endpoint families exist.
 
 **The machine-readable spec served by the running app is authoritative:**

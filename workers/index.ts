@@ -22,6 +22,10 @@ import {
   webhooks,
 } from "../lib/db/schema";
 import { QUEUE_NAME } from "../lib/queue";
+import { buildTrimArgs, chooseImageEncoder, containerExtensionFor, DEFAULT_EDIT_QUALITY } from "../lib/files/media-edit";
+import { EDIT_INPUT_MAX_PIXELS } from "../lib/files/edit-limits";
+import { WEBHOOK_USER_AGENT } from "../lib/webhooks/constants";
+import { fetchWebhook } from "../lib/webhooks/ssrf";
 import { runScheduledCleanups } from "./cleanup";
 import { enrichBrain, enrichMemory, ENRICH_SWEEP_LIMIT } from "../lib/brain/enrich/enrich-service";
 import { relateJobId, runRelateBrainJob, runRelateMemoryJob } from "../lib/brain/graph/relate-jobs";
@@ -256,13 +260,68 @@ async function generateThumbnail(fileId: string, r2Key: string, mimeType: string
   }
 }
 
+/**
+ * Re-compress an image in place, keeping its own format.
+ *
+ * Nothing enqueues this today — the edit route compresses inline so it can report the
+ * result — but it stays honest about format: writing JPEG bytes under a `.png` name
+ * breaks every later read of the file.
+ */
 async function compressImage(fileId: string, r2Key: string, mimeType: string) {
   const buffer = await downloadFromR2(r2Key);
-  const output = await sharp(buffer).jpeg({ quality: 80 }).toBuffer();
-  await uploadToR2(r2Key, output, mimeType);
-  await db.update(files).set({ sizeBytes: output.length }).where(eq(files.id, fileId));
+  const encoder = chooseImageEncoder(mimeType);
+  const pipeline = sharp(buffer, { limitInputPixels: EDIT_INPUT_MAX_PIXELS });
+  const output = await (encoder.format === "png"
+    ? pipeline.png({ compressionLevel: 9, palette: true, quality: DEFAULT_EDIT_QUALITY })
+    : encoder.format === "webp"
+      ? pipeline.webp({ quality: DEFAULT_EDIT_QUALITY })
+      : encoder.format === "avif"
+        ? pipeline.avif({ quality: DEFAULT_EDIT_QUALITY })
+        : pipeline.jpeg({ quality: DEFAULT_EDIT_QUALITY, mozjpeg: true })
+  ).toBuffer();
+
+  await uploadToR2(r2Key, output, encoder.mimeType);
+  const [row] = await db
+    .update(files)
+    .set({ sizeBytes: output.length, updatedAt: new Date() })
+    .where(eq(files.id, fileId))
+    .returning({ userId: files.userId });
+  if (row) await recomputeUsedBytes(row.userId);
 }
 
+/**
+ * Recompute an account's stored bytes from the rows that actually count.
+ *
+ * Anything that rewrites an object in place changes the number the quota is read from,
+ * and a `sizeBytes` update on its own leaves `users.usedBytes` drifting.
+ */
+async function recomputeUsedBytes(userId: string) {
+  const [usage] = await db
+    .select({ total: drizzleSql<number>`COALESCE(SUM(${files.sizeBytes}), 0)` })
+    .from(files)
+    .where(
+      and(
+        eq(files.userId, userId),
+        drizzleSql`deleted_at IS NULL`,
+        inArray(files.status, ["ready", "legacy_unverified"])
+      )
+    );
+  await db
+    .update(users)
+    .set({ usedBytes: Number(usage?.total ?? 0), updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+/**
+ * Cut a clip down to a single window, in place.
+ *
+ * `PUT /api/files/edit` has already checked the window and taken a version snapshot,
+ * which is the only way back from here. The container is preserved because the streams
+ * are copied rather than re-encoded — see `buildTrimArgs` for why that is worth the
+ * keyframe granularity, and `containerExtensionFor` for why the extension matters:
+ * the output extension is what picks the muxer, and Matroska packets do not go into
+ * an `.mp4`.
+ */
 async function trimMedia(
   fileId: string,
   r2Key: string,
@@ -270,24 +329,37 @@ async function trimMedia(
   startSeconds: number,
   endSeconds: number
 ) {
+  const extension = containerExtensionFor(mimeType);
+  // The route refuses these, so a job carrying one is stale. Doing nothing is better
+  // than remuxing into a container that cannot hold the streams.
+  if (!extension) return;
+
   const buffer = await downloadFromR2(r2Key);
   const fs = await import("fs/promises");
-  const tmpIn = tmpPath(`${fileId}-trim-in`);
-  const ext = mimeType.includes("video") ? "mp4" : "mp3";
-  const tmpOut = tmpPath(`${fileId}-trim-out.${ext}`);
+  const tmpIn = tmpPath(`${fileId}-trim-in.${extension}`);
+  const tmpOut = tmpPath(`${fileId}-trim-out.${extension}`);
   await fs.writeFile(tmpIn, buffer);
 
   try {
-    await execFileAsync("ffmpeg", [
-      "-i", tmpIn,
-      "-ss", String(startSeconds),
-      "-to", String(endSeconds),
-      "-c", "copy",
-      "-y", tmpOut,
-    ]);
+    await execFileAsync(
+      "ffmpeg",
+      buildTrimArgs({ inputPath: tmpIn, outputPath: tmpOut, startSeconds, endSeconds })
+    );
     const output = await fs.readFile(tmpOut);
+    // A seek past the last keyframe can produce a valid, empty container. Writing that
+    // back would replace the caller's clip with nothing.
+    if (output.length === 0) throw new Error("ffmpeg produced an empty file");
+
     await uploadToR2(r2Key, output, mimeType);
-    await db.update(files).set({ sizeBytes: output.length }).where(eq(files.id, fileId));
+    const [row] = await db
+      .update(files)
+      .set({ sizeBytes: output.length, updatedAt: new Date() })
+      .where(eq(files.id, fileId))
+      .returning({ userId: files.userId });
+    if (row) await recomputeUsedBytes(row.userId);
+
+    // The poster frame was taken from a part of the clip that may no longer exist.
+    await generateThumbnail(fileId, r2Key, mimeType);
   } finally {
     await fs.unlink(tmpIn).catch(() => {});
     await fs.unlink(tmpOut).catch(() => {});
@@ -301,12 +373,14 @@ async function deliverWebhook(data: {
   body: string;
 }) {
   const signature = createHmac("sha256", data.secret).update(data.body).digest("hex");
-  const res = await fetch(data.url, {
+  // Re-validated at send time (and on every redirect hop): the row may predate
+  // the current SSRF policy, and DNS can move under a URL after creation.
+  const res = await fetchWebhook(data.url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Webhook-Signature": `sha256=${signature}`,
-      "User-Agent": "StrogeByAFR-Webhook/1.0",
+      "User-Agent": WEBHOOK_USER_AGENT,
     },
     body: data.body,
     signal: AbortSignal.timeout(15_000),
@@ -510,14 +584,7 @@ async function processDeletion(deletionJobId: string): Promise<void> {
       `);
     }
 
-    const [usage] = await db.select({ total: drizzleSql<number>`COALESCE(SUM(${files.sizeBytes}), 0)` })
-      .from(files).where(and(
-        eq(files.userId, claimed.userId),
-        drizzleSql`deleted_at IS NULL`,
-        inArray(files.status, ["ready", "legacy_unverified"])
-      ));
-    await db.update(users).set({ usedBytes: Number(usage?.total ?? 0), updatedAt: new Date() })
-      .where(eq(users.id, claimed.userId));
+    await recomputeUsedBytes(claimed.userId);
 
     await db.update(deletionJobs).set({
       status: "completed",

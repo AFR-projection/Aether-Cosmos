@@ -1,22 +1,45 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
-import { apiFetch } from "@/lib/api/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
-import { AdminStatCard } from "@/components/admin/admin-stat-card";
-import { formatBytes, formatDate } from "@/lib/utils";
-import {
-  Users, FileText, HardDrive, Share2, Activity, Upload,
-  Download, Shield, TrendingUp,
-  CheckCircle, XCircle, BarChart3, Zap, Database, Server, Cpu,
-} from "lucide-react";
+import Link from "next/link";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
-import Link from "next/link";
+import {
+  Activity,
+  ArrowUpRight,
+  BarChart3,
+  Cpu,
+  Database,
+  Download,
+  FileText,
+  Gauge,
+  HardDrive,
+  KeyRound,
+  Server,
+  Share2,
+  Shield,
+  TrendingUp,
+  Upload,
+  Users,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  AdminEmpty,
+  AdminHeader,
+  AdminMetric,
+  AdminPanel,
+  Chip,
+  Meter,
+  Skeleton,
+  StatusDot,
+  type Tone,
+} from "@/components/admin/admin-ui";
+import { auditAction } from "@/lib/admin/audit-actions";
+import { apiFetch } from "@/lib/api/client";
+import { formatBytes, formatDate } from "@/lib/utils";
 
 interface AdminStats {
   users: { total: number; active: number; suspended: number };
@@ -58,32 +81,17 @@ interface AdminStats {
   };
 }
 
-const actionIcons: Record<string, typeof Upload> = {
-  upload: Upload,
-  download: Download,
-  delete: XCircle,
-  login: Shield,
-  create: FileText,
-  restore: CheckCircle,
-  share: Share2,
-  impersonate: Users,
-};
-
-const actionColors: Record<string, string> = {
-  upload: "bg-emerald-500/10 text-emerald-500",
-  download: "bg-blue-500/10 text-blue-500",
-  delete: "bg-red-500/10 text-red-500",
-  login: "bg-violet-500/10 text-violet-500",
-  create: "bg-cyan-500/10 text-cyan-500",
-  restore: "bg-amber-500/10 text-amber-500",
-  share: "bg-pink-500/10 text-pink-500",
-  impersonate: "bg-orange-500/10 text-orange-500",
-};
-
 // Categorical palette — validated colorblind-safe (ΔE) in both light & dark,
 // contrast ≥ 3:1 vs surface. Paired with a legend + direct labels (identity is
 // never color-alone). Do not reorder: colors follow entity slots, not rank.
 const MIME_COLORS = ["#059669", "#2563eb", "#d97706", "#7c3aed", "#dc2626", "#0891b2"];
+
+/** Storage capacity reads danger past 90% and warning past 75% of the pool. */
+function capacityTone(ratio: number): Tone {
+  if (ratio >= 0.9) return "danger";
+  if (ratio >= 0.75) return "warning";
+  return "success";
+}
 
 export default function AdminOverviewPage() {
   const { data: stats, isLoading } = useQuery({
@@ -95,429 +103,487 @@ export default function AdminOverviewPage() {
     refetchInterval: 15000, // Live — auto-refresh every 15 seconds
   });
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-28 skeleton rounded-2xl" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  if (isLoading && !stats) return <OverviewSkeleton />;
 
-  const storagePct = stats?.storage.quota
-    ? Math.min((stats.storage.used / stats.storage.quota) * 100, 100)
-    : 0;
+  const used = stats?.storage.used ?? 0;
+  const quota = stats?.storage.quota ?? 0;
+  const ratio = quota > 0 ? Math.min(used / quota, 1) : 0;
+  const storagePct = ratio * 100;
+  const free = Math.max(quota - used, 0);
+  const growth = stats?.storageGrowth ?? [];
+  const categories = stats?.byCategory ?? [];
+  const topUsers = stats?.topUsers ?? [];
+  const recent = stats?.recentActivity ?? [];
+  const byType = stats?.activity.byType ?? [];
 
   return (
-    <div className="space-y-6">
-      <AdminPageHeader
-        title="System Overview"
-        subtitle="Real-time platform statistics and health monitoring"
+    <div className="space-y-5">
+      <AdminHeader
+        icon={Gauge}
+        kicker="Overview"
+        title="System overview"
+        lede="What the platform is doing right now — accounts, storage, traffic, and the services behind them. Every figure refreshes on its own every 15 seconds."
         live
-        liveLabel="Live • auto-refreshes every 15s"
+        liveLabel="Live · 15s"
       />
 
-      {/* System Health */}
       {stats?.system && <SystemHealth system={stats.system} />}
 
-      {/* Primary Stats */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <AdminStatCard
-          label="Total Users"
-          value={stats?.users.total ?? 0}
+      {/* Two rows of four: what exists, then what happened. Keeping them the same
+          shape means the eye can compare down a column instead of re-learning a
+          new card for every number. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <AdminMetric
           icon={Users}
-          gradient="from-violet-500 to-fuchsia-500"
-          iconBg="bg-violet-500/10 text-violet-500"
-          subtitle={`${stats?.users.active ?? 0} active, ${stats?.users.suspended ?? 0} suspended`}
-          delay={0}
+          label="Users"
+          value={stats?.users.total ?? 0}
+          tone="accent"
+          hint={`${stats?.users.active ?? 0} active · ${stats?.users.suspended ?? 0} suspended`}
         />
-        <AdminStatCard
-          label="Total Files"
-          value={stats?.files.total ?? 0}
+        <AdminMetric
           icon={FileText}
-          gradient="from-blue-500 to-cyan-500"
-          iconBg="bg-blue-500/10 text-blue-500"
-          subtitle={`${stats?.files.notes ?? 0} notes, ${stats?.folders ?? 0} folders`}
-          delay={0.06}
+          label="Files"
+          value={stats?.files.total ?? 0}
+          tone="info"
+          hint={`${stats?.files.notes ?? 0} notes · ${stats?.folders ?? 0} folders`}
         />
-        <AdminStatCard
-          label="Storage Used"
-          value={formatBytes(stats?.storage.used ?? 0)}
+        <AdminMetric
           icon={HardDrive}
-          gradient="from-emerald-500 to-teal-500"
-          iconBg="bg-emerald-500/10 text-emerald-500"
-          subtitle={`${storagePct.toFixed(1)}% of ${formatBytes(stats?.storage.quota ?? 0)}`}
-          delay={0.12}
+          label="Storage used"
+          value={formatBytes(used)}
+          tone={capacityTone(ratio)}
+          hint={`${storagePct.toFixed(1)}% of ${formatBytes(quota)} allocated`}
         />
-        <AdminStatCard
-          label="Shared Links"
-          value={stats?.shares ?? 0}
+        <AdminMetric
           icon={Share2}
-          gradient="from-amber-500 to-orange-500"
-          iconBg="bg-amber-500/10 text-amber-500"
-          subtitle={`${stats?.sessions ?? 0} active sessions`}
-          delay={0.18}
+          label="Share links"
+          value={stats?.shares ?? 0}
+          tone="warning"
+          hint="Public links in circulation"
         />
       </div>
 
-      {/* Activity Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <ActivityCard
-          label="Logins (7d)"
-          value={stats?.activity.logins ?? 0}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <AdminMetric
           icon={Shield}
-          color="bg-violet-500/10 text-violet-500"
-          delay={0.24}
+          label="Logins"
+          value={stats?.activity.logins ?? 0}
+          tone="success"
+          hint="Last 7 days"
         />
-        <ActivityCard
-          label="Uploads (7d)"
-          value={stats?.activity.uploads ?? 0}
+        <AdminMetric
           icon={Upload}
-          color="bg-emerald-500/10 text-emerald-500"
-          delay={0.3}
+          label="Uploads"
+          value={stats?.activity.uploads ?? 0}
+          tone="info"
+          hint="Last 7 days"
         />
-        <ActivityCard
-          label="Downloads (7d)"
-          value={stats?.activity.downloads ?? 0}
+        <AdminMetric
           icon={Download}
-          color="bg-blue-500/10 text-blue-500"
-          delay={0.36}
+          label="Downloads"
+          value={stats?.activity.downloads ?? 0}
+          tone="accent"
+          hint="Last 7 days"
+        />
+        <AdminMetric
+          icon={KeyRound}
+          label="Sessions"
+          value={stats?.sessions ?? 0}
+          tone="muted"
+          hint="Signed in right now"
         />
       </div>
 
-      {/* Storage Overview */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
+      <AdminPanel
+        icon={HardDrive}
+        title="Storage pool"
+        sub="Bytes stored against the total quota handed out to accounts"
+        tone={capacityTone(ratio)}
+        tools={
+          <Chip tone={capacityTone(ratio)} mono>
+            {storagePct.toFixed(1)}%
+          </Chip>
+        }
       >
-        <Card className="border-border/50">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <HardDrive className="h-4 w-4 text-muted-foreground" />
-              Storage Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-4 flex justify-between text-sm">
-              <span className="font-semibold">{formatBytes(stats?.storage.used ?? 0)}</span>
-              <span className="text-muted-foreground">of {formatBytes(stats?.storage.quota ?? 0)}</span>
-            </div>
-            <div className="h-4 overflow-hidden rounded-full bg-muted/50">
-              <motion.div
-                className="h-full rounded-full bg-accent-gradient"
-                initial={{ width: 0 }}
-                animate={{ width: `${storagePct}%` }}
-                transition={{ duration: 1.2, ease: "easeOut" }}
-              />
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-4 text-center">
-              <div>
-                <p className="text-2xl font-bold">{formatBytes(stats?.storage.used ?? 0)}</p>
-                <p className="text-xs text-muted-foreground">Used</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{formatBytes((stats?.storage.quota ?? 0) - (stats?.storage.used ?? 0))}</p>
-                <p className="text-xs text-muted-foreground">Free</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{storagePct.toFixed(1)}%</p>
-                <p className="text-xs text-muted-foreground">Utilization</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+        <Meter value={ratio} tone={ratio >= 0.9 ? "danger" : "accent"} />
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <Figure label="Used" value={formatBytes(used)} />
+          <Figure label="Free" value={formatBytes(free)} />
+          <Figure label="Utilisation" value={`${storagePct.toFixed(1)}%`} />
+        </div>
+      </AdminPanel>
 
-      {/* Growth 30d + MIME breakdown */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.42 }}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <AdminPanel
+          icon={TrendingUp}
+          title="Upload growth"
+          sub="Files added per day over the last 30 days"
         >
-          <Card className="border-border/50 h-full">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                Upload growth (30 days)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {(stats?.storageGrowth?.length ?? 0) > 0 ? (
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={stats!.storageGrowth} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="uploadFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.28} />
-                          <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="var(--border)"
-                        vertical={false}
-                      />
-                      <XAxis
-                        dataKey="day"
-                        tickFormatter={formatChartDay}
-                        tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                        tickLine={false}
-                        axisLine={{ stroke: "var(--border)" }}
-                        minTickGap={24}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                        tickLine={false}
-                        axisLine={false}
-                        allowDecimals={false}
-                        width={32}
-                      />
-                      <Tooltip
-                        cursor={{ stroke: "var(--accent)", strokeWidth: 1, strokeDasharray: "4 4" }}
-                        content={<UploadTooltip />}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="uploads"
-                        stroke="var(--accent)"
-                        fill="url(#uploadFill)"
-                        strokeWidth={2.5}
-                        dot={false}
-                        activeDot={{
-                          r: 5,
-                          fill: "var(--accent)",
-                          stroke: "var(--surface)",
-                          strokeWidth: 2,
-                        }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <p className="py-12 text-center text-sm text-muted-foreground">No upload activity yet</p>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
+          {growth.length > 0 ? (
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={growth} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="uploadFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis
+                    dataKey="day"
+                    tickFormatter={formatChartDay}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "var(--border)" }}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                    tickLine={false}
+                    axisLine={false}
+                    allowDecimals={false}
+                    width={32}
+                  />
+                  <Tooltip
+                    cursor={{ stroke: "var(--accent)", strokeWidth: 1, strokeDasharray: "4 4" }}
+                    content={<UploadTooltip />}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="uploads"
+                    stroke="var(--accent)"
+                    fill="url(#uploadFill)"
+                    strokeWidth={2.5}
+                    dot={false}
+                    activeDot={{
+                      r: 5,
+                      fill: "var(--accent)",
+                      stroke: "var(--surface)",
+                      strokeWidth: 2,
+                    }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <AdminEmpty
+              icon={TrendingUp}
+              title="No uploads in the last 30 days"
+              body="The curve draws itself as soon as files start arriving."
+            />
+          )}
+        </AdminPanel>
 
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.44 }}
-        >
-          <Card className="border-border/50 h-full">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Database className="h-4 w-4 text-muted-foreground" />
-                Storage by type
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {(stats?.byCategory?.length ?? 0) > 0 ? (
-                <div className="flex flex-col sm:flex-row items-center gap-4">
-                  <div className="h-48 w-full sm:w-1/2">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={stats!.byCategory}
-                          dataKey="bytes"
-                          nameKey="category"
-                          innerRadius={48}
-                          outerRadius={72}
-                          paddingAngle={2}
-                        >
-                          {stats!.byCategory!.map((_, i) => (
-                            <Cell
-                              key={i}
-                              fill={MIME_COLORS[i % MIME_COLORS.length]}
-                              stroke="var(--surface)"
-                              strokeWidth={2}
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip content={<CategoryTooltip />} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="flex-1 space-y-2 w-full">
-                    {stats!.byCategory!.map((c, i) => (
-                      <div key={c.category} className="flex items-center justify-between text-sm gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="h-2.5 w-2.5 rounded-full shrink-0"
-                            style={{ background: MIME_COLORS[i % MIME_COLORS.length] }}
-                          />
-                          <span className="truncate">{c.category}</span>
-                          <span className="text-xs text-muted-foreground">({c.count})</span>
-                        </div>
-                        <span className="text-muted-foreground shrink-0">{formatBytes(c.bytes)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="py-12 text-center text-sm text-muted-foreground">No files yet</p>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
+        <AdminPanel icon={Database} title="Storage by type" sub="Where the bytes actually sit">
+          {categories.length > 0 ? (
+            <div className="flex flex-col items-center gap-4 sm:flex-row">
+              <div className="h-48 w-full sm:w-1/2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={categories}
+                      dataKey="bytes"
+                      nameKey="category"
+                      innerRadius={48}
+                      outerRadius={72}
+                      paddingAngle={2}
+                    >
+                      {categories.map((c, i) => (
+                        <Cell
+                          key={c.category}
+                          fill={MIME_COLORS[i % MIME_COLORS.length]}
+                          stroke="var(--surface)"
+                          strokeWidth={2}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CategoryTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Direct labels next to the swatches: the slice colour is a
+                  shortcut, never the only way to read the chart. */}
+              <ul className="w-full flex-1 space-y-1.5">
+                {categories.map((c, i) => (
+                  <li key={c.category} className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: MIME_COLORS[i % MIME_COLORS.length] }}
+                      />
+                      <span className="truncate text-[0.78rem] capitalize">{c.category}</span>
+                      <span className="adm-num text-[var(--adm-muted)]">{c.count}</span>
+                    </span>
+                    <span className="adm-num shrink-0 text-[var(--adm-muted)]">
+                      {formatBytes(c.bytes)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <AdminEmpty
+              icon={Database}
+              title="No files yet"
+              body="Once accounts start uploading, this splits the pool by file category."
+            />
+          )}
+        </AdminPanel>
       </div>
 
-      {/* Top Users & Recent Activity */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Top Users */}
-        <motion.div
-          initial={{ opacity: 0, x: -12 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.45 }}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <AdminPanel
+          icon={TrendingUp}
+          title="Heaviest accounts"
+          sub="Ranked by bytes stored, not by file count"
+          tools={<PanelLink href="/admin/users">All users</PanelLink>}
         >
-          <Card className="h-full border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                Top Users by Storage
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {(stats?.topUsers ?? []).map((user, idx) => {
-                  const pct = user.quotaBytes > 0 ? (user.usedBytes / user.quotaBytes) * 100 : 0;
-                  return (
-                    <motion.div
-                      key={user.id}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.5 + idx * 0.05 }}
-                      className="flex items-center gap-3"
-                    >
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-sm font-bold text-accent">
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <Link
-                            href={`/admin/users/${user.id}`}
-                            className="text-sm font-medium truncate hover:underline"
-                          >
-                            {user.username}
-                          </Link>
-                          <span className="text-xs text-muted-foreground">{formatBytes(user.usedBytes)}</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-muted/50">
-                          <div
-                            className="h-full rounded-full bg-accent-gradient"
-                            style={{ width: `${Math.min(pct, 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-                {(stats?.topUsers ?? []).length === 0 && (
-                  <p className="py-4 text-center text-sm text-muted-foreground">No users yet</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+          {topUsers.length > 0 ? (
+            <ol className="space-y-2.5">
+              {topUsers.map((user, idx) => {
+                const share = user.quotaBytes > 0 ? Math.min(user.usedBytes / user.quotaBytes, 1) : 0;
+                return (
+                  <li key={user.id} className="flex items-center gap-3">
+                    <span className="adm-num grid h-7 w-7 shrink-0 place-items-center rounded-[0.55rem] bg-[var(--adm-soft)] font-semibold">
+                      {idx + 1}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="mb-1 flex items-center justify-between gap-2">
+                        <Link
+                          href={`/admin/users/${user.id}`}
+                          className="truncate text-[0.8rem] font-medium hover:text-accent hover:underline"
+                        >
+                          {user.username}
+                        </Link>
+                        <span className="adm-num shrink-0 text-[var(--adm-muted)]">
+                          {formatBytes(user.usedBytes)}
+                          {user.quotaBytes > 0 && ` / ${formatBytes(user.quotaBytes)}`}
+                        </span>
+                      </span>
+                      <Meter value={share} tone={capacityTone(share)} />
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <AdminEmpty
+              icon={Users}
+              title="No accounts yet"
+              body="The first account to store anything shows up here."
+            />
+          )}
+        </AdminPanel>
 
-        {/* Recent Activity */}
-        <motion.div
-          initial={{ opacity: 0, x: 12 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.5 }}
+        <AdminPanel
+          icon={Activity}
+          title="Latest events"
+          sub="The eight most recent entries in the audit log"
+          tools={<PanelLink href="/admin/logs">Full log</PanelLink>}
+          flush
         >
-          <Card className="h-full border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-muted-foreground" />
-                Recent Activity
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-1">
-                {(stats?.recentActivity ?? []).slice(0, 8).map((log, idx) => {
-                  const Icon = actionIcons[log.action] ?? Activity;
-                  const colorClass = actionColors[log.action] ?? "bg-gray-500/10 text-gray-500";
-                  return (
-                    <motion.div
-                      key={log.id}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.55 + idx * 0.03 }}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-accent/5 transition-colors"
+          {recent.length > 0 ? (
+            <ul>
+              {recent.slice(0, 8).map((log) => {
+                const meta = auditAction(log.action);
+                return (
+                  <li key={log.id}>
+                    {/* Each event is a way into the filtered log, so a suspicious
+                        line is one click from its full history. */}
+                    <Link
+                      href={`/admin/logs?action=${encodeURIComponent(log.action)}`}
+                      className="adm-row adm-row--flat flex items-center gap-2.5 px-3 py-2"
+                      data-tone={meta.tone}
                     >
-                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${colorClass}`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium capitalize">{log.action.replace(/_/g, " ")}</span>
-                      </div>
-                      <span className="shrink-0 text-xs text-muted-foreground/60">
+                      <span className="adm-tile__icon">
+                        <meta.icon aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[0.78rem] font-medium">
+                          {meta.label}
+                        </span>
+                        <span className="adm-sub block truncate">{meta.description}</span>
+                      </span>
+                      <span className="adm-num shrink-0 text-[var(--adm-muted)]">
                         {formatDate(log.createdAt, "short")}
                       </span>
-                    </motion.div>
-                  );
-                })}
-                {(stats?.recentActivity ?? []).length === 0 && (
-                  <p className="py-8 text-center text-sm text-muted-foreground">No recent activity</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="p-4">
+              <AdminEmpty
+                icon={Activity}
+                title="Nothing logged yet"
+                body="Sign-ins, uploads and administrative changes all land here."
+              />
+            </div>
+          )}
+        </AdminPanel>
       </div>
 
-      {/* Activity Breakdown */}
-      {stats?.activity.byType && stats.activity.byType.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
+      {byType.length > 0 && (
+        <AdminPanel
+          icon={BarChart3}
+          title="Activity breakdown"
+          sub="Every logged action type over the last 7 days"
         >
-          <Card className="border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                Activity Breakdown (7 days)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {stats.activity.byType.map((item, idx) => {
-                  const Icon = actionIcons[item.action] ?? Activity;
-                  const colorClass = actionColors[item.action] ?? "bg-gray-500/10 text-gray-500";
-                  return (
-                    <motion.div
-                      key={item.action}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 0.65 + idx * 0.05 }}
-                      className="flex items-center gap-3 rounded-xl border border-border/40 p-3"
-                    >
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${colorClass}`}>
-                        <Icon className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="text-lg font-bold">{item.count}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{item.action.replace(/_/g, " ")}</p>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-4">
+            {byType.map((item) => {
+              const meta = auditAction(item.action);
+              return (
+                <Link
+                  key={item.action}
+                  href={`/admin/logs?action=${encodeURIComponent(item.action)}`}
+                  className="adm-tile"
+                  data-tone={meta.tone}
+                  title={meta.description}
+                >
+                  <span className="adm-tile__icon">
+                    <meta.icon aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="adm-tile__value adm-num">{item.count}</span>
+                    <span className="adm-tile__label block truncate">{meta.label}</span>
+                  </span>
+                  <ArrowUpRight
+                    className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--adm-muted)]"
+                    aria-hidden="true"
+                  />
+                </Link>
+              );
+            })}
+          </div>
+        </AdminPanel>
       )}
     </div>
   );
 }
+
+/* ── Small pieces ───────────────────────────────────────────────────────────── */
+
+/** One number in a three-up summary strip. */
+function Figure({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[0.7rem] bg-[var(--adm-inset)] px-2.5 py-2">
+      <p className="adm-num text-[0.9rem] font-semibold">{value}</p>
+      <p className="adm-tile__label">{label}</p>
+    </div>
+  );
+}
+
+/** "See everything" link in a panel header. */
+function PanelLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1 text-[0.72rem] font-medium text-accent hover:underline"
+    >
+      {children}
+      <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+    </Link>
+  );
+}
+
+function OverviewSkeleton() {
+  return (
+    <div className="space-y-5">
+      <Skeleton className="h-8 w-56" />
+      <Skeleton className="h-4 w-80" />
+      <Skeleton className="h-20 w-full" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {["a", "b", "c", "d"].map((k) => (
+          <Skeleton key={k} className="h-20 w-full" />
+        ))}
+      </div>
+      <Skeleton className="h-24 w-full" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    </div>
+  );
+}
+
+/* ── System health ──────────────────────────────────────────────────────────── */
+
+/**
+ * Four services, one verdict. The previous version painted each tile with its own
+ * hue; here colour only ever means state — green up, red down, grey deliberately
+ * off — so "something is wrong" is visible without reading a word.
+ */
+function SystemHealth({ system }: { system: NonNullable<AdminStats["system"]> }) {
+  const services: { label: string; icon: LucideIcon; tone: Tone; value: string; note?: string }[] = [
+    {
+      label: "Database",
+      icon: Database,
+      tone: system.database === "connected" ? "success" : "danger",
+      value: system.database === "connected" ? "Connected" : "Down",
+    },
+    {
+      label: "Cache",
+      icon: Zap,
+      tone:
+        system.redis === "connected" ? "success" : system.redis === "disabled" ? "muted" : "danger",
+      value:
+        system.redis === "connected" ? "Connected" : system.redis === "disabled" ? "Disabled" : "Down",
+      note: system.redis === "disabled" ? "Jobs run in-process" : undefined,
+    },
+    {
+      label: "Web server",
+      icon: Server,
+      tone: "success",
+      value: `Up ${formatUptime(system.uptimeSeconds)}`,
+      note: `Node ${system.nodeVersion}`,
+    },
+    {
+      label: "Memory",
+      icon: Cpu,
+      tone: "info",
+      value: `${system.memoryUsedMB} MB`,
+      note: `Heap ${system.memoryHeapMB} MB`,
+    },
+  ];
+
+  const down = services.filter((s) => s.tone === "danger");
+  const healthy = down.length === 0;
+
+  return (
+    <AdminPanel
+      icon={Server}
+      title="System health"
+      sub={`Environment: ${system.env}`}
+      tone={healthy ? "success" : "danger"}
+      variant={healthy ? undefined : "danger"}
+      tools={
+        <Chip tone={healthy ? "success" : "danger"}>
+          <StatusDot tone={healthy ? "success" : "danger"} ring={healthy} />
+          {healthy ? "All systems operational" : `${down.length} service down`}
+        </Chip>
+      }
+    >
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        {services.map((s) => (
+          <div key={s.label} className="adm-tile" data-tone={s.tone}>
+            <span className="adm-tile__icon">
+              <s.icon aria-hidden="true" />
+            </span>
+            <span className="min-w-0">
+              <span className="adm-tile__label block">{s.label}</span>
+              <span className="adm-tile__value truncate">{s.value}</span>
+              {s.note && <span className="adm-sub block truncate">{s.note}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+    </AdminPanel>
+  );
+}
+
+/* ── Chart helpers ──────────────────────────────────────────────────────────── */
 
 /** "2026-07-13" → "Jul 13" for compact, readable axis ticks. */
 function formatChartDay(value: unknown): string {
@@ -525,6 +591,15 @@ function formatChartDay(value: unknown): string {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s.slice(5);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 /** Theme-aware tooltip — reads surface/border/ink tokens so it's legible in
@@ -541,34 +616,18 @@ function UploadTooltip({
   if (!active || !payload?.length) return null;
   const value = payload[0]?.value ?? 0;
   return (
-    <div
-      className="rounded-xl border px-3 py-2 shadow-lg"
-      style={{
-        background: "var(--surface-elevated)",
-        borderColor: "var(--border)",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-      }}
-    >
-      <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
-        {formatChartDay(label)}
-      </p>
-      <p className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--foreground)" }}>
-        <span className="inline-block h-2 w-4 rounded-full" style={{ background: "var(--accent)" }} />
-        {value} upload{value === 1 ? "" : "s"}
+    <div className="adm-tooltip">
+      <p className="adm-sub">{formatChartDay(label)}</p>
+      <p className="mt-0.5 flex items-center gap-1.5 text-[0.8rem] font-semibold">
+        <span
+          className="inline-block h-2 w-4 rounded-full"
+          style={{ background: "var(--accent)" }}
+        />
+        <span className="adm-num">{value}</span> upload{value === 1 ? "" : "s"}
       </p>
     </div>
   );
 }
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
 /** Theme-aware tooltip for the storage-by-type pie. */
 function CategoryTooltip({
   active,
@@ -580,147 +639,17 @@ function CategoryTooltip({
   if (!active || !payload?.length) return null;
   const item = payload[0];
   return (
-    <div
-      className="rounded-xl border px-3 py-2 shadow-lg"
-      style={{
-        background: "var(--surface-elevated)",
-        borderColor: "var(--border)",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-      }}
-    >
-      <p className="flex items-center gap-1.5 text-sm font-semibold capitalize" style={{ color: "var(--foreground)" }}>
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: item.payload?.fill }} />
+    <div className="adm-tooltip">
+      <p className="flex items-center gap-1.5 text-[0.8rem] font-semibold capitalize">
+        <span
+          className="inline-block h-2.5 w-2.5 rounded-full"
+          style={{ background: item.payload?.fill }}
+        />
         {item.name}
       </p>
-      <p className="mt-0.5 text-xs" style={{ color: "var(--muted-foreground)" }}>
+      <p className="adm-num mt-0.5 text-[var(--adm-muted)]">
         {formatBytes(Number(item.value ?? 0))}
       </p>
     </div>
-  );
-}
-
-function SystemHealth({ system }: { system: NonNullable<AdminStats["system"]> }) {
-  const services = [
-    {
-      label: "Database",
-      icon: Database,
-      ok: system.database === "connected",
-      neutral: false,
-      value: system.database === "connected" ? "Connected" : "Down",
-    },
-    {
-      label: "Cache (Redis)",
-      icon: Zap,
-      ok: system.redis === "connected",
-      neutral: system.redis === "disabled",
-      value:
-        system.redis === "connected" ? "Connected" : system.redis === "disabled" ? "Disabled" : "Down",
-    },
-    {
-      label: "Web Server",
-      icon: Server,
-      ok: true,
-      neutral: false,
-      value: `Up ${formatUptime(system.uptimeSeconds)}`,
-    },
-    {
-      label: "Memory",
-      icon: Cpu,
-      ok: true,
-      neutral: false,
-      value: `${system.memoryUsedMB} MB`,
-    },
-  ];
-
-  const allOk = services.every((s) => s.ok || s.neutral);
-
-  return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-      <Card className="border-border/50">
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2">
-              <Server className="h-4 w-4 text-muted-foreground" />
-              System Health
-            </span>
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                allOk ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
-              }`}
-            >
-              <span
-                className={`size-1.5 rounded-full ${allOk ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`}
-              />
-              {allOk ? "All systems operational" : "Attention needed"}
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {services.map((s) => {
-              const Icon = s.icon;
-              const tone = s.neutral
-                ? "text-muted-foreground"
-                : s.ok
-                  ? "text-emerald-500"
-                  : "text-red-500";
-              return (
-                <div
-                  key={s.label}
-                  className="flex items-center gap-3 rounded-xl border border-border/40 bg-surface/40 p-3"
-                >
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/40 ${tone}`}>
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground/70">{s.label}</p>
-                    <p className={`truncate text-sm font-semibold ${tone}`}>{s.value}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground/60">
-            <span>Node {system.nodeVersion}</span>
-            <span>Env: {system.env}</span>
-            <span>Heap: {system.memoryHeapMB} MB</span>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-}
-
-function ActivityCard({
-  label,
-  value,
-  icon: Icon,
-  color,
-  delay,
-}: {
-  label: string;
-  value: number;
-  icon: typeof Upload;
-  color: string;
-  delay: number;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay }}
-    >
-      <Card className="border-border/50 hover:border-accent/20 transition-colors">
-        <CardContent className="flex items-center gap-4 p-5">
-          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${color}`}>
-            <Icon className="h-6 w-6" />
-          </div>
-          <div>
-            <p className="text-3xl font-bold">{value}</p>
-            <p className="text-sm text-muted-foreground">{label}</p>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
   );
 }

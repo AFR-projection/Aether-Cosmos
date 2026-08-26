@@ -10,9 +10,9 @@ import {
   countWebhooks,
   createWebhook,
   listWebhooks,
-  validateWebhookUrl,
   type WebhookEventName,
 } from "@/lib/webhooks/manage";
+import { assertSafeWebhookTarget, WebhookTargetError } from "@/lib/webhooks/ssrf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,8 +40,15 @@ export async function POST(request: NextRequest) {
     const userId = getEffectiveUserId(sessionUser);
     const body = createSchema.parse(await request.json());
 
-    const check = validateWebhookUrl(body.url);
-    if (!check.ok) return apiError(check.error, 400);
+    // Resolve-and-check here so a private target is refused at creation time
+    // rather than becoming a queued request-forgery job. Delivery re-validates.
+    let url: string;
+    try {
+      url = (await assertSafeWebhookTarget(body.url)).url;
+    } catch (e) {
+      if (e instanceof WebhookTargetError) return apiError(e.message, 400);
+      throw e;
+    }
 
     const existing = await countWebhooks(userId);
     if (existing >= MAX_WEBHOOKS_PER_USER) {
@@ -50,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     const hook = await createWebhook({
       userId,
-      url: check.url,
+      url,
       events: (body.events ?? [...WEBHOOK_EVENTS]) as WebhookEventName[],
     });
 

@@ -6,6 +6,7 @@ import { AlertTriangle, Loader2, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/api/client";
+import { APP_NAME } from "@/lib/app-version";
 
 const STORAGE_SCOPES = ["read", "upload", "download", "write", "delete", "full"] as const;
 const MASTER_SCOPES = [
@@ -168,7 +169,7 @@ export default function OAuthConsentClient() {
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed">
           <span className="font-medium text-foreground">{appLabel}</span> wants to connect to your
-          Storage ByAFR account. Choose what it can do, then allow access.
+          {APP_NAME} account. Choose what it can do, then allow access.
         </p>
 
         {/* Awareness: this grants an outside app direct access to your data */}
@@ -241,7 +242,7 @@ export default function OAuthConsentClient() {
           </p>
         </div>
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex gap-2">
           <Button
             className={grantsDangerous ? "flex-1 bg-amber-600 hover:bg-amber-500 text-white" : "flex-1"}

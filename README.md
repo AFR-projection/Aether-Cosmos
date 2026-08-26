@@ -1,4 +1,4 @@
-# Storage ByAFR
+# Aether Cosmos ByAFR
 
 **v0.4.0** · Self-hosted cloud storage with a Second Brain knowledge layer for AI agents.
 

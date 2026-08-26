@@ -5,21 +5,36 @@ import { useCallback, useEffect, useState, useRef, useMemo, type ElementType } f
 import { QUICK_ACTION_EVENT, type QuickAction } from "@/lib/system/quick-actions";
 import {
   Upload, FolderPlus, FilePlus, Grid3X3, List, Search, Trash2, AlertCircle, FolderUp,
-  Image, Film, Music, FileText, FileArchive, Star, X, CheckSquare, Square,
-  Download, File, Lock, Move, ArrowDownUp, ArrowUp, ArrowDown, Check, PencilRuler,
-  Copy, Scissors, ClipboardPaste, ArrowLeft, FolderOpen,
+  Image, Film, Music, FileText, FileArchive, Star, X, Files, FolderOpen,
+  Download, File, Lock, Move, ArrowDownUp, ArrowUp, ArrowDown, PencilRuler,
+  Copy, Scissors, ClipboardPaste, ArrowLeft, Plus, ChevronDown, PanelLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileGrid } from "./file-grid";
+import { BrowserBreadcrumb, useFolderPath } from "./browser-breadcrumb";
+import {
+  FloatingActionMenu,
+  useFloatingMenu,
+  type FloatingMenuItem,
+} from "@/components/ui/floating-action-menu";
 import { apiFetch } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { File as FileRecord, Folder as FolderRecord } from "@/lib/db/schema";
 import dynamic from "next/dynamic";
-import { DndContext, DragEndEvent } from "@dnd-kit/core";
+import {
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  pointerWithin,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import { FolderCard } from "@/components/folders/folder-card";
-import { getSharedUploadQueue, UploadQueue, traverseDirectory } from "@/lib/upload-queue";
+import { getSharedUploadQueue, UploadQueue, traverseDirectory, type UploadItem } from "@/lib/upload-queue";
 import { requestDownload, downloadZip, requestFolderArchive } from "@/lib/download/download-actions";
 import { EncryptionSetupDialog } from "./encryption-setup-dialog";
 import { MoveToFolderDialog } from "./move-to-folder-dialog";
@@ -27,14 +42,29 @@ import { BulkRenameDialog } from "./bulk-rename-dialog";
 import { useDialogs } from "@/components/ui/dialog-prompts";
 import {
   loadView, saveView, loadSortBy, saveSortBy, loadSortOrder, saveSortOrder,
+  loadTreeOpen, saveTreeOpen, loadTreeWidth, saveTreeWidth,
   SORT_OPTIONS,
 } from "@/lib/files/view-prefs";
 import { sortFiles } from "@/lib/files/sort";
+import { FolderTreeSidebar } from "./folder-tree-sidebar";
+import { folderChildrenQuery } from "@/hooks/use-folder-children";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import {
+  DRAG_ACTIVATION_DISTANCE,
+  describeDrag,
+  planDragMove,
+  readDragSource,
+  type DragSource,
+} from "@/lib/files/drag-move";
+import {
+  collectFolderPaths, chunkPaths, resolveFileFolderIds, splitCommonRoot,
+  type UploadEntry,
+} from "@/lib/files/folder-tree-upload";
 import {
   setClipboard, clearClipboard, getClipboard, useFileClipboard,
 } from "@/lib/files/clipboard";
 import { notify } from "@/lib/system/notify-store";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { recordActivity } from "@/lib/activity/activity-store";
 
 const ActivityCenter = dynamic(
@@ -70,6 +100,17 @@ const FILTER_MIME_MAP: Record<string, string[]> = {
   archive: ["application/zip", "application/x-rar", "application/x-7z", "application/gzip", "application/x-tar"],
 };
 
+/** Actions that mutate the folder's contents, so they need `canEdit`. */
+const NEEDS_EDIT_ACTIONS = new Set(["rename", "move", "duplicate", "copy", "clip-cut"]);
+
+/**
+ * One page of a listing. Both endpoints answer with this shape but page differently:
+ * `/api/files` walks a `createdAt` cursor, `/api/search` ranks by relevance and walks an
+ * OFFSET index, so exactly one of the two tokens is ever non-null.
+ */
+type FilePage = { files: FileRecord[]; nextCursor: string | null; nextPage: number | null };
+const EMPTY_PAGE: FilePage = { files: [], nextCursor: null, nextPage: null };
+
 function matchesFilter(file: FileRecord, filter: FilterKey): boolean {
   if (filter === "all") return true;
   const prefixes = FILTER_MIME_MAP[filter] ?? [];
@@ -78,6 +119,35 @@ function matchesFilter(file: FileRecord, filter: FilterKey): boolean {
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
+/**
+ * What the signed-in viewer may do in this listing.
+ *
+ * Mirrors `FolderCapabilities` from `lib/auth/permissions.ts`. The server refuses on its
+ * own — this only stops the UI from offering buttons that can only end in a 403, which is
+ * what made "view" access feel broken (and let a `view` member believe they could delete
+ * the owner's folder).
+ */
+export type BrowserCaps = {
+  role: "owner" | "view" | "edit";
+  /** Create / rename / move / trash the CONTENT of this folder. */
+  canEdit: boolean;
+  /** Favourite flag + public share links. Owner only. */
+  canOwnerOnlyFlags: boolean;
+  /** Restore from the bin, delete permanently. Owner only. */
+  canPurge: boolean;
+  /** Invite collaborators / change their role. Owner only. */
+  canManageMembers: boolean;
+};
+
+/** Own files: everything is permitted. */
+export const OWNER_CAPS: BrowserCaps = {
+  role: "owner",
+  canEdit: true,
+  canOwnerOnlyFlags: true,
+  canPurge: true,
+  canManageMembers: true,
+};
+
 interface FileBrowserProps {
   folderId?: string | null;
   trash?: boolean;
@@ -85,6 +155,59 @@ interface FileBrowserProps {
   selectedFileId?: string | null;
   isSharedContext?: boolean;
   sharedFolderName?: string;
+  /** Omit on own surfaces; a shared folder passes the capabilities the server resolved. */
+  caps?: BrowserCaps;
+  /** Slot in the shared-folder header — currently the "Leave shared folder" button. */
+  sharedAction?: React.ReactNode;
+}
+
+/** Badge copy for the header, so a member always knows what they are allowed to do. */
+const ROLE_BADGE: Record<BrowserCaps["role"], { label: string; className: string } | null> = {
+  owner: null,
+  view: {
+    label: "View only",
+    className: "border-warning/25 bg-warning/10 text-warning",
+  },
+  edit: {
+    label: "Can edit",
+    className: "border-success/25 bg-success/10 text-success",
+  },
+};
+
+// ─── Folder-tree creation ───────────────────────────────────────────────────
+
+/**
+ * Create every directory a set of uploaded files needs, in chunks, and return the
+ * path → id map.
+ *
+ * Throws on the first chunk the server refuses. That matters: `apiFetch` resolves
+ * on a 4xx, so the previous code read a rejected request as "no folders" and let
+ * every file fall back to the root folder — the upload reported success and the
+ * project arrived flat. A folder tree that cannot be created is an upload that must
+ * not start.
+ */
+async function createFolderTree(
+  relativePaths: string[],
+  rootFolderId: string | null
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const paths = collectFolderPaths(relativePaths);
+  if (paths.length === 0) return map;
+
+  // Sequential, not parallel: two chunks that share an ancestor would otherwise
+  // both find it missing and insert it twice.
+  for (const chunk of chunkPaths(paths)) {
+    const res = await apiFetch<{ folders: Record<string, string> }>("/api/folders/batch", {
+      method: "POST",
+      body: JSON.stringify({ paths: chunk, rootFolderId }),
+    });
+    if (!res.success || !res.data) {
+      throw new Error(res.error ?? "Couldn't create the folders for this upload");
+    }
+    for (const [path, id] of Object.entries(res.data.folders)) map.set(path, id);
+  }
+
+  return map;
 }
 
 // ─── DockButton ─────────────────────────────────────────────────────────────
@@ -101,21 +224,26 @@ function DockButton({
   danger?: boolean;
 }) {
   return (
-    <button
+    <Button
+      type="button"
+      variant={danger ? "destructive" : "ghost"}
+      size="sm"
       onClick={onClick}
       title={label}
-      className={cn(
-        "flex h-8 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition-colors",
-        danger
-          ? "text-destructive hover:bg-destructive/10"
-          : "text-foreground/70 hover:bg-muted/70 hover:text-foreground",
-      )}
+      // The text label is `sm:inline` only, so below that breakpoint this is an
+      // icon-only control: without an explicit name a screen reader announces
+      // nothing but "button". `title` is not a reliable substitute.
+      aria-label={label}
+      className={cn("shrink-0 cursor-pointer gap-1.5 rounded-xl px-2.5", danger && "border-transparent")}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
       <span className="hidden sm:inline">{label}</span>
-    </button>
+    </Button>
   );
 }
+
+/** One toolbar control height, so search / buttons / toggles line up exactly. */
+const CONTROL_H = "h-9";
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -126,9 +254,14 @@ export function FileBrowser({
   selectedFileId = null,
   isSharedContext = false,
   sharedFolderName = "",
+  caps = OWNER_CAPS,
+  sharedAction = null,
 }: FileBrowserProps) {
   const queryClient = useQueryClient();
   const { askPrompt, askConfirm, dialogs } = useDialogs();
+  // Only framer-motion needs this: the global `prefers-reduced-motion` block in
+  // globals.css already neutralises CSS animations, but JS-driven springs escape it.
+  const reduceMotion = useReducedMotion();
 
   // View + search + filter + sort (view & sort persist across sessions)
   const [view, setView] = useState<"grid" | "list">(() => loadView());
@@ -136,12 +269,27 @@ export function FileBrowser({
   const [typeFilter, setTypeFilter] = useState<FilterKey>("all");
   const [sortBy, setSortBy] = useState<string>(() => loadSortBy());
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => loadSortOrder());
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+
+  // Folder tree pane (open state + width persist across sessions).
+  const [treeOpen, setTreeOpen] = useState(() => loadTreeOpen());
+  const [treeWidth, setTreeWidth] = useState(() => loadTreeWidth());
+
+  // Toolbar menus ("new" and "sort") share one open-state so only one is ever up,
+  // but each needs its own anchor to position against.
+  const toolbarMenu = useFloatingMenu();
+  const newMenuRef = useRef<HTMLButtonElement>(null);
+  const sortMenuRef = useRef<HTMLButtonElement>(null);
 
   const setViewPersisted = useCallback((v: "grid" | "list") => {
     setView(v);
     saveView(v);
   }, []);
+
+  const toggleTree = useCallback(() => {
+    const next = !treeOpen;
+    setTreeOpen(next);
+    saveTreeOpen(next);
+  }, [treeOpen]);
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -172,6 +320,12 @@ export function FileBrowser({
   const [loadedMore, setLoadedMore] = useState<FileRecord[]>([]);
   /** undefined = use first page cursor; null/string = after load-more */
   const [moreCursor, setMoreCursor] = useState<string | null | undefined>(undefined);
+  /**
+   * The search endpoint ranks by relevance, so it pages by OFFSET index instead of a
+   * `createdAt` cursor and always answers `nextCursor: null`. Tracking only the cursor
+   * capped every search at its first 100 hits with no way to ask for more.
+   */
+  const [morePage, setMorePage] = useState<number | null | undefined>(undefined);
   const [loadingMore, setLoadingMore] = useState(false);
 
   const listScope = `${folderId ?? "root"}:${trash}:${favorites}:${search}`;
@@ -183,21 +337,17 @@ export function FileBrowser({
       if (search) {
         const params = new URLSearchParams({ q: search, limit: "100" });
         if (folderId) params.set("folderId", folderId);
-        const res = await apiFetch<{ files: FileRecord[]; nextCursor: string | null }>(
-          `/api/search?${params}`
-        );
+        const res = await apiFetch<FilePage>(`/api/search?${params}`);
         if (!res.success) throw new Error(res.error ?? "Failed to search files");
-        return res.data ?? { files: [], nextCursor: null };
+        return res.data ?? EMPTY_PAGE;
       }
       const params = new URLSearchParams({ limit: "100" });
       if (folderId) params.set("folderId", folderId);
       if (trash) params.set("trash", "true");
       if (favorites) params.set("favorites", "true");
-      const res = await apiFetch<{ files: FileRecord[]; nextCursor: string | null }>(
-        `/api/files?${params}`
-      );
+      const res = await apiFetch<FilePage>(`/api/files?${params}`);
       if (!res.success) throw new Error(res.error ?? "Failed to load files");
-      return res.data ?? { files: [], nextCursor: null };
+      return res.data ?? EMPTY_PAGE;
     },
     staleTime: 5_000,
     refetchOnMount: "always",
@@ -208,6 +358,7 @@ export function FileBrowser({
   useEffect(() => {
     setLoadedMore([]);
     setMoreCursor(undefined);
+    setMorePage(undefined);
   }, [listScope]);
 
   const baseFiles = filesQuery.data?.files ?? [];
@@ -223,77 +374,147 @@ export function FileBrowser({
 
   const nextCursor =
     moreCursor !== undefined ? moreCursor : (filesQuery.data?.nextCursor ?? null);
+  const nextPage =
+    morePage !== undefined ? morePage : (filesQuery.data?.nextPage ?? null);
+  /** Whichever token the active endpoint pages with is the one that decides this. */
+  const hasMore = search ? nextPage !== null : nextCursor !== null;
 
   const getQueue = useCallback((): UploadQueue => {
     if (!uploadQueue) {
       const q = getSharedUploadQueue();
       q.setEncryption(encryptUploads, encryptUploads ? encryptPassphrase : null);
-      let lastToastKey = "";
-      q.on("allComplete", () => {
-        queryClient.invalidateQueries({ queryKey: ["files"] });
-        queryClient.invalidateQueries({ queryKey: ["folders"] });
-        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-        const stats = q.getStats();
-        const toastKey = `${stats.total}:${stats.completed}:${stats.failed}`;
-        if (toastKey !== lastToastKey && stats.total > 0) {
-          lastToastKey = toastKey;
-          if (stats.failed > 0) notify({ title: "Upload finished with errors", description: `${stats.failed} file${stats.failed === 1 ? "" : "s"} failed. Open Activity for details.`, tone: "error", duration: 5000 });
-          else if (stats.completed > 0) notify({ title: "Upload completed", description: `${stats.completed} file${stats.completed === 1 ? "" : "s"} uploaded successfully.`, tone: "success", duration: 4000 });
-        }
-      });
-      q.on("error", (item) => {
-        if (item.status === "error") notify({ title: "Upload failed", description: `${item.file?.name ?? item.remotePath} — ${item.error ?? "Transfer failed"}`, tone: "error", duration: 5000 });
-      });
       setUploadQueue(q);
       return q;
     }
     uploadQueue.setEncryption(encryptUploads, encryptUploads ? encryptPassphrase : null);
     return uploadQueue;
-  }, [uploadQueue, queryClient, encryptUploads, encryptPassphrase]);
+  }, [uploadQueue, encryptUploads, encryptPassphrase]);
 
+  /**
+   * The batch-completion notice for uploads started from this browser. The queue
+   * is a module-level singleton that outlives this component, so the listeners
+   * are registered in an effect and removed on unmount — registering them where
+   * the queue is first grabbed left one extra listener behind on every visit to
+   * this route, and the toast fired once per stale listener.
+   */
+  useEffect(() => {
+    if (!uploadQueue) return;
+    const q = uploadQueue;
+    let lastToastKey = "";
+    const onAllComplete = () => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      const stats = q.getStats();
+      const toastKey = `${stats.total}:${stats.completed}:${stats.failed}`;
+      if (toastKey === lastToastKey || stats.total === 0) return;
+      lastToastKey = toastKey;
+      if (stats.failed > 0) {
+        notify({ title: "Upload finished with errors", description: `${stats.failed} file${stats.failed === 1 ? "" : "s"} failed. Open Activity for details.`, tone: "error", duration: 5000 });
+      } else if (stats.completed > 0) {
+        notify({ title: "Upload completed", description: `${stats.completed} file${stats.completed === 1 ? "" : "s"} uploaded successfully.`, tone: "success", duration: 4000 });
+      }
+    };
+    const onError = (item: UploadItem) => {
+      if (item.status === "error") notify({ title: "Upload failed", description: `${item.file?.name ?? item.remotePath} — ${item.error ?? "Transfer failed"}`, tone: "error", duration: 5000 });
+    };
+    q.on("allComplete", onAllComplete);
+    q.on("error", onError);
+    return () => {
+      q.off("allComplete", onAllComplete);
+      q.off("error", onError);
+    };
+  }, [uploadQueue, queryClient]);
+
+  // One timer, replaced each time: two errors in quick succession used to leave two
+  // pending timeouts, so the second banner was cleared early by the first one's clock.
+  const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showError = useCallback((msg: string) => {
     setError(msg);
-    setTimeout(() => setError(""), 4000);
+    if (errorTimer.current) clearTimeout(errorTimer.current);
+    errorTimer.current = setTimeout(() => setError(""), 5000);
   }, []);
+  useEffect(() => () => { if (errorTimer.current) clearTimeout(errorTimer.current); }, []);
+
+  // Client-side twin of `shareRefusal`/`fileRefusal`: same wording the API would return, so
+  // a blocked action reads the same whether it was stopped here or on the server.
+  const refuse = useCallback((what: "edit" | "flag" | "purge") => {
+    if (what === "purge") {
+      showError("Only the folder owner can restore or permanently delete these files.");
+      return;
+    }
+    if (what === "flag") {
+      showError("Favorites and public share links can only be set by the file's owner.");
+      return;
+    }
+    showError(
+      caps.role === "view"
+        ? "You have view-only access to this folder, so you can't change what's in it."
+        : "You don't have permission to change what's in this folder."
+    );
+  }, [caps.role, showError]);
+
+  // The per-file menu needs a narrower slice of the same capabilities.
+  const gridCaps = useMemo(
+    () => ({
+      canEdit: caps.canEdit,
+      canOwnerOnlyFlags: caps.canOwnerOnlyFlags,
+      canPurge: caps.canPurge,
+    }),
+    [caps.canEdit, caps.canOwnerOnlyFlags, caps.canPurge]
+  );
 
   // ── Folder fetching ──
+  // The options come from the shared factory so the tree pane observes the SAME cache
+  // entry for this folder's children instead of fetching its own copy.
   const foldersQuery = useQuery({
-    queryKey: ["folders", folderId, trash],
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (folderId) params.set("parentId", folderId);
-      if (trash) params.set("trash", "true");
-      const res = await apiFetch<{ folders: FolderRecord[] }>(`/api/folders?${params}`);
-      return res.data?.folders ?? [];
-    },
+    ...folderChildrenQuery(folderId, trash),
     enabled: !favorites && !search,
   });
 
   const folders = foldersQuery.data ?? [];
 
+  // ── Folder identity ──
+  // The listing endpoints return a folder's CHILDREN, never the folder itself, so the
+  // name comes from the ancestor-path query the breadcrumb already caches — the header
+  // used to just print the literal word "Folder". Fetched here rather than beside the
+  // header it feeds, because a drop resolves its destination's name from these crumbs.
+  const folderPath = useFolderPath(folderId);
+
   // ── Load more ──
   const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
+    if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const params = new URLSearchParams({ limit: "100", cursor: nextCursor });
+      const params = new URLSearchParams({ limit: "100" });
       if (folderId) params.set("folderId", folderId);
-      if (trash) params.set("trash", "true");
-      if (favorites) params.set("favorites", "true");
-      const res = await apiFetch<{ files: FileRecord[]; nextCursor: string | null }>(
-        `/api/files?${params}`
-      );
+      let url: string;
+      if (search) {
+        // Keep paging the SEARCH endpoint. Asking `/api/files` for the next page of a
+        // search returned the folder's contents instead, so page two of any search was
+        // a list of files that never matched the query.
+        params.set("q", search);
+        params.set("page", String(nextPage));
+        url = `/api/search?${params}`;
+      } else {
+        params.set("cursor", nextCursor!);
+        if (trash) params.set("trash", "true");
+        if (favorites) params.set("favorites", "true");
+        url = `/api/files?${params}`;
+      }
+      const res = await apiFetch<FilePage>(url);
       if (!res.success || !res.data) {
         throw new Error(res.error ?? "Failed to load more files");
       }
       setLoadedMore((prev) => [...prev, ...res.data!.files]);
-      setMoreCursor(res.data.nextCursor);
+      setMoreCursor(res.data.nextCursor ?? null);
+      setMorePage(res.data.nextPage ?? null);
     } catch {
       showError("Failed to load more files");
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, loadingMore, folderId, trash, favorites, showError]);
+  }, [hasMore, nextCursor, nextPage, loadingMore, search, folderId, trash, favorites, showError]);
 
   // ── Filter + sort files (client-side) ──
   const filteredFiles = useMemo(() => {
@@ -311,8 +532,9 @@ export function FileBrowser({
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     dragCounter.current++;
-    setIsDragActive(true);
-  }, []);
+    // No "drop to upload" overlay when the viewer may not write here.
+    if (caps.canEdit) setIsDragActive(true);
+  }, [caps.canEdit]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -324,71 +546,69 @@ export function FileBrowser({
   const onDropNative = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
+      // Dropping onto a folder you may only read must not start an upload.
+      if (!caps.canEdit) {
+        dragCounter.current = 0;
+        setIsDragActive(false);
+        refuse("edit");
+        return;
+      }
       const items = e.dataTransfer.items;
       if (!items) return;
 
       const queue = getQueue();
-      const allFilesArr: { file: File; relativePath: string; folderId: string | null }[] = [];
-
       const entries: FileSystemEntry[] = [];
       for (let i = 0; i < items.length; i++) {
         const entry = items[i].webkitGetAsEntry?.();
         if (entry) entries.push(entry);
       }
 
+      const dropped: UploadEntry[] = [];
       for (const entry of entries) {
         if (entry.isDirectory) {
           const dirEntry = entry as FileSystemDirectoryEntry;
           const files = await traverseDirectory(entry, dirEntry.name);
           for (const f of files) {
-            allFilesArr.push({ file: f.file, relativePath: f.relativePath, folderId: null });
+            dropped.push({ file: f.file, relativePath: f.relativePath });
           }
         } else {
           const fileEntry = entry as FileSystemFileEntry;
           const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject));
-          allFilesArr.push({ file, relativePath: file.name, folderId });
+          dropped.push({ file, relativePath: file.name });
         }
       }
 
-      // Extract ALL unique directory paths from all traversed files
-      const allFolderPaths = new Set<string>();
-      for (const item of allFilesArr) {
-        const parts = item.relativePath.split("/");
-        if (parts.length > 1) {
-          for (let i = 1; i < parts.length; i++) {
-            allFolderPaths.add(parts.slice(0, i).join("/"));
-          }
-        }
+      if (dropped.length === 0) {
+        dragCounter.current = 0;
+        setIsDragActive(false);
+        return;
       }
 
-      if (allFolderPaths.size > 0) {
-        try {
-          const res = await apiFetch<{ folders: Record<string, string> }>("/api/folders/batch", {
-            method: "POST",
-            body: JSON.stringify({ paths: Array.from(allFolderPaths) }),
-          });
-          if (res.data?.folders) {
-            for (const item of allFilesArr) {
-              const parts = item.relativePath.split("/");
-              if (parts.length > 1) {
-                const folderPath = parts.slice(0, -1).join("/");
-                item.folderId = res.data.folders[folderPath] ?? folderId;
-              } else {
-                item.folderId = folderId;
-              }
-            }
-          }
-        } catch {
-          showError("Failed to create folders");
-          return;
-        }
-      }
-
-      queue.addFolderStructure(allFilesArr);
       dragCounter.current = 0;
       setIsDragActive(false);
+
+      let folderIds: Map<string, string>;
+      try {
+        // `folderId` as the root: a tree dropped while inside a folder used to be
+        // created at the account root, because this call never said where it landed.
+        folderIds = await createFolderTree(
+          dropped.map((d) => d.relativePath),
+          folderId
+        );
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "Failed to create folders");
+        return;
+      }
+
+      const { items: uploadItems, unresolved } = resolveFileFolderIds(dropped, folderIds, folderId);
+      if (unresolved.length > 0) {
+        showError(`Couldn't create ${unresolved.length} folder(s) — upload cancelled so nothing lands in the wrong place.`);
+        return;
+      }
+
+      queue.addFolderStructure(uploadItems);
     },
-    [folderId, getQueue, showError]
+    [folderId, getQueue, showError, caps.canEdit, refuse]
   );
 
   // ── Clipboard: copy / cut (paste lives below, needs folderId handlers) ──
@@ -413,6 +633,15 @@ export function FileBrowser({
   // ── File actions ──
   const handleFileAction = useCallback(async (action: string, file: FileRecord) => {
     try {
+      // Menus, keyboard shortcuts and the mobile sheet all funnel through here, so the
+      // capability check lives here rather than only where the buttons are rendered.
+      if (NEEDS_EDIT_ACTIONS.has(action) && !caps.canEdit) { refuse("edit"); return; }
+      if ((action === "favorite" || action === "share") && !caps.canOwnerOnlyFlags) { refuse("flag"); return; }
+      if (action === "restore" && !caps.canPurge) { refuse("purge"); return; }
+      if (action === "delete" && (trash ? !caps.canPurge : !caps.canEdit)) {
+        refuse(trash ? "purge" : "edit");
+        return;
+      }
       if (action === "download") {
         // Notes have no stored file — export happens from the editor
         // (Markdown / TXT / PDF). Open it instead of hitting the download API.
@@ -489,10 +718,11 @@ export function FileBrowser({
     } catch {
       showError("Connection failed");
     }
-  }, [trash, queryClient, showError, askPrompt, askConfirm, copyToClipboard, cutToClipboard, selectedIds]);
+  }, [trash, queryClient, showError, askPrompt, askConfirm, copyToClipboard, cutToClipboard, selectedIds, caps, refuse]);
 
   // ── Folder actions ──
   async function createFolder() {
+    if (!caps.canEdit) { refuse("edit"); return; }
     const name = await askPrompt({
       title: "New folder",
       label: "Folder name",
@@ -511,6 +741,7 @@ export function FileBrowser({
   }
 
   async function folderAction(action: "rename" | "delete", folder: FolderRecord) {
+    if (!caps.canEdit) { refuse("edit"); return; }
     try {
       if (action === "rename") {
         const name = await askPrompt({
@@ -545,6 +776,7 @@ export function FileBrowser({
 
   // ── Note ──
   async function createNote() {
+    if (!caps.canEdit) { refuse("edit"); return; }
     const res = await apiFetch<{ file: FileRecord }>("/api/files", { method: "POST", body: JSON.stringify({ name: "Untitled Note", folderId }) });
     if (res.data?.file) {
       setSelectedFile(res.data.file);
@@ -554,15 +786,80 @@ export function FileBrowser({
   }
 
   // ── Drag-drop ──
-  async function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
+  //
+  // Mouse and pen only. A touch sensor would have to claim the same gesture the listing
+  // uses to scroll and the one Android uses to open the context menu; losing either on a
+  // phone costs more than drag-to-move gains there, where the always-visible checkboxes
+  // plus "Move to…" already do the job. The keyboard path is unchanged: M, or Ctrl+X
+  // then Ctrl+V.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } })
+  );
+
+  /** What is under the pointer right now, for the overlay. `null` when nothing is. */
+  const [dragSource, setDragSource] = useState<DragSource | null>(null);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setDragSource(readDragSource(event.active));
+  }, []);
+
+  /** A readable destination for the activity line. Ids the page has no name for stay out. */
+  function destinationLabel(destination: string | null): string | undefined {
+    if (destination === null) return "My Files";
+    return (
+      folders.find((f) => f.id === destination)?.name ??
+      folderPath.data?.crumbs.find((c) => c.id === destination)?.name
+    );
+  }
+
+  async function moveFolderTo(source: DragSource, destination: string | null) {
     try {
-      const res = await apiFetch("/api/files", { method: "PATCH", body: JSON.stringify({ id: active.id as string, action: "move", folderId: over.id as string }) });
-      if (!res.success) { showError(res.error ?? "Failed to move"); return; }
+      const res = await apiFetch("/api/folders", {
+        method: "PATCH",
+        body: JSON.stringify({ id: source.id, action: "move", parentId: destination }),
+      });
+      // The server owns the rules the browser cannot check: a folder dropped into its own
+      // subtree, and a destination in someone else's tree. Its wording is the better one.
+      if (!res.success) { showError(res.error ?? "Failed to move folder"); return; }
+      recordActivity("move", source.name, "done", { destination: destinationLabel(destination) });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["folder-path"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch {
       showError("Connection failed");
+    }
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    setDragSource(null);
+    const source = readDragSource(event.active);
+    if (!source) return;
+
+    const plan = planDragMove({
+      source,
+      overId: typeof event.over?.id === "string" ? event.over.id : null,
+      currentFolderId: folderId ?? null,
+      selectedIds: [...selectedIds],
+      canEdit: caps.canEdit,
+      trash,
+    });
+
+    switch (plan.type) {
+      case "none":
+        return;
+      case "denied":
+        refuse("edit");
+        return;
+      case "blocked":
+        showError(plan.reason);
+        return;
+      case "files":
+        await executeMove(plan.ids, plan.destination, destinationLabel(plan.destination));
+        return;
+      case "folder":
+        await moveFolderTo(source, plan.destination);
+        return;
     }
   }
 
@@ -593,6 +890,7 @@ export function FileBrowser({
 
   // ── Folder upload (showDirectoryPicker + webkitdirectory fallback) ──
   async function pickAndUploadFolder() {
+    if (!caps.canEdit) { refuse("edit"); return; }
     let rootFolderName: string;
     let files: { file: File; relativePath: string }[];
 
@@ -625,31 +923,31 @@ export function FileBrowser({
   async function handleFolderUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
+    if (!caps.canEdit) { e.target.value = ""; refuse("edit"); return; }
 
-    const entries = Array.from(fileList);
-    const files: { file: File; relativePath: string }[] = [];
+    const picked: UploadEntry[] = Array.from(fileList).map((f) => ({
+      file: f,
+      relativePath: f.webkitRelativePath || f.name,
+    }));
 
-    for (const f of entries) {
-      const path = f.webkitRelativePath || f.name;
-      files.push({ file: f, relativePath: path });
-    }
-
-    // Use timestamp as folder name since webkitdirectory doesn't expose the original name
+    // `webkitRelativePath` starts with the directory the user chose, so the name is
+    // right there. The old code invented "Upload <timestamp>" and then kept the
+    // real name as a subfolder, burying every project one level deeper than it is.
+    const { rootName, entries } = splitCommonRoot(picked);
     const now = new Date();
     const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}.${String(now.getMinutes()).padStart(2, "0")}`;
-    const fallbackName = `Upload ${ts}`;
 
-    await uploadFolderStructure(fallbackName, files, folderId);
+    await uploadFolderStructure(rootName ?? `Upload ${ts}`, entries, folderId);
     e.target.value = "";
   }
 
   // ── Core: create root folder, subfolders, then upload all files ──
   async function uploadFolderStructure(
     rootName: string,
-    files: { file: File; relativePath: string }[],
+    entries: UploadEntry[],
     parentFolderId: string | null,
   ) {
-    if (files.length === 0) return;
+    if (entries.length === 0) return;
     const queue = getQueue();
 
     // 1. Create the root folder
@@ -658,60 +956,28 @@ export function FileBrowser({
       body: JSON.stringify({ name: rootName, parentId: parentFolderId }),
     });
     if (!folderRes.success || !folderRes.data) {
-      showError("Failed to create folder");
+      showError(folderRes.error ?? "Failed to create folder");
       return;
     }
     const rootId = folderRes.data.folder.id;
 
-    // 2. Collect all unique subfolder paths (relative to root folder)
-    const subFolderPaths = new Set<string>();
-    for (const item of files) {
-      const parts = item.relativePath.split("/");
-      if (parts.length > 1) {
-        for (let i = 1; i < parts.length; i++) {
-          subFolderPaths.add(parts.slice(0, i).join("/"));
-        }
-      }
+    // 2. Create every subfolder underneath it, in chunks, failing loudly.
+    let folderIds: Map<string, string>;
+    try {
+      folderIds = await createFolderTree(entries.map((entry) => entry.relativePath), rootId);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Failed to create subfolders");
+      return;
     }
 
-    // 3. Create subfolders inside root folder via batch API
-    const folderIdMap = new Map<string, string>();
-    if (subFolderPaths.size > 0) {
-      try {
-        const batchRes = await apiFetch<{ folders: Record<string, string> }>("/api/folders/batch", {
-          method: "POST",
-          body: JSON.stringify({
-            paths: Array.from(subFolderPaths),
-            rootFolderId: rootId,
-          }),
-        });
-        if (batchRes.data?.folders) {
-          for (const [path, id] of Object.entries(batchRes.data.folders)) {
-            folderIdMap.set(path, id);
-          }
-        }
-      } catch {
-        showError("Failed to create subfolders");
-        return;
-      }
+    // 3. Point each file at its own folder — never at the root as a fallback.
+    const { items, unresolved } = resolveFileFolderIds(entries, folderIds, rootId);
+    if (unresolved.length > 0) {
+      showError(`Couldn't create ${unresolved.length} folder(s) — upload cancelled so nothing lands in the wrong place.`);
+      return;
     }
 
-    // 4. Prepare files with correct folderId
-    const uploadItems: { file: File; relativePath: string; folderId: string | null }[] = [];
-    for (const item of files) {
-      const parts = item.relativePath.split("/");
-      if (parts.length > 1) {
-        const folderPath = parts.slice(0, -1).join("/");
-        const destFolderId = folderIdMap.get(folderPath) ?? rootId;
-        uploadItems.push({ file: item.file, relativePath: item.relativePath, folderId: destFolderId });
-      } else {
-        // File at root of uploaded folder → goes directly into root folder
-        uploadItems.push({ file: item.file, relativePath: item.relativePath, folderId: rootId });
-      }
-    }
-
-    // 5. Upload all files
-    queue.addFolderStructure(uploadItems);
+    queue.addFolderStructure(items);
   }
 
   // ── Sort toggle ──
@@ -735,7 +1001,6 @@ export function FileBrowser({
     saveSortBy(key);
     setSortOrder("asc");
     saveSortOrder("asc");
-    setSortMenuOpen(false);
   }, []);
 
   const toggleSortOrder = useCallback(() => {
@@ -791,6 +1056,7 @@ export function FileBrowser({
 
   // ── Batch actions ──
   async function batchFavorite() {
+    if (!caps.canOwnerOnlyFlags) { refuse("flag"); return; }
     const ids = Array.from(selectedIds);
     try {
       const res = await apiFetch("/api/files/batch", {
@@ -806,24 +1072,41 @@ export function FileBrowser({
   }
 
   async function batchDelete() {
-    const ok = await askConfirm({
-      title: `Delete ${selectedIds.size} file${selectedIds.size > 1 ? "s" : ""}?`,
-      message: "They'll be moved to the recycle bin — you can restore them later.",
-      confirmText: "Move to trash",
-      danger: true,
-    });
+    if (trash ? !caps.canPurge : !caps.canEdit) { refuse(trash ? "purge" : "edit"); return; }
+    const n = selectedIds.size;
+    const plural = n > 1 ? "s" : "";
+    // In the bin the only delete left IS the permanent one. This used to send the same
+    // `PATCH action:"delete"` as the normal listing, which only stamps `deletedAt` again —
+    // so the files the user asked to purge were still sitting there afterwards.
+    const ok = await askConfirm(
+      trash
+        ? {
+            title: `Permanently delete ${n} file${plural}?`,
+            message: "This cannot be undone — the files are erased from storage.",
+            confirmText: "Delete forever",
+            danger: true,
+          }
+        : {
+            title: `Delete ${n} file${plural}?`,
+            message: "They'll be moved to the recycle bin — you can restore them later.",
+            confirmText: "Move to trash",
+            danger: true,
+          }
+    );
     if (!ok) return;
     const ids = Array.from(selectedIds);
     try {
-      const res = await apiFetch("/api/files/batch", {
-        method: "PATCH",
-        body: JSON.stringify({ ids, action: "delete" }),
-      });
+      const res = trash
+        ? await apiFetch("/api/files/batch", {
+            method: "DELETE",
+            body: JSON.stringify({ ids, permanent: true }),
+          })
+        : await apiFetch("/api/files/batch", {
+            method: "PATCH",
+            body: JSON.stringify({ ids, action: "delete" }),
+          });
       if (!res.success) showError(res.error ?? "Delete failed");
-      else {
-        const n = ids.length;
-        recordActivity("delete", `${n} file${n > 1 ? "s" : ""}`, "done");
-      }
+      else recordActivity("delete", `${ids.length} file${ids.length > 1 ? "s" : ""}`, "done");
     } catch {
       showError("Connection failed");
     }
@@ -836,6 +1119,7 @@ export function FileBrowser({
   async function executeMove(ids: string[], destinationFolderId: string | null, destinationFolderName?: string) {
     setMoveIds(null);
     if (ids.length === 0) return;
+    if (!caps.canEdit) { refuse("edit"); return; }
     const sourceName = folderId === null ? "My Files" : undefined;
     const destName = destinationFolderName ?? (destinationFolderId === null ? "My Files" : undefined);
     try {
@@ -867,6 +1151,7 @@ export function FileBrowser({
   async function executeBulkRename(renames: { id: string; name: string }[]) {
     setBulkRenameIds(null);
     if (renames.length === 0) return;
+    if (!caps.canEdit) { refuse("edit"); return; }
     let failed = 0;
     for (const r of renames) {
       try {
@@ -889,6 +1174,7 @@ export function FileBrowser({
   async function pasteHere() {
     const clip = getClipboard();
     if (!clip) return;
+    if (!caps.canEdit) { refuse("edit"); return; }
     try {
       if (clip.mode === "cut") {
         const res = await apiFetch("/api/files/batch", {
@@ -941,7 +1227,7 @@ export function FileBrowser({
       .filter((f): f is FileRecord => !!f && !!f.encrypted);
     if (encryptedSelected.length > 0) {
       showError(
-        `${encryptedSelected.length} file terenkripsi tidak bisa masuk ZIP. Download satu per satu biar bisa dimasukin passphrase.`
+        `${encryptedSelected.length} encrypted file${encryptedSelected.length > 1 ? "s" : ""} can't go into a ZIP. Download them one at a time so you can enter the passphrase.`
       );
       return;
     }
@@ -953,14 +1239,19 @@ export function FileBrowser({
   }
 
   // ── Select file from URL ──
+  // `?file=<id>` is a one-shot instruction, not a piece of live state. Because this
+  // effect depended on `allFiles`, every background refetch re-ran it and re-opened
+  // the preview the user had just closed — so the deep link became impossible to
+  // dismiss. The ref records that the instruction has been carried out.
+  const appliedUrlSelection = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedFileId && allFiles.length > 0) {
-      const found = allFiles.find((f) => f.id === selectedFileId);
-      if (found) {
-        setSelectedFile(found);
-        if (found.isNote) setShowNoteEditor(true);
-      }
-    }
+    if (!selectedFileId || allFiles.length === 0) return;
+    if (appliedUrlSelection.current === selectedFileId) return;
+    const found = allFiles.find((f) => f.id === selectedFileId);
+    if (!found) return;
+    appliedUrlSelection.current = selectedFileId;
+    setSelectedFile(found);
+    if (found.isNote) setShowNoteEditor(true);
   }, [selectedFileId, allFiles]);
 
   const handleFileClick = useCallback((file: FileRecord) => {
@@ -971,7 +1262,7 @@ export function FileBrowser({
   // Mobile bottom-nav "+" delegates here so we never duplicate upload/note/
   // folder logic. Disabled in trash/favorites where creation isn't allowed.
   useEffect(() => {
-    if (trash || favorites) return;
+    if (trash || favorites || !caps.canEdit) return;
     const handler = (e: Event) => {
       const action = (e as CustomEvent<QuickAction>).detail;
       if (action === "upload") uploadInputRef.current?.click();
@@ -982,12 +1273,24 @@ export function FileBrowser({
     return () => window.removeEventListener(QUICK_ACTION_EVENT, handler);
     // createNote/createFolder are stable closures over folderId; re-bind on it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trash, favorites, folderId]);
+  }, [trash, favorites, folderId, caps.canEdit]);
 
   const isLoading = filesQuery.isPending && !filesQuery.data;
 
+  /**
+   * True while any surface this component owns is on top of the listing. The shortcuts
+   * below are bound to `window`, so without this a Backspace inside the note editor also
+   * trashed the selection behind it, and `g` / `l` silently flipped the view under an
+   * open preview. Dialogs from `useDialogs()` are not included: they own the focus, so
+   * their own handlers see the key first.
+   */
+  const overlayOpen =
+    !!selectedFile || showNoteEditor || !!moveIds || !!bulkRenameIds ||
+    !!shareFile || !!inviteFolder || encryptDialogOpen;
+
   // ── Keyboard shortcuts (power-user parity with Drive/Dropbox) ──
   useEffect(() => {
+    if (overlayOpen) return;
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing =
@@ -1080,7 +1383,7 @@ export function FileBrowser({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIds, filteredFiles, trash]);
+  }, [selectedIds, filteredFiles, trash, overlayOpen]);
 
   useEffect(() => {
     if (filesQuery.isError) {
@@ -1088,8 +1391,106 @@ export function FileBrowser({
     }
   }, [filesQuery.isError, filesQuery.error, showError]);
 
+  // ── Header identity ──
+  const currentFolderName = folderPath.data?.crumbs.at(-1)?.name;
+  const headingPending = !!folderId && !currentFolderName && folderPath.isPending;
+  const heading = isSharedContext
+    ? sharedFolderName || currentFolderName || "Shared folder"
+    : folderId
+      ? currentFolderName ?? "Folder"
+      : "My Files";
+  const HeadingIcon = folderId || isSharedContext ? FolderOpen : Files;
+  const roleBadge = ROLE_BADGE[caps.role];
+
+  // ── Folder tree pane ──
+  // Only mounted from `xl` up: the app already spends 240px on its global nav, and a
+  // third column below that width would leave the listing one card wide. Below it the
+  // breadcrumb and folder cards remain the way around, so nothing is lost — and no tree
+  // requests are made for rows nobody can see.
+  const wideEnoughForTree = useMediaQuery("(min-width: 1280px)");
+  const showTree = wideEnoughForTree && treeOpen && !trash && !favorites;
+
+  // Inside a share the cached path is already trimmed to start at the folder that was
+  // shared, so `crumbs[0]` IS the root the member is allowed to see. Before it lands the
+  // pane is rooted at the current folder, which re-roots itself once the path arrives.
+  const shareRoot = isSharedContext ? folderPath.data?.crumbs[0] : undefined;
+  const treeRoot = useMemo(
+    () =>
+      isSharedContext
+        ? { id: shareRoot?.id ?? folderId, name: shareRoot?.name ?? (sharedFolderName || "Shared folder") }
+        : { id: null, name: "My Files" },
+    [isSharedContext, shareRoot?.id, shareRoot?.name, folderId, sharedFolderName]
+  );
+
+  // The chain includes the folder itself, so its own children are open in the pane.
+  const treeOpenPath = useMemo(
+    () => (folderPath.data?.crumbs ?? []).map((crumb) => crumb.id),
+    [folderPath.data]
+  );
+
+  const treeHrefFor = useCallback(
+    (id: string | null) =>
+      id === null ? "/files" : isSharedContext ? `/shared-with-me/${id}` : `/files?folder=${id}`,
+    [isSharedContext]
+  );
+
+  /** Files shown / files here, plus the search term — one line, always text. */
+  const countLabel =
+    typeFilter !== "all"
+      ? `${filteredFiles.length} of ${allFiles.length} file${allFiles.length !== 1 ? "s" : ""}`
+      : `${allFiles.length} file${allFiles.length !== 1 ? "s" : ""}`;
+
+  const canCreate = !trash && !favorites && caps.canEdit;
+
+  // The menu closes itself after an item runs, so these only do the work.
+  const newItems: FloatingMenuItem[] = [
+    { id: "folder", label: "New folder", icon: FolderPlus, onClick: () => void createFolder() },
+    { id: "note", label: "New note", icon: FilePlus, onClick: () => void createNote() },
+    {
+      id: "folder-upload",
+      label: "Upload folder",
+      icon: FolderUp,
+      separatorBefore: true,
+      onClick: () => void pickAndUploadFolder(),
+    },
+  ];
+
+  const sortItems: FloatingMenuItem[] = [
+    ...SORT_OPTIONS.map((opt) => ({
+      id: opt.key,
+      label: opt.label,
+      icon: ArrowDownUp,
+      checked: sortBy === opt.key,
+      onClick: () => chooseSort(opt.key),
+    })),
+    {
+      id: "order",
+      label: sortOrder === "asc" ? "Ascending" : "Descending",
+      icon: sortOrder === "asc" ? ArrowUp : ArrowDown,
+      separatorBefore: true,
+      onClick: toggleSortOrder,
+    },
+  ];
+
+  /** Puts the listing back to "everything here" from the empty state. */
+  const resetFilters = useCallback(() => {
+    setSearch("");
+    setTypeFilter("all");
+    setSelectedIds(new Set());
+  }, []);
+
   return (
-    <DndContext onDragEnd={handleDragEnd}>
+    // `pointerWithin` rather than the default rectangle intersection: the targets here
+    // range from a full folder card to a 28px-tall breadcrumb, and only "the thing the
+    // pointer is actually inside" behaves the way a drop is aimed. It also resolves to
+    // nothing when the pointer is over open space, so letting go there moves nothing.
+    <DndContext
+      sensors={sensors}
+      collisionDetection={pointerWithin}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => setDragSource(null)}
+    >
     <div
       className="relative"
       onDragEnter={handleDragEnter}
@@ -1098,361 +1499,512 @@ export function FileBrowser({
       onDrop={onDropNative}
     >
 
-      {/* ── Drag overlay ── */}
+      {/* ── Drag overlay ──
+          z-30 is the page-chrome tier: high enough to cover the listing it belongs to,
+          low enough that a full-screen surface (preview, upload panel) still wins. */}
       {isDragActive && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/5 backdrop-blur-sm">
+        <div className="absolute inset-0 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/5 backdrop-blur-sm">
           <div className="text-center">
-            <div className="flex items-center justify-center gap-3 mb-2">
-              <Upload className="h-10 w-10 text-accent" />
-              <FolderUp className="h-10 w-10 text-accent/60" />
+            <div className="mb-2 flex items-center justify-center gap-3">
+              <Upload aria-hidden className="h-10 w-10 text-accent" />
+              <FolderUp aria-hidden className="h-10 w-10 text-accent/60" />
             </div>
             <p className="text-lg font-medium">Drop files or folders to upload</p>
-            <p className="text-sm text-muted-foreground mt-1">Files and folder structures will be preserved</p>
+            <p className="mt-1 text-sm text-muted-foreground">Files and folder structures will be preserved</p>
           </div>
         </div>
       )}
 
-      {/* ── Error toast ── */}
+      {/* ── Error banner ── */}
       <AnimatePresence>
         {error && (
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="mb-4 flex items-center gap-2.5 rounded-xl border border-red-500/20 bg-red-500/8 px-4 py-2.5 text-sm text-red-500"
+            role="alert"
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+            className="mb-4 flex items-center gap-2.5 rounded-xl border border-danger/25 bg-danger/10 px-4 py-2.5 text-sm text-danger"
           >
-            <AlertCircle className="h-4 w-4 shrink-0" />
+            <AlertCircle aria-hidden className="h-4 w-4 shrink-0" />
             {error}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Page header ── */}
-      {isSharedContext && (
-        <div className="mb-8">
-          <Link
-            href="/shared-with-me"
-            className="group mb-4 inline-flex items-center gap-2 rounded-xl border border-border/50 bg-card/60 px-4 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-all hover:border-accent/40 hover:bg-accent/5 hover:text-foreground hover:shadow-md"
-          >
-            <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
-            <span>Back to Shared with me</span>
-          </Link>
-          <div className="flex items-end gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 ring-1 ring-accent/20">
-              <FolderOpen className="h-6 w-6 text-accent" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground">
-                {sharedFolderName || "Shared Folder"}
-              </h1>
-              {!isLoading && allFiles.length > 0 && (
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  {typeFilter !== "all"
-                    ? `${filteredFiles.length} of ${allFiles.length} files`
-                    : `${allFiles.length} file${allFiles.length !== 1 ? "s" : ""}`}
-                  {search && <> — results for <span className="font-medium text-foreground/80">&ldquo;{search}&rdquo;</span></>}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {!trash && !favorites && !isSharedContext && (
-        <div className="mb-6">
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              {folderId ? "Folder" : "My Files"}
-            </h1>
-            {!isLoading && allFiles.length > 0 && (
-              <span className="text-sm text-muted-foreground/50 font-normal">
-                {typeFilter !== "all"
-                  ? `${filteredFiles.length} of ${allFiles.length}`
-                  : `${allFiles.length} file${allFiles.length !== 1 ? "s" : ""}`}
-              </span>
-            )}
-          </div>
-          {search && (
-            <p className="mt-0.5 text-sm text-muted-foreground/60">
-              Results for <span className="font-medium text-foreground/80">&ldquo;{search}&rdquo;</span>
-            </p>
+      {/* ── Page header ──
+          One block for every surface. `trash`/`favorites` are headed by their own page,
+          so this stays out of their way rather than printing a second H1. */}
+      {!trash && !favorites && (
+        <div className="mb-5">
+          {isSharedContext && (
+            <Link
+              href="/shared-with-me"
+              className="group mb-3 -ml-1.5 inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            >
+              <ArrowLeft aria-hidden className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
+              <span>Shared with me</span>
+            </Link>
           )}
-        </div>
-      )}
-      {(trash || favorites) && (
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            {trash ? "Recycle Bin" : "Favorites"}
-          </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground/50">
-            {trash ? "Files moved to trash — restore or delete permanently" : "Files you've starred"}
-          </p>
+
+          {/* Where this folder sits. Inside a share the chain starts at the shared
+              folder, so no link back to the owner's root is offered. */}
+          {folderId && (
+            <BrowserBreadcrumb
+              folderId={folderId}
+              showRoot={!isSharedContext}
+              droppable={caps.canEdit && !trash}
+              hrefFor={
+                isSharedContext ? (id) => `/shared-with-me/${id}` : undefined
+              }
+              className="mb-1.5"
+            />
+          )}
+
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-accent/20 bg-accent/10">
+              <HeadingIcon aria-hidden className="h-5 w-5 text-accent" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
+                  {headingPending ? (
+                    <>
+                      <span
+                        aria-hidden
+                        className="inline-block h-5 w-40 animate-pulse rounded bg-muted align-middle"
+                      />
+                      <span className="sr-only">Loading folder</span>
+                    </>
+                  ) : (
+                    heading
+                  )}
+                </h1>
+                {/* Say the role out loud: a member who sees no Upload button should know
+                    it is by design, not a broken page. */}
+                {roleBadge && (
+                  <span
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-xs font-semibold uppercase tracking-wide",
+                      roleBadge.className
+                    )}
+                  >
+                    {roleBadge.label}
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                {isLoading ? (
+                  "Loading…"
+                ) : (
+                  <>
+                    {countLabel}
+                    {folders.length > 0 && !search && (
+                      <> · {folders.length} folder{folders.length !== 1 ? "s" : ""}</>
+                    )}
+                    {search && (
+                      <> · results for <span className="font-medium text-foreground">&ldquo;{search}&rdquo;</span></>
+                    )}
+                  </>
+                )}
+              </p>
+            </div>
+            {sharedAction && <div className="shrink-0">{sharedAction}</div>}
+          </div>
         </div>
       )}
 
-      {/* ── Toolbar ── */}
-      <div className="mb-4 flex items-center gap-2 flex-wrap">
-        {/* Search */}
-        <div className="relative flex-1 min-w-[160px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50 pointer-events-none" />
-          <Input
-            ref={searchInputRef}
-            placeholder="Search files…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-9 bg-surface text-sm"
+      {/* ── Tree + listing ──
+          The pane is a sibling of the LISTING, not of the page: the breadcrumb, title
+          and role badge above still span the full width, so re-opening the tree never
+          reflows the header. `items-start` lets the pane stick while the grid scrolls. */}
+      <div className="flex items-start gap-4">
+        {showTree && (
+          <FolderTreeSidebar
+            root={treeRoot}
+            currentFolderId={folderId}
+            openPath={treeOpenPath}
+            hrefFor={treeHrefFor}
+            width={treeWidth}
+            onWidthChange={setTreeWidth}
+            onWidthCommit={saveTreeWidth}
+            onCollapse={toggleTree}
+            droppable={caps.canEdit && !trash}
           />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/50 hover:text-foreground transition-colors"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Spacer */}
-        <div className="flex-1 hidden sm:block" />
-
-        {/* ─ Action group ─ */}
-        {!trash && !favorites && (
-          <div className="flex items-center gap-1.5">
-            {/* Upload files (primary) */}
-            <label>
-              <Button variant="default" size="sm" asChild className="h-9 gap-1.5 px-3 cursor-pointer">
-                <span>
-                  <Upload className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Upload</span>
-                </span>
-              </Button>
-              <input
-                ref={uploadInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  const fileList = e.target.files;
-                  if (!fileList) return;
-                  const queue = getQueue();
-                  queue.addFiles(Array.from(fileList), folderId);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-
-            <Button variant="secondary" size="sm" onClick={() => void createFolder()} className="h-9 px-2.5 gap-1.5" title="New folder">
-              <FolderPlus className="h-3.5 w-3.5" />
-              <span className="hidden md:inline text-xs">Folder</span>
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => void createNote()} className="h-9 px-2.5 gap-1.5" title="New note">
-              <FilePlus className="h-3.5 w-3.5" />
-              <span className="hidden md:inline text-xs">Note</span>
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => void pickAndUploadFolder()} className="h-9 px-2.5 gap-1.5" title="Upload folder">
-              <FolderUp className="h-3.5 w-3.5" />
-              <span className="hidden lg:inline text-xs">Folder upload</span>
-            </Button>
-
-            <ActivityCenter uploadQueue={uploadQueue} inline />
-
-            {/* Encryption toggle */}
-            <Button
-              variant={encryptUploads ? "default" : "ghost"}
-              size="sm"
-              className={cn("h-9 px-2.5 gap-1.5", encryptUploads && "ring-1 ring-accent/40")}
-              title={encryptUploads ? "Encryption ON — click to disable" : "Enable client-side encryption"}
-              onClick={() => {
-                if (encryptUploads) { setEncryptUploads(false); setEncryptPassphrase(""); return; }
-                setEncryptDialogOpen(true);
-              }}
-            >
-              <Lock className={cn("h-3.5 w-3.5", encryptUploads && "fill-current")} />
-              {encryptUploads && <span className="hidden sm:inline text-xs font-semibold">Enc</span>}
-            </Button>
-
-            {/* Paste */}
-            {clipboard && (
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-9 gap-1.5 px-2.5 border border-accent/25 bg-accent/5 text-accent hover:bg-accent/10"
-                onClick={pasteHere}
-                title={`Paste ${clipboard.count} ${clipboard.mode === "cut" ? "(move)" : "(copy)"}`}
-              >
-                <ClipboardPaste className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline text-xs">{clipboard.count}</span>
-              </Button>
-            )}
-          </div>
         )}
 
-        {/* Separator */}
-        <div className="hidden sm:block h-5 w-px bg-border/40" />
+        <div className="min-w-0 flex-1">
+          {/* ── Toolbar ──
+              Search on the left, everything that acts on the listing on the right, in one
+              row that wraps as a block instead of scattering ten separate controls. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {/* Folder tree toggle. Only offered where the pane can actually appear —
+                below `xl` there is no room for it, and trash/favorites are flat lists. */}
+            {!trash && !favorites && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={toggleTree}
+                aria-pressed={treeOpen}
+                aria-label={treeOpen ? "Hide folder tree" : "Show folder tree"}
+                title={treeOpen ? "Hide folder tree" : "Show folder tree"}
+                className={cn(
+                  CONTROL_H,
+                  "hidden shrink-0 cursor-pointer px-2 xl:inline-flex",
+                  treeOpen && "bg-muted text-foreground"
+                )}
+              >
+                <PanelLeft aria-hidden className="h-4 w-4" />
+              </Button>
+            )}
 
-        {/* ─ View controls ─ */}
-        <div className="flex items-center gap-1.5">
-          {/* Sort dropdown */}
-          <div className="relative">
+            {/* Search */}
+            <div className="relative min-w-[180px] flex-1 sm:max-w-sm">
+              <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={searchInputRef}
+                aria-label="Search files"
+                // The shortcut is in the placeholder because the toolbar has no room for
+                // a hint chip; "/" focuses this field from anywhere on the page.
+                placeholder="Search files… (/)"
+                autoComplete="off"
+                spellCheck={false}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={cn(CONTROL_H, "bg-surface pl-9 pr-9")}
+              />
+              {search && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 cursor-pointer hover:bg-muted"
+                >
+                  <X aria-hidden className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+
+            {/* Pushes everything that follows to the right edge on a single row. */}
+            <div className="hidden flex-1 sm:block" />
+
+            {/* ─ Create group ─ (hidden for a `view` member: nothing here would succeed) */}
+            {canCreate && (
+              <>
+                {/* Upload files — the one primary action on the page. */}
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => uploadInputRef.current?.click()}
+                  className={cn(CONTROL_H, "cursor-pointer gap-1.5 px-3")}
+                >
+                  <Upload aria-hidden className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Upload</span>
+                  <span className="sr-only sm:hidden">Upload files</span>
+                </Button>
+
+                {/* Everything else that creates something lives in one menu, so the
+                    toolbar reads as "search · upload · new" instead of five buttons. */}
+                <Button
+                  ref={newMenuRef}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => toolbarMenu.toggle("new")}
+                  aria-haspopup="menu"
+                  aria-expanded={toolbarMenu.isOpen("new")}
+                  className={cn(CONTROL_H, "cursor-pointer gap-1 px-2.5")}
+                >
+                  <Plus aria-hidden className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline text-xs">New</span>
+                  <ChevronDown aria-hidden className="h-3 w-3 opacity-60" />
+                  <span className="sr-only md:hidden">New item</span>
+                </Button>
+                <FloatingActionMenu
+                  open={toolbarMenu.isOpen("new")}
+                  onClose={toolbarMenu.close}
+                  anchorRef={newMenuRef}
+                  items={newItems}
+                  align="end"
+                  menuLabel="Create"
+                />
+              </>
+            )}
+
+            {/* ─ Transfer state ─ */}
+            {canCreate && (
+              <>
+                {/* Encryption is a mode, not an action: it reports itself as pressed. */}
+                <Button
+                  variant={encryptUploads ? "default" : "ghost"}
+                  size="sm"
+                  aria-pressed={encryptUploads}
+                  className={cn(CONTROL_H, "cursor-pointer gap-1.5 px-2.5", encryptUploads && "ring-1 ring-accent/40")}
+                  title={encryptUploads ? "Encrypting uploads — click to turn off" : "Encrypt uploads on this device"}
+                  onClick={() => {
+                    if (encryptUploads) { setEncryptUploads(false); setEncryptPassphrase(""); return; }
+                    setEncryptDialogOpen(true);
+                  }}
+                >
+                  <Lock aria-hidden className={cn("h-3.5 w-3.5", encryptUploads && "fill-current")} />
+                  <span className={encryptUploads ? "hidden text-xs font-semibold sm:inline" : "sr-only"}>
+                    {encryptUploads ? "Encrypted" : "Encrypt uploads"}
+                  </span>
+                </Button>
+
+                {clipboard && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className={cn(CONTROL_H, "cursor-pointer gap-1.5 border border-accent/25 bg-accent/5 px-2.5 text-accent hover:bg-accent/10")}
+                    onClick={pasteHere}
+                    title={`Paste ${clipboard.count} item${clipboard.count !== 1 ? "s" : ""} (${clipboard.mode === "cut" ? "move" : "copy"})`}
+                  >
+                    <ClipboardPaste aria-hidden className="h-3.5 w-3.5" />
+                    <span className="text-xs tabular-nums">{clipboard.count}</span>
+                    <span className="sr-only">Paste here</span>
+                  </Button>
+                )}
+              </>
+            )}
+
+            {!trash && !favorites && <ActivityCenter uploadQueue={uploadQueue} inline />}
+
+            <div className="mx-0.5 hidden h-5 w-px bg-border/40 sm:block" />
+
+            {/* ─ View controls ─ */}
             <Button
+              ref={sortMenuRef}
               variant="ghost"
               size="sm"
-              className="h-9 gap-1.5 px-2.5 text-muted-foreground hover:text-foreground"
-              onClick={() => setSortMenuOpen((o) => !o)}
-              title="Sort"
+              onClick={() => toolbarMenu.toggle("sort")}
+              aria-haspopup="menu"
+              aria-expanded={toolbarMenu.isOpen("sort")}
+              className={cn(CONTROL_H, "cursor-pointer gap-1.5 px-2.5 text-muted-foreground hover:text-foreground")}
             >
-              <ArrowDownUp className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline text-xs">
+              <ArrowDownUp aria-hidden className="h-3.5 w-3.5" />
+              <span className="hidden text-xs sm:inline">
                 {SORT_OPTIONS.find((o) => o.key === sortBy)?.label ?? "Sort"}
               </span>
+              <span className="sr-only">
+                Sort files. Current: {SORT_OPTIONS.find((o) => o.key === sortBy)?.label ?? "Name"},{" "}
+                {sortOrder === "asc" ? "ascending" : "descending"}
+              </span>
             </Button>
-            <AnimatePresence>
-              {sortMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                    transition={{ duration: 0.12 }}
-                    className="absolute right-0 z-50 mt-1.5 w-44 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
-                  >
-                    {SORT_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.key}
-                        onClick={() => chooseSort(opt.key)}
-                        className={cn(
-                          "flex w-full items-center justify-between px-3 py-2 text-[13px] transition-colors hover:bg-accent/8",
-                          sortBy === opt.key ? "text-accent font-medium" : "text-foreground/80"
-                        )}
-                      >
-                        {opt.label}
-                        {sortBy === opt.key && <Check className="h-3 w-3" />}
-                      </button>
-                    ))}
-                    <div className="my-1 mx-2.5 border-t border-border/30" />
-                    <button
-                      onClick={toggleSortOrder}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-foreground/80 transition-colors hover:bg-accent/8"
-                    >
-                      {sortOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-                      {sortOrder === "asc" ? "Ascending" : "Descending"}
-                    </button>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
+            <FloatingActionMenu
+              open={toolbarMenu.isOpen("sort")}
+              onClose={toolbarMenu.close}
+              anchorRef={sortMenuRef}
+              items={sortItems}
+              align="end"
+              menuLabel="Sort files"
+            />
+
+            {/* Grid / List toggle */}
+            <div className="flex items-center gap-px rounded-lg border border-border/40 bg-muted/40 p-0.5">
+              <button
+                type="button"
+                aria-pressed={view === "grid"}
+                aria-label="Grid view"
+                title="Grid view (G)"
+                className={cn(
+                  "flex h-7 w-7 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+                  view === "grid" ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => setViewPersisted("grid")}
+              >
+                <Grid3X3 aria-hidden className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === "list"}
+                aria-label="List view"
+                title="List view (L)"
+                className={cn(
+                  "flex h-7 w-7 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+                  view === "list" ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => setViewPersisted("list")}
+              >
+                <List aria-hidden className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
 
-          {/* Grid / List toggle */}
-          <div className="flex items-center gap-px rounded-lg border border-border/40 bg-muted/40 p-0.5">
-            <button
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-md transition-all",
-                view === "grid" ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground/60 hover:text-foreground"
-              )}
-              onClick={() => setViewPersisted("grid")}
-              title="Grid view (G)"
+          {/* Hidden pickers — always mounted, so the mobile "+" quick action and the
+              New menu can click them regardless of which controls are on screen. */}
+          <input
+            ref={uploadInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden
+            onChange={(e) => {
+              const fileList = e.target.files;
+              if (!fileList) return;
+              const queue = getQueue();
+              queue.addFiles(Array.from(fileList), folderId);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={folderInputRef}
+            type="file"
+            // @ts-expect-error — webkitdirectory is a non-standard HTML attribute
+            webkitdirectory=""
+            multiple
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden
+            onChange={handleFolderUpload}
+          />
+
+          {/* ── Filter chips ──
+              Kept on screen during a search too: the type filter still applies to the
+              results, so hiding the chips made the narrowed count look like a bug. */}
+          {!trash && !favorites && (
+            <div
+              role="group"
+              aria-label="Filter by file type"
+              className="no-scrollbar mb-4 flex items-center gap-1.5 overflow-x-auto"
             >
-              <Grid3X3 className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-md transition-all",
-                view === "list" ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground/60 hover:text-foreground"
-              )}
-              onClick={() => setViewPersisted("list")}
-              title="List view (L)"
-            >
-              <List className="h-3.5 w-3.5" />
-            </button>
-          </div>
+              {FILTERS.map(({ key, label, icon: Icon }) => {
+                const count = key !== "all" ? allFiles.filter((f) => matchesFilter(f, key)).length : allFiles.length;
+                const active = typeFilter === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => { setTypeFilter(key); setSelectedIds(new Set()); }}
+                    className={cn(
+                      "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+                      active
+                        ? "border-accent/40 bg-accent/12 text-accent"
+                        : "border-transparent bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <Icon aria-hidden className="h-3 w-3" />
+                    {label}
+                    {count > 0 && key !== "all" && (
+                      // Subordinate by weight, not by opacity: `opacity-40` on an already
+                      // muted chip put the count under the contrast floor.
+                      <span className="font-mono text-xs font-normal tabular-nums">{count}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── Folders ── */}
+          {!search && folders.length > 0 && (
+            <section aria-labelledby="folders-heading" className="mb-5">
+              <h2
+                id="folders-heading"
+                className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground"
+              >
+                Folders <span className="font-mono font-normal tabular-nums">{folders.length}</span>
+              </h2>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {folders.map((folder) => (
+                  <FolderCard
+                    key={folder.id}
+                    folder={folder}
+                    trash={trash}
+                    // Inside a shared folder, a subfolder must stay in the shared view so its
+                    // capabilities get resolved the same way instead of falling back to /files.
+                    href={isSharedContext ? `/shared-with-me/${folder.id}` : undefined}
+                    canDrag={caps.canEdit}
+                    onRename={caps.canEdit ? (f) => folderAction("rename", f) : undefined}
+                    onDelete={caps.canEdit ? (f) => folderAction("delete", f) : undefined}
+                    onShare={trash || !caps.canManageMembers ? undefined : (f) => setInviteFolder(f)}
+                    onDownload={trash ? undefined : (f) => void requestFolderArchive(f.id, f.name)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── Files ── */}
+          {!search && folders.length > 0 && filteredFiles.length > 0 && (
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Files <span className="font-mono font-normal tabular-nums">{filteredFiles.length}</span>
+            </h2>
+          )}
+          <FileGrid
+            files={filteredFiles}
+            view={view}
+            trash={trash}
+            selectedIds={selectedIds}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            onFileAction={handleFileAction}
+            onFileClick={handleFileClick}
+            onSelect={toggleSelect}
+            onSelectAll={toggleSelectAll}
+            onSort={handleSort}
+            caps={gridCaps}
+            hasMore={hasMore}
+            loadMore={loadMore}
+            loadingMore={loadingMore}
+            empty={{
+              searchQuery: search || undefined,
+              filterActive: typeFilter !== "all",
+              onResetFilters: resetFilters,
+              readOnly: !canCreate,
+              action: canCreate ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => uploadInputRef.current?.click()}
+                  className="cursor-pointer gap-1.5"
+                >
+                  <Upload aria-hidden className="h-3.5 w-3.5" />
+                  Upload files
+                </Button>
+              ) : undefined,
+              // With folders on screen the page is not empty, so the notice stays a
+              // single line instead of a full-height illustration.
+              compact: !search && folders.length > 0,
+            }}
+          />
         </div>
       </div>
 
-      {/* hidden webkitdirectory input */}
-      <input
-        ref={folderInputRef}
-        type="file"
-        // @ts-expect-error — webkitdirectory is non-standard HTML attribute
-        webkitdirectory=""
-        multiple
-        className="hidden"
-        onChange={handleFolderUpload}
-      />
+      {/* ── Preview / Note editor ──
+          Both surfaces declare `exit` animations, and both were mounted bare — without
+          an AnimatePresence around them React unmounts the element the instant the state
+          flips, so closing either one snapped off the screen and the exit props were
+          dead code. Keyed by file id so switching files replays the entrance. */}
+      <AnimatePresence>
+        {selectedFile && !showNoteEditor && (
+          <FilePreview
+            key={`preview-${selectedFile.id}`}
+            file={selectedFile}
+            onClose={() => setSelectedFile(null)}
+            /* A trashed file is not edited in place — it is restored first. */
+            canEdit={caps.canEdit && !trash}
+            onSaved={() => {
+              // The listing carries size and modified time, and a save moves both.
+              queryClient.invalidateQueries({ queryKey: ["files"] });
+              queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+            }}
+          />
+        )}
+      </AnimatePresence>
 
-      {/* ── Filter chips ── */}
-      {!trash && !favorites && !search && (
-        <div className="mb-4 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-          {FILTERS.map(({ key, label, icon: Icon }) => {
-            const count = key !== "all" ? allFiles.filter((f) => matchesFilter(f, key)).length : allFiles.length;
-            return (
-              <button
-                key={key}
-                onClick={() => { setTypeFilter(key); setSelectedIds(new Set()); }}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
-                  typeFilter === key
-                    ? "bg-foreground/90 text-background shadow-sm"
-                    : "bg-muted/50 text-muted-foreground/70 hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-3 w-3" />
-                {label}
-                {count > 0 && key !== "all" && (
-                  <span className={cn(
-                    "text-[10px] font-mono tabular-nums",
-                    typeFilter === key ? "opacity-60" : "opacity-40"
-                  )}>{count}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── Folders ── */}
-      {!search && folders.length > 0 && (
-        <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {folders.map((folder) => (
-            <FolderCard
-              key={folder.id}
-              folder={folder}
-              trash={trash}
-              onRename={(f) => folderAction("rename", f)}
-              onDelete={(f) => folderAction("delete", f)}
-              onShare={trash ? undefined : (f) => setInviteFolder(f)}
-              onDownload={trash ? undefined : (f) => void requestFolderArchive(f.id, f.name)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* ── Files ── */}
-      <FileGrid
-        files={filteredFiles}
-        view={view}
-        trash={trash}
-        selectedIds={selectedIds}
-        sortBy={sortBy}
-        sortOrder={sortOrder}
-        onFileAction={handleFileAction}
-        onFileClick={handleFileClick}
-        onSelect={toggleSelect}
-        onSelectAll={toggleSelectAll}
-        onSort={handleSort}
-        hasMore={!!nextCursor}
-        loadMore={loadMore}
-        loadingMore={loadingMore}
-      />
-
-      {/* ── Preview / Note editor ── */}
-      {selectedFile && !showNoteEditor && (
-        <FilePreview file={selectedFile} onClose={() => setSelectedFile(null)} />
-      )}
-
-      {showNoteEditor && selectedFile && (
-        <NoteEditor file={selectedFile} onClose={() => { setShowNoteEditor(false); setSelectedFile(null); }} />
-      )}
+      <AnimatePresence>
+        {showNoteEditor && selectedFile && (
+          <NoteEditor
+            key={`note-${selectedFile.id}`}
+            file={selectedFile}
+            onClose={() => { setShowNoteEditor(false); setSelectedFile(null); }}
+          />
+        )}
+      </AnimatePresence>
 
       {inviteFolder && (
         <FolderInviteDialog
@@ -1507,44 +2059,95 @@ export function FileBrowser({
     <AnimatePresence>
       {selectedIds.size > 0 && (
         <motion.div
-          initial={{ y: 20, opacity: 0, scale: 0.95 }}
-          animate={{ y: 0, opacity: 1, scale: 1 }}
-          exit={{ y: 20, opacity: 0, scale: 0.95 }}
-          transition={{ type: "spring", stiffness: 500, damping: 36 }}
-          className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2"
+          initial={reduceMotion ? { opacity: 0 } : { y: 20, opacity: 0, scale: 0.95 }}
+          animate={reduceMotion ? { opacity: 1 } : { y: 0, opacity: 1, scale: 1 }}
+          exit={reduceMotion ? { opacity: 0 } : { y: 20, opacity: 0, scale: 0.95 }}
+          transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 36 }}
+          // z-60 clears the mobile bottom nav (z-40) it used to hide behind, and the
+          // offset lifts it above that bar plus the home indicator on a phone.
+          className="fixed bottom-[calc(var(--bottom-nav-h)+var(--safe-bottom)+0.75rem)] left-1/2 z-[60] -translate-x-1/2 lg:bottom-6"
         >
-          <div className="flex items-center gap-0.5 rounded-2xl border border-border/50 bg-surface-elevated/95 px-2 py-1.5 shadow-[0_8px_40px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+          <div className="flex items-center gap-0.5 rounded-2xl border border-border/50 bg-surface-elevated/95 px-2 py-1.5 shadow-2xl backdrop-blur-2xl">
             {/* Count */}
-            <span className="px-2.5 py-1 text-sm font-semibold text-foreground/80 shrink-0 select-none">
+            <span className="shrink-0 select-none px-2.5 py-1 text-sm font-semibold tabular-nums text-foreground">
               {selectedIds.size}
+              <span className="sr-only"> selected</span>
             </span>
-            <div className="h-5 w-px bg-border/40 mx-1" />
+            <div className="mx-1 h-5 w-px bg-border/40" />
 
             <DockButton icon={Download} label="Download" onClick={batchDownload} />
             {!trash && <DockButton icon={Copy} label="Copy" onClick={() => copyToClipboard(Array.from(selectedIds))} />}
-            {!trash && <DockButton icon={Scissors} label="Cut" onClick={() => cutToClipboard(Array.from(selectedIds))} />}
-            {!trash && <DockButton icon={Move} label="Move" onClick={() => setMoveIds(Array.from(selectedIds))} />}
-            {!trash && selectedIds.size >= 2 && (
+            {!trash && caps.canEdit && <DockButton icon={Scissors} label="Cut" onClick={() => cutToClipboard(Array.from(selectedIds))} />}
+            {!trash && caps.canEdit && <DockButton icon={Move} label="Move" onClick={() => setMoveIds(Array.from(selectedIds))} />}
+            {!trash && caps.canEdit && selectedIds.size >= 2 && (
               <DockButton icon={PencilRuler} label="Rename" onClick={() => setBulkRenameIds(Array.from(selectedIds))} />
             )}
-            <DockButton icon={Star} label="Favorite" onClick={batchFavorite} />
+            {caps.canOwnerOnlyFlags && <DockButton icon={Star} label="Favorite" onClick={batchFavorite} />}
 
-            <div className="h-5 w-px bg-border/40 mx-1" />
-            <DockButton icon={Trash2} label="Delete" onClick={batchDelete} danger />
+            {(trash ? caps.canPurge : caps.canEdit) && (
+              <>
+                <div className="h-5 w-px bg-border/40 mx-1" />
+                <DockButton icon={Trash2} label="Delete" onClick={batchDelete} danger />
+              </>
+            )}
 
-            <div className="h-5 w-px bg-border/40 mx-1" />
-            <button
+            <div className="mx-1 h-5 w-px bg-border/40" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={() => setSelectedIds(new Set())}
-              className="flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground/60 transition-colors hover:bg-muted/60 hover:text-foreground"
+              className="h-8 w-8 shrink-0 cursor-pointer rounded-xl hover:bg-muted/60"
+              aria-label="Clear selection"
               title="Clear selection (Esc)"
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
+              <X aria-hidden className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </motion.div>
       )}
     </AnimatePresence>
 
+    {/* ── What follows the pointer ──
+        Rendered by dnd-kit in a portal instead of transforming the row in place, so the
+        listing never reflows while something is being carried across it. `dropAnimation`
+        is off: the default flies the preview back to where the row was, which reads as
+        "nothing happened" at the exact moment the row has in fact moved elsewhere. */}
+    <DragOverlay dropAnimation={null}>
+      {dragSource && <DragPreview source={dragSource} selectedIds={selectedIds} />}
+    </DragOverlay>
+
     </DndContext>
+  );
+}
+
+/**
+ * The pill under the pointer during a drag.
+ *
+ * Deliberately quiet — no accent fill, no motion. The accent belongs to the drop target
+ * under the pointer, which is the thing being aimed at; a second accent here would leave
+ * two controls competing for the same "this is live" signal. The count comes from
+ * `describeDrag` so it can never disagree with what the drop actually moves.
+ */
+function DragPreview({
+  source,
+  selectedIds,
+}: {
+  source: DragSource;
+  selectedIds: Set<string>;
+}) {
+  const { label, count } = describeDrag(source, [...selectedIds]);
+  const Icon = source.kind === "folder" ? FolderOpen : File;
+
+  return (
+    <div className="pointer-events-none flex max-w-[16rem] cursor-grabbing items-center gap-2 rounded-xl border border-border bg-surface-elevated px-3 py-2 shadow-xl shadow-black/25">
+      <Icon aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="truncate text-sm font-medium text-foreground">{label}</span>
+      {count > 1 && (
+        <span className="shrink-0 rounded-md bg-accent px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-white">
+          {count}
+        </span>
+      )}
+    </div>
   );
 }

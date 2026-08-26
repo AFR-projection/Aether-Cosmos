@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, PencilRuler, X } from "lucide-react";
+import { ArrowRight, PencilRuler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Field } from "@/components/ui/field";
+import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
 
 export type BulkRenameTarget = { id: string; name: string };
@@ -29,12 +30,16 @@ function pad(n: number, width: number): string {
 /**
  * Compute the new name for one file given the rename options.
  * Order: find/replace on stem → prefix → optional "{n}" numbering → keep ext.
+ *
+ * Returns the parts, not just the joined name: the caller has to know whether the
+ * *stem* survived, and once the extension is back on, a wiped stem reads as the
+ * perfectly non-empty ".pdf" to every string test.
  */
 function buildName(
   original: string,
   index: number,
   opts: { find: string; replace: string; prefix: string; numbering: boolean; start: number; width: number }
-): string {
+): { stem: string; ext: string; name: string } {
   const { stem, ext } = splitExt(original);
   let out = stem;
   if (opts.find) {
@@ -46,7 +51,7 @@ function buildName(
     const num = pad(opts.start + index, opts.width);
     out = out.includes("{n}") ? out.split("{n}").join(num) : `${out} ${num}`;
   }
-  return `${out}${ext}`;
+  return { stem: out, ext, name: `${out}${ext}` };
 }
 
 export function BulkRenameDialog({ files, onCancel, onConfirm }: BulkRenameDialogProps) {
@@ -60,134 +65,167 @@ export function BulkRenameDialog({ files, onCancel, onConfirm }: BulkRenameDialo
 
   const preview = useMemo(
     () =>
-      files.map((f, i) => ({
-        id: f.id,
-        from: f.name,
-        to: buildName(f.name, i, { find, replace, prefix, numbering, start, width }),
-      })),
+      files.map((f, i) => {
+        const next = buildName(f.name, i, { find, replace, prefix, numbering, start, width });
+        // Emptying the stem is a rule the file cannot be renamed under, not a
+        // rename to ".pdf" — it is called out in the preview and left out of the
+        // batch rather than silently passing as "unchanged".
+        const emptied = next.stem.trim().length === 0;
+        return {
+          id: f.id,
+          from: f.name,
+          to: next.name,
+          emptied,
+          willChange: !emptied && next.name !== f.name,
+        };
+      }),
     [files, find, replace, prefix, numbering, start, width]
   );
 
-  const changed = preview.filter((p) => p.to !== p.from && p.to.trim().length > 0);
+  const changed = preview.filter((p) => p.willChange);
+  const blocked = preview.filter((p) => p.emptied).length;
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="scrim fixed inset-0 z-[80] flex items-center justify-center p-4"
-        onClick={onCancel}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 16, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 16, scale: 0.97 }}
-          transition={{ duration: 0.18 }}
-          className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="relative border-b border-border bg-gradient-to-br from-accent/10 to-transparent px-5 py-4">
-            <button
-              onClick={onCancel}
-              className="absolute right-3 top-3 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/15">
-                <PencilRuler className="h-4 w-4 text-accent" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold">Bulk rename {files.length} files</h2>
-                <p className="text-[11px] text-muted-foreground">Extensions are always preserved</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Controls */}
-          <div className="space-y-3 border-b border-border/50 px-5 py-4">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Find</label>
-                <Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="text to replace" className="h-9" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Replace with</label>
-                <Input value={replace} onChange={(e) => setReplace(e.target.value)} placeholder="new text" className="h-9" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Prefix</label>
-                <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="e.g. 2026_" className="h-9" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Start number</label>
-                <Input
-                  type="number"
-                  value={start}
-                  min={0}
-                  onChange={(e) => setStart(Math.max(0, Number(e.target.value) || 0))}
-                  disabled={!numbering}
-                  className="h-9"
-                />
-              </div>
-            </div>
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={numbering}
-                onChange={(e) => setNumbering(e.target.checked)}
-                className="h-3.5 w-3.5 accent-accent"
+    <Modal
+      open
+      onClose={onCancel}
+      icon={PencilRuler}
+      size="lg"
+      title={`Bulk rename ${files.length} file${files.length === 1 ? "" : "s"}`}
+      description="Extensions are always preserved."
+      bodyClassName="flex min-h-0 flex-col overflow-y-hidden p-0"
+      footer={
+        <>
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={changed.length === 0}
+            onClick={() => onConfirm(changed.map((c) => ({ id: c.id, name: c.to })))}
+          >
+            {changed.length === 0
+              ? "Rename"
+              : `Rename ${changed.length} file${changed.length === 1 ? "" : "s"}`}
+          </Button>
+        </>
+      }
+    >
+      <div className="shrink-0 space-y-3 border-b border-border/50 px-5 py-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Find">
+            {(field) => (
+              <Input
+                {...field}
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+                placeholder="text to replace"
+                className="h-9"
               />
-              <span className="text-[12px]">
-                Append sequential numbers{" "}
-                <span className="text-muted-foreground">(or place <code>{"{n}"}</code> in the prefix)</span>
+            )}
+          </Field>
+          <Field label="Replace with">
+            {(field) => (
+              <Input
+                {...field}
+                value={replace}
+                onChange={(e) => setReplace(e.target.value)}
+                placeholder="new text"
+                className="h-9"
+              />
+            )}
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Prefix">
+            {(field) => (
+              <Input
+                {...field}
+                value={prefix}
+                onChange={(e) => setPrefix(e.target.value)}
+                placeholder="e.g. 2026_"
+                className="h-9"
+              />
+            )}
+          </Field>
+          <Field
+            label="Start number"
+            hint={numbering ? undefined : "Enable numbering to use this"}
+          >
+            {(field) => (
+              <Input
+                {...field}
+                type="number"
+                value={start}
+                min={0}
+                onChange={(e) => setStart(Math.max(0, Number(e.target.value) || 0))}
+                disabled={!numbering}
+                className="h-9"
+              />
+            )}
+          </Field>
+        </div>
+        <label className="flex cursor-pointer items-start gap-2.5 py-1">
+          <input
+            type="checkbox"
+            checked={numbering}
+            onChange={(e) => setNumbering(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+          />
+          <span className="text-xs leading-relaxed">
+            Append sequential numbers{" "}
+            <span className="text-muted-foreground">
+              (or place <code className="font-mono">{"{n}"}</code> inside the prefix)
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {/* Focusable and named: the preview is a scroll container, and a list of 50
+          renames is unreachable with a keyboard if nothing in it can take focus. */}
+      <div
+        className="min-h-[6rem] flex-1 overflow-y-auto px-5 py-3"
+        role="region"
+        aria-label="Rename preview"
+        tabIndex={0}
+      >
+        <p className="mb-2 text-xs font-medium text-muted-foreground">
+          Preview · {changed.length} of {files.length} will change
+          {blocked > 0 && (
+            <span className="text-danger">
+              {" "}
+              · {blocked} skipped, name would be empty
+            </span>
+          )}
+        </p>
+        <ul className="space-y-1">
+          {preview.map((p) => (
+            <li key={p.id} className="flex items-center gap-2 text-xs">
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{p.from}</span>
+              <ArrowRight
+                className={cn(
+                  "h-3 w-3 shrink-0",
+                  p.emptied ? "text-danger" : p.willChange ? "text-accent" : "text-muted-foreground"
+                )}
+                aria-hidden="true"
+              />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate font-medium",
+                  p.emptied ? "text-danger" : p.willChange ? "text-foreground" : "text-muted-foreground"
+                )}
+              >
+                {p.to}
+                {p.emptied ? (
+                  <span className="sr-only"> (skipped, name would be empty)</span>
+                ) : (
+                  !p.willChange && <span className="sr-only"> (unchanged)</span>
+                )}
               </span>
-            </label>
-          </div>
-
-          {/* Live preview */}
-          <div className="min-h-[6rem] flex-1 overflow-y-auto px-5 py-3">
-            <p className="mb-2 text-[11px] font-medium text-muted-foreground">
-              Preview · {changed.length} will change
-            </p>
-            <ul className="space-y-1">
-              {preview.map((p) => {
-                const willChange = p.to !== p.from && p.to.trim().length > 0;
-                return (
-                  <li key={p.id} className="flex items-center gap-2 text-[12px]">
-                    <span className="min-w-0 flex-1 truncate text-muted-foreground/70">{p.from}</span>
-                    <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 truncate font-medium",
-                        willChange ? "text-foreground" : "text-muted-foreground/40"
-                      )}
-                    >
-                      {p.to}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3.5">
-            <Button variant="ghost" size="sm" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={changed.length === 0}
-              onClick={() => onConfirm(changed.map((c) => ({ id: c.id, name: c.to })))}
-            >
-              Rename {changed.length || ""}
-            </Button>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Modal>
   );
 }

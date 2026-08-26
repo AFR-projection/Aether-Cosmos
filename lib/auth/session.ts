@@ -4,7 +4,7 @@ import { eq, and, gt, desc, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { sessions, users, type User } from "@/lib/db/schema";
 import { nanoid } from "nanoid";
-import { getAdminSettings } from "@/lib/admin-settings";
+import { getAdminSettings, sessionIdleTimeoutMs, sessionIpBindingEnabled } from "@/lib/admin-settings";
 import { logActivity } from "@/lib/auth/audit";
 import { cookieSecure } from "@/lib/env/runtime";
 import { getIpLocation, parseUserAgent } from "@/lib/access-tracking";
@@ -13,26 +13,18 @@ const SESSION_COOKIE = "storage_session";
 const ROTATION_INTERVAL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
 /**
- * Idle cut-off, in ms, or null when idle expiry is not configured.
+ * Idle cut-off and IP binding both live in Admin → Settings now.
  *
- * This is deliberately opt-in. It used to default to 30 minutes, which silently
- * overrode the admin's "Session Duration" setting — a session configured for a
- * week still died after half an hour of inactivity, so the setting did nothing.
- * Absolute expiry (sessionDurationHours) is now the authority; SESSION_INACTIVITY_MS
- * is an explicit extra tightening on top of it.
+ * Idle expiry stays deliberately opt-in (0 = off). It used to default to 30
+ * minutes, which silently overrode the admin's "Session Duration" setting — a
+ * session configured for a week still died after half an hour of inactivity, so
+ * the setting did nothing. Absolute expiry (sessionDurationHours) is the
+ * authority; the idle timeout is an explicit extra tightening on top of it.
+ *
+ * They were `SESSION_INACTIVITY_MS` and `SESSION_IP_BIND`, which meant changing
+ * either one needed a redeploy. The helpers in lib/admin-settings.ts keep the
+ * same three-state semantics for IP binding (on / off / auto = production only).
  */
-function inactivityMs(): number | null {
-  const raw = process.env.SESSION_INACTIVITY_MS;
-  if (!raw) return null;
-  const parsed = parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function ipBindEnabled(): boolean {
-  if (process.env.SESSION_IP_BIND === "true") return true;
-  if (process.env.SESSION_IP_BIND === "false") return false;
-  return process.env.NODE_ENV === "production";
-}
 
 /** True if IP is suitable for production IP binding. */
 export function isBindableIp(ip: string | null | undefined): boolean {
@@ -353,19 +345,17 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   if (!user || user.status === "suspended") return null;
 
   // Maintenance: non-master blocked (masters still work)
-  try {
-    const settings = await getAdminSettings();
-    if (settings.maintenanceMode && user.role !== "master") {
-      return null;
-    }
-  } catch {
-    // ignore settings failures
+  // The same settings row also carries the idle cut-off and the IP-binding mode,
+  // so it is fetched once here and reused below rather than read three times.
+  const settings = await getAdminSettings().catch(() => null);
+  if (settings?.maintenanceMode && user.role !== "master") {
+    return null;
   }
 
   const currentIp = await getClientIpFromHeaders();
 
   // Optional idle cut-off on top of the absolute expiry checked in the query above.
-  const idleLimit = inactivityMs();
+  const idleLimit = sessionIdleTimeoutMs(settings ?? undefined);
   const lastActive = session.lastActiveAt
     ? new Date(session.lastActiveAt).getTime()
     : new Date(session.createdAt).getTime();
@@ -380,9 +370,9 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     );
   }
 
-  // IP bind (production / SESSION_IP_BIND=true only); skip unknown/private
+  // IP bind (Admin → Settings; "auto" means production only); skip unknown/private
   if (
-    ipBindEnabled() &&
+    sessionIpBindingEnabled(settings ?? undefined) &&
     isBindableIp(session.ip) &&
     isBindableIp(currentIp) &&
     session.ip !== currentIp

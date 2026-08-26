@@ -10,7 +10,7 @@
  *   npx next start                                  # or npm run dev, in another shell
  *   npx tsx scripts/test-brain-mcp-flow.ts [baseUrl]
  */
-import "dotenv/config";
+import "./load-env";
 import { and, eq } from "drizzle-orm";
 import { db } from "../lib/db";
 import { brainAgents, brains, users } from "../lib/db/schema";
@@ -118,7 +118,7 @@ async function main() {
     const remembered = await callTool(rawKey, "brain_remember", {
       title: "Production deployment requires Redis",
       content:
-        "Storage ByAFR background workers run on BullMQ, which requires Redis. Deployment without Redis leaves uploads stuck in the queue.",
+        "Aether Cosmos ByAFR background workers run on BullMQ, which requires Redis. Deployment without Redis leaves uploads stuck in the queue.",
       type: "fact",
       importance: 0.9,
       confidence: 0.95,
@@ -162,7 +162,7 @@ async function main() {
     );
 
     const linked = await callTool(rawKey, "brain_link", {
-      source: "Storage ByAFR",
+      source: "Aether Cosmos ByAFR",
       sourceType: "product",
       target: "Redis",
       targetType: "technology",

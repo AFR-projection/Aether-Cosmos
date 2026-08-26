@@ -4,15 +4,23 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { users, files, sessions } from "@/lib/db/schema";
 import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp } from "@/lib/auth/session";
+import { getClientIp, destroyAllUserSessions } from "@/lib/auth/session";
 import { hashPassword } from "@/lib/auth/password";
 import { logActivity } from "@/lib/auth/audit";
 import { validateCsrf } from "@/lib/security";
 import { validatePasswordStrength } from "@/lib/security/password-policy";
 import { deleteR2Object } from "@/lib/storage/r2";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { defaultQuotaBytes, getAdminSettings } from "@/lib/admin-settings";
+import { defaultQuotaBytes, defaultBandwidthQuotaBytes, getAdminSettings } from "@/lib/admin-settings";
 import { publishToAdmins } from "@/lib/realtime/events";
+import {
+  MAX_QUOTA_BYTES,
+  USERNAME_MAX,
+  USERNAME_MIN,
+  adminUserUpdateByIdSchema,
+  normalizeAdminEmail,
+  sessionRevocationReason,
+} from "@/lib/admin/user-update";
 
 /** A user counts as "online" if a live session was active within this window. */
 const ONLINE_WINDOW_MS = 3 * 60 * 1000;
@@ -90,11 +98,11 @@ export async function GET(request: NextRequest) {
 }
 
 const createUserSchema = z.object({
-  username: z.string().min(3).max(50),
+  username: z.string().trim().min(USERNAME_MIN).max(USERNAME_MAX),
   email: z.string().email().max(254).optional(),
-  password: z.string().min(8),
+  password: z.string().min(8).max(200),
   role: z.enum(["user"]).default("user"),
-  quotaBytes: z.number().int().positive().optional(),
+  quotaBytes: z.number().int().positive().max(MAX_QUOTA_BYTES).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -114,6 +122,9 @@ export async function POST(request: NextRequest) {
 
     const passwordHash = await hashPassword(body.password);
     const quotaBytes = body.quotaBytes ?? defaultQuotaBytes(settings);
+    // Egress allowance for a fresh account, from Admin → Settings. 0 means
+    // unmetered, which is what every account got before this was configurable.
+    const bandwidthQuotaBytes = defaultBandwidthQuotaBytes(settings);
 
     const [user] = await db
       .insert(users)
@@ -123,6 +134,7 @@ export async function POST(request: NextRequest) {
         passwordHash,
         role: body.role,
         quotaBytes,
+        bandwidthQuotaBytes,
       })
       .returning();
 
@@ -141,25 +153,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-const updateUserSchema = z.object({
-  id: z.string().uuid(),
-  username: z.string().min(3).optional(),
-  email: z.string().email().max(254).nullable().optional(),
-  password: z.string().min(8).optional(),
-  status: z.enum(["active", "suspended"]).optional(),
-  suspendReason: z.string().max(500).nullable().optional(),
-  mustChangePassword: z.boolean().optional(),
-  quotaBytes: z.number().int().positive().optional(),
-  bandwidthQuotaBytes: z.number().int().min(0).optional(),
-  role: z.enum(["user", "master"]).optional(),
-});
-
 export async function PATCH(request: NextRequest) {
   try {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
 
     const master = await requireMasterOrApiKey(request, "users");
-    const body = updateUserSchema.parse(await request.json());
+    const body = adminUserUpdateByIdSchema.parse(await request.json());
     const ip = getClientIp(request);
 
     const [existing] = await db.select().from(users).where(eq(users.id, body.id)).limit(1);
@@ -191,7 +190,11 @@ export async function PATCH(request: NextRequest) {
 
     const updates: Partial<typeof existing> = { updatedAt: new Date() };
     if (body.username) updates.username = body.username;
-    if (body.email !== undefined) updates.email = body.email ? body.email.toLowerCase() : null;
+    if (body.email !== undefined) {
+      const normalized = normalizeAdminEmail(body.email);
+      if (!normalized.ok) return apiError("Please enter a valid email address.", 400);
+      updates.email = normalized.email;
+    }
     if (body.status) {
       updates.status = body.status;
       if (body.status === "active") {
@@ -206,31 +209,37 @@ export async function PATCH(request: NextRequest) {
     if (body.mustChangePassword !== undefined) {
       updates.mustChangePassword = body.mustChangePassword;
     }
-    if (body.quotaBytes) updates.quotaBytes = body.quotaBytes;
+    if (body.quotaBytes !== undefined) updates.quotaBytes = body.quotaBytes;
     if (body.bandwidthQuotaBytes !== undefined) updates.bandwidthQuotaBytes = body.bandwidthQuotaBytes;
     if (body.password) updates.passwordHash = await hashPassword(body.password);
     if (body.role) updates.role = body.role;
 
     await db.update(users).set(updates).where(eq(users.id, body.id));
 
+    // Same reason as the per-user route: the credential and the session rows are
+    // independent, so evicting someone means deleting the rows.
+    const revocation = sessionRevocationReason(body);
+    if (revocation) await destroyAllUserSessions(body.id);
+
     if (body.status === "suspended") {
       await logActivity(master, "suspend_user", {
         resourceType: "user",
         resourceId: body.id,
-        metadata: { reason: updates.suspendReason },
+        metadata: { reason: updates.suspendReason, sessionsRevoked: revocation },
         ip,
       });
     } else {
       await logActivity(master, "update_user", {
         resourceType: "user",
         resourceId: body.id,
+        ...(revocation ? { metadata: { sessionsRevoked: revocation } } : {}),
         ip,
       });
     }
 
     void publishToAdmins({ type: "user_updated", userId: body.id, at: Date.now() });
 
-    return apiSuccess({ updated: true });
+    return apiSuccess({ updated: true, sessionsRevoked: revocation !== null });
   } catch (error) {
     return handleApiError(error);
   }

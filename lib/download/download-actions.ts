@@ -29,7 +29,7 @@ export function requestDownload(file: DownloadableFile) {
   if (file.encrypted) {
     if (!isEncryptionMeta(file.encryptionMeta)) {
       const id = startDownload(file.name);
-      failDownload(id, "File terenkripsi tapi metadata enkripsi tidak ada");
+      failDownload(id, "This file is encrypted but its encryption metadata is missing");
       return;
     }
     setPendingEncryptedDownload({ fileId: file.id, fileName: file.name, mimeType: file.mimeType, meta: file.encryptionMeta as EncryptionMetaV1 });
@@ -48,14 +48,14 @@ export async function saveDecryptedFile(
   passphrase: string
 ) {
   const response = await fetch(`/api/files/${fileId}/preview`);
-  if (!response.ok) throw new Error("Gagal mengambil file terenkripsi");
+  if (!response.ok) throw new Error("Couldn't fetch the encrypted file");
   const plaintext = await decryptToBlob(await response.arrayBuffer(), passphrase, meta, mimeType);
   const id = startDownload(fileName);
   try {
     saveBlob(plaintext, fileName);
     finishDownload(id);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Gagal menyimpan file";
+    const msg = error instanceof Error ? error.message : "Couldn't save the file";
     failDownload(id, msg);
     throw error;
   }
@@ -73,7 +73,7 @@ export function downloadViewerSource(src: string, fileId: string, fileName: stri
       anchor.remove();
       finishDownload(id);
     } catch (error) {
-      failDownload(id, error instanceof Error ? error.message : "Gagal menyimpan file");
+      failDownload(id, error instanceof Error ? error.message : "Couldn't save the file");
     }
     return;
   }
@@ -156,7 +156,7 @@ export async function requestFolderArchive(folderId: string, folderName: string)
     for (let attempt = 0; attempt < 300; attempt += 1) {
       if (job.status === "ready") {
         const url = json.data.downloadUrl ?? (await getArchiveStatus(job.id)).downloadUrl;
-        if (!url) throw new Error("Archive URL belum tersedia");
+        if (!url) throw new Error("The archive URL isn't ready yet");
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = job.archiveName;
@@ -168,7 +168,7 @@ export async function requestFolderArchive(folderId: string, folderName: string)
         return;
       }
       if (job.status === "failed" || job.status === "expired") {
-        throw new Error(job.errorMessage ?? "Archive gagal diproses");
+        throw new Error(job.errorMessage ?? "The archive couldn't be built");
       }
 
       const now = performance.now();
@@ -183,7 +183,7 @@ export async function requestFolderArchive(folderId: string, folderName: string)
         json.data.downloadUrl = status.downloadUrl;
       }
     }
-    throw new Error("Archive terlalu lama diproses, silakan cek lagi nanti");
+    throw new Error("The archive is taking too long — check back in a little while");
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Archive download failed";
     failDownload(downloadId, msg);

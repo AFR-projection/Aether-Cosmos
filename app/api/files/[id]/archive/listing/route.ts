@@ -1,11 +1,14 @@
 import { NextRequest } from "next/server";
-import { eq, and, isNull } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth/session";
-import { canAccessUserResource } from "@/lib/auth/permissions";
+import { resolveFileAccess } from "@/lib/auth/permissions";
 import { downloadFromR2Stream } from "@/lib/storage/r2";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import {
+  ARCHIVE_INSPECT_MAX_BYTES,
+  archiveErrorResponse,
+  archiveTooLargeResponse,
+  readArchiveBuffer,
+} from "@/lib/storage/archive-read";
 import JSZip from "jszip";
 
 export async function GET(
@@ -16,14 +19,16 @@ export async function GET(
     const sessionUser = await requireAuth();
     const { id } = await params;
 
-    const [file] = await db
-      .select()
-      .from(files)
-      .where(and(eq(files.id, id), isNull(files.deletedAt)))
-      .limit(1);
-
-    if (!file || !canAccessUserResource(sessionUser, file.userId)) {
+    // Peeking inside an archive is a read: a member of the shared folder may do it.
+    const accessible = await resolveFileAccess(sessionUser, id);
+    if (!accessible?.canView) {
       return apiError("File not found", 404);
+    }
+    const file = accessible.file;
+
+    // Refuse before spending the bandwidth when the recorded size already says no.
+    if (Number(file.sizeBytes) > ARCHIVE_INSPECT_MAX_BYTES) {
+      return archiveTooLargeResponse();
     }
 
     const r2 = await downloadFromR2Stream(file.r2Key);
@@ -31,25 +36,15 @@ export async function GET(
       return apiError("File is empty", 404);
     }
 
-    const chunks: Uint8Array[] = [];
-    if (r2.body instanceof ReadableStream) {
-      const reader = r2.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-    } else if ("on" in r2.body && typeof (r2.body as NodeJS.ReadableStream).on === "function") {
-      const bufs: Buffer[] = [];
-      for await (const chunk of r2.body as AsyncIterable<Buffer>) {
-        bufs.push(chunk);
-      }
-      chunks.push(Buffer.concat(bufs));
-    } else {
-      return apiError("Unsupported stream type", 500);
+    let buffer: Buffer;
+    try {
+      buffer = await readArchiveBuffer(r2.body, ARCHIVE_INSPECT_MAX_BYTES);
+    } catch (error) {
+      const response = archiveErrorResponse(error);
+      if (response) return response;
+      throw error;
     }
 
-    const buffer = Buffer.concat(chunks);
     const zip = await JSZip.loadAsync(buffer);
 
     const entries: Array<{

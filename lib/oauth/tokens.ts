@@ -52,14 +52,23 @@ export async function issueTokens(input: {
   };
 }
 
+/**
+ * Rotate a refresh token. The old row is revoked by the SAME statement that
+ * selects it, so two concurrent refreshes cannot both succeed: the loser sees
+ * zero rows and gets `null`.
+ *
+ * With a SELECT-then-UPDATE, a stolen refresh token could be redeemed in
+ * parallel with the real client's rotation and both would receive a live access
+ * token — the exact replay window RFC 6749 §10.4 asks implementations to close.
+ */
 export async function refreshAccessToken(input: {
   refreshToken: string;
   clientId: string;
 }): Promise<OAuthTokenResponse | null> {
   const refreshHash = hashSecret(input.refreshToken);
   const [row] = await db
-    .select()
-    .from(oauthAccessTokens)
+    .update(oauthAccessTokens)
+    .set({ revokedAt: new Date() })
     .where(
       and(
         eq(oauthAccessTokens.refreshTokenHash, refreshHash),
@@ -68,14 +77,9 @@ export async function refreshAccessToken(input: {
         gt(oauthAccessTokens.refreshExpiresAt, new Date())
       )
     )
-    .limit(1);
+    .returning();
 
   if (!row) return null;
-
-  await db
-    .update(oauthAccessTokens)
-    .set({ revokedAt: new Date() })
-    .where(eq(oauthAccessTokens.id, row.id));
 
   return issueTokens({
     clientId: row.clientId,

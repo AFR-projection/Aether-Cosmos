@@ -1,6 +1,6 @@
 import { consumeAuthorizationCode } from "@/lib/oauth/codes";
 import { getOAuthClient } from "@/lib/oauth/clients";
-import { parseOAuthBody, oauthError, oauthJson } from "@/lib/oauth/http";
+import { parseOAuthBody, oauthBodyErrorResponse, oauthError, oauthJson } from "@/lib/oauth/http";
 import { issueTokens, refreshAccessToken } from "@/lib/oauth/tokens";
 import { verifySecret } from "@/lib/oauth/constants";
 
@@ -8,7 +8,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const body = await parseOAuthBody(request);
+  // The endpoint is unauthenticated, so the body is read through a byte ceiling; a
+  // refusal is an OAuth error, not an unhandled throw.
+  let body: Record<string, string>;
+  try {
+    body = await parseOAuthBody(request);
+  } catch (e) {
+    return oauthBodyErrorResponse(e) ?? oauthError("invalid_request", "Invalid request body", 400);
+  }
   const grantType = body.grant_type;
 
   if (grantType === "authorization_code") {

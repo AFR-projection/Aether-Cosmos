@@ -719,8 +719,14 @@ export const mailSenders = pgTable(
     /** AES-256-GCM ciphertext of the Gmail App Password (see lib/email/crypto.ts). */
     appPasswordEncrypted: text("app_password_encrypted").notNull(),
     displayName: text("display_name").notNull(),
-    /** Friendly From name shown to recipients, e.g. "Storage ByAFR". */
-    fromName: text("from_name").notNull().default("Storage ByAFR"),
+    /**
+     * Friendly From name shown to recipients, e.g. "Aether Cosmos ByAFR".
+     *
+     * A literal, not `APP_NAME` from `lib/app-version.ts`: drizzle-kit loads this
+     * file outside the Next.js module graph, where the `@/` alias is not resolved.
+     * Migration `0025_mail_from_name_rebrand.sql` keeps the column default in step.
+     */
+    fromName: text("from_name").notNull().default("Aether Cosmos ByAFR"),
     status: mailStatusEnum("status").notNull().default("unverified"),
     isActive: boolean("is_active").notNull().default(true),
     lastError: text("last_error"),
@@ -897,6 +903,7 @@ export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type Folder = typeof folders.$inferSelect;
 export type File = typeof files.$inferSelect;
+export type Share = typeof shares.$inferSelect;
 export type UploadSession = typeof uploadSessions.$inferSelect;
 export type UploadPart = typeof uploadParts.$inferSelect;
 export type ArchiveJob = typeof archiveJobs.$inferSelect;

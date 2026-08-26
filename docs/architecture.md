@@ -1,6 +1,6 @@
 # Architecture
 
-How Storage ByAFR is put together: the stack, the layout on disk, how a request
+How Aether Cosmos ByAFR is put together: the stack, the layout on disk, how a request
 flows, and where the security boundaries are.
 
 ---

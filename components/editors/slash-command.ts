@@ -13,26 +13,29 @@ import { SlashMenu, type SlashItem, type SlashMenuRef } from "./slash-menu";
  * dependency — a lightweight fixed-position wrapper keeps the bundle small.
  */
 
+/* Descriptions are shown to the author, so they follow the rest of the app's copy. The
+   keywords are invisible search aliases, so the Indonesian ones stay alongside the
+   English: both spellings find the block. */
 export const SLASH_ITEMS: SlashItem[] = [
-  { title: "Text", desc: "Paragraf biasa", icon: "Type", keywords: ["paragraph", "text", "teks"],
+  { title: "Text", desc: "Plain paragraph", icon: "Type", keywords: ["paragraph", "text", "teks"],
     run: (e, r) => e.chain().focus().deleteRange(r).setParagraph().run() },
-  { title: "Heading 1", desc: "Judul besar", icon: "Heading1", keywords: ["h1", "judul", "title"],
+  { title: "Heading 1", desc: "Large section title", icon: "Heading1", keywords: ["h1", "judul", "title", "heading"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 1 }).run() },
-  { title: "Heading 2", desc: "Sub-judul", icon: "Heading2", keywords: ["h2", "subjudul"],
+  { title: "Heading 2", desc: "Subsection title", icon: "Heading2", keywords: ["h2", "subjudul", "subheading"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 2 }).run() },
-  { title: "Heading 3", desc: "Sub-sub-judul", icon: "Heading3", keywords: ["h3"],
+  { title: "Heading 3", desc: "Smallest title", icon: "Heading3", keywords: ["h3", "heading"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 3 }).run() },
-  { title: "Bullet List", desc: "Daftar poin", icon: "List", keywords: ["ul", "bullet", "list", "daftar"],
+  { title: "Bullet List", desc: "Unordered list", icon: "List", keywords: ["ul", "bullet", "list", "daftar"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleBulletList().run() },
-  { title: "Numbered List", desc: "Daftar bernomor", icon: "ListOrdered", keywords: ["ol", "number", "nomor"],
+  { title: "Numbered List", desc: "Ordered list", icon: "ListOrdered", keywords: ["ol", "number", "nomor", "ordered"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleOrderedList().run() },
-  { title: "To-do List", desc: "Checklist tugas", icon: "ListChecks", keywords: ["todo", "task", "check", "checklist"],
+  { title: "To-do List", desc: "Task checklist", icon: "ListChecks", keywords: ["todo", "task", "check", "checklist", "tugas"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleTaskList().run() },
-  { title: "Quote", desc: "Kutipan", icon: "Quote", keywords: ["blockquote", "quote", "kutipan"],
+  { title: "Quote", desc: "Quoted passage", icon: "Quote", keywords: ["blockquote", "quote", "kutipan"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleBlockquote().run() },
-  { title: "Code Block", desc: "Blok kode", icon: "Code2", keywords: ["code", "kode", "pre"],
+  { title: "Code Block", desc: "Preformatted code", icon: "Code2", keywords: ["code", "kode", "pre"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleCodeBlock().run() },
-  { title: "Divider", desc: "Garis pemisah", icon: "Minus", keywords: ["hr", "divider", "rule", "garis"],
+  { title: "Divider", desc: "Horizontal rule", icon: "Minus", keywords: ["hr", "divider", "rule", "garis"],
     run: (e, r) => e.chain().focus().deleteRange(r).setHorizontalRule().run() },
 ];
 
@@ -70,47 +73,86 @@ export const SlashCommand = Extension.create({
         render: () => {
           let component: ReactRenderer<SlashMenuRef> | null = null;
           let wrapper: HTMLDivElement | null = null;
+          let raf = 0;
+          let dismissed = false;
+
+          const teardown = () => {
+            if (raf) cancelAnimationFrame(raf);
+            raf = 0;
+            wrapper?.remove();
+            component?.destroy();
+            wrapper = null;
+            component = null;
+          };
 
           const position = (rect: DOMRect | null) => {
             if (!wrapper || !rect) return;
-            // Fixed to the viewport; flip above the caret if near the bottom.
-            const menuH = 320;
-            const below = rect.bottom + menuH < window.innerHeight;
-            wrapper.style.left = `${rect.left}px`;
-            wrapper.style.top = below ? `${rect.bottom + 6}px` : `${rect.top - 6}px`;
-            wrapper.style.transform = below ? "none" : "translateY(-100%)";
+            /* Fixed to the viewport. The menu is measured rather than assumed: the old
+               version treated it as always 320px tall (its max-height) so a short filtered
+               list flipped above the caret while there was still room below, and it never
+               clamped `left`, so typing "/" near the right edge — or anywhere on a phone —
+               put the menu partly off-screen. Falls back to the CSS box while React is
+               still painting the first frame. */
+            const menu = wrapper.firstElementChild as HTMLElement | null;
+            const menuH = menu?.offsetHeight || 320;
+            const menuW = menu?.offsetWidth || 252;
+            const gap = 6;
+            const edge = 8;
+            const fitsBelow = rect.bottom + gap + menuH <= window.innerHeight - edge;
+            const top = fitsBelow
+              ? rect.bottom + gap
+              : Math.max(edge, rect.top - gap - menuH);
+            wrapper.style.left = `${Math.max(edge, Math.min(rect.left, window.innerWidth - menuW - edge))}px`;
+            wrapper.style.top = `${top}px`;
           };
 
           return {
             onStart: (props) => {
+              dismissed = false;
               component = new ReactRenderer(SlashMenu, {
                 props,
                 editor: props.editor,
               });
               wrapper = document.createElement("div");
               wrapper.style.position = "fixed";
-              wrapper.style.zIndex = "80";
+              // 90 is the floating-menu tier in the LAYER scale (components/ui/modal.tsx),
+              // the same one the note editor's export menu uses. It used to sit at 80,
+              // which is the dialog tier.
+              wrapper.style.zIndex = "90";
               wrapper.appendChild(component.element);
               document.body.appendChild(wrapper);
               position(props.clientRect?.() ?? null);
+              // React has not painted the menu yet, so the first pass positions a
+              // zero-height box. Measure again on the next frame.
+              raf = requestAnimationFrame(() => {
+                raf = 0;
+                position(props.clientRect?.() ?? null);
+              });
             },
             onUpdate: (props) => {
+              if (dismissed) return;
               component?.updateProps(props);
               position(props.clientRect?.() ?? null);
             },
             onKeyDown: (props) => {
               if (props.event.key === "Escape") {
-                wrapper?.remove();
-                wrapper = null;
+                /* Escape only takes the menu away: the suggestion itself stays active as
+                   long as the caret sits after the "/", so from here on every key has to
+                   fall through to the editor. Without the flag the torn-down menu still
+                   owned Enter, and pressing it for a new line applied whichever block was
+                   highlighted when the menu was dismissed. */
+                dismissed = true;
+                teardown();
                 return true;
               }
+              if (dismissed) return false;
               return component?.ref?.onKeyDown(props) ?? false;
             },
             onExit: () => {
-              wrapper?.remove();
-              component?.destroy();
-              wrapper = null;
-              component = null;
+              teardown();
+              // render() runs once per editor, so this closure outlives a single "/" —
+              // the next one starts with the menu allowed again.
+              dismissed = false;
             },
           };
         },

@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Spinner } from "@/components/system/spinner";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { init } from "pptx-preview";
+import { Presentation } from "lucide-react";
 import { usePreviewSource } from "@/hooks/use-preview-source";
-import { Button } from "@/components/ui/button";
-import { Download, Presentation, RefreshCw } from "lucide-react";
 import { downloadViewerSource } from "@/lib/download/download-actions";
+import {
+  ViewerBar,
+  ViewerDownloadButton,
+  ViewerLoading,
+  ViewerMessage,
+} from "./viewer-chrome";
 
 interface PptxViewerProps {
   src: string;
@@ -20,89 +24,85 @@ export function PptxViewer({ src, fileName, fileId }: PptxViewerProps) {
   const { arrayBuffer, loading, error } = usePreviewSource(src);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
+  // Bumped by "Try again" so the render effect re-runs without reloading the page.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!arrayBuffer || !wrapperRef.current) return;
+    const el = wrapperRef.current;
+    if (!arrayBuffer || !el) return;
 
     let cancelled = false;
     setRendering(true);
     setRenderError(null);
+    el.innerHTML = "";
 
-    // Clear previous render
-    if (wrapperRef.current) {
-      wrapperRef.current.innerHTML = "";
-    }
-
-    const el = wrapperRef.current;
-    if (!el) return;
+    const fail = () => {
+      if (cancelled) return;
+      setRenderError("This presentation could not be rendered in the browser.");
+      setRendering(false);
+    };
 
     try {
       const width = containerRef.current?.clientWidth ?? 960;
-      const height = Math.round(width * 9 / 16);
-      const previewer = init(el, { width: Math.min(width - 32, 960), height });
-
+      const previewer = init(el, {
+        width: Math.min(Math.max(width - 32, 320), 960),
+        height: Math.round(Math.min(Math.max(width - 32, 320), 960) * 9 / 16),
+      });
       previewer
         .preview(arrayBuffer)
         .then(() => {
           if (!cancelled) setRendering(false);
         })
-        .catch(() => {
-          if (!cancelled) {
-            setRenderError("Presentasi tidak dapat dirender");
-            setRendering(false);
-          }
-        });
+        .catch(fail);
     } catch {
-      if (!cancelled) {
-        setRenderError("Presentasi tidak dapat dirender");
-        setRendering(false);
-      }
+      fail();
     }
 
-    return () => { cancelled = true; };
-  }, [arrayBuffer]);
+    return () => {
+      cancelled = true;
+      el.innerHTML = "";
+    };
+  }, [arrayBuffer, attempt]);
 
-  if (loading || rendering) {
-    return (
-      <div className="flex items-center justify-center h-full bg-card">
-        <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
-          <p className="text-xs text-muted-foreground">Memuat presentasi...</p>
-        </div>
-      </div>
-    );
-  }
+  const handleDownload = useCallback(
+    () => downloadViewerSource(src, fileId, fileName),
+    [src, fileId, fileName]
+  );
 
-  if (error || renderError) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-card gap-3 px-6 text-center">
-        <Presentation className="h-10 w-10 opacity-40" />
-        <p className="text-sm">{error ?? renderError}</p>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>
-            <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Coba lagi
-          </Button>
-          <Button size="sm" onClick={() => downloadViewerSource(src, fileId, fileName)}>
-            <Download className="h-3.5 w-3.5 mr-1.5" /> Download
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  const message = error ?? renderError;
 
+  // The slide host stays mounted at all times: pptx-preview writes straight into
+  // this node, and unmounting it while rendering left the render in a detached
+  // element — a permanently blank viewer. States are layered over it instead.
   return (
-    <div ref={containerRef} className="flex flex-col h-full bg-neutral-900">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/30 bg-muted/20 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <Presentation className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-          <span className="text-xs text-muted-foreground truncate">{fileName}</span>
+    <div ref={containerRef} className="relative flex h-full flex-col bg-viewer-stage">
+      <ViewerBar icon={Presentation} fileName={fileName} tone="warning">
+        <ViewerDownloadButton onDownload={handleDownload} />
+      </ViewerBar>
+
+      <div className="relative min-h-0 flex-1 overflow-auto">
+        <div className="flex justify-center px-4 py-6">
+          <div ref={wrapperRef} className="pptx-preview-root" />
         </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => downloadViewerSource(src, fileId, fileName)}>
-          <Download className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="flex-1 overflow-auto flex justify-center py-6 px-4">
-        <div ref={wrapperRef} className="pptx-preview-root" />
+
+        {(loading || rendering) && (
+          <div className="absolute inset-0 bg-viewer-stage">
+            <ViewerLoading label={loading ? "Loading presentation…" : "Rendering slides…"} />
+          </div>
+        )}
+
+        {message && !loading && !rendering && (
+          <div className="absolute inset-0 bg-viewer-stage">
+            <ViewerMessage
+              icon={Presentation}
+              tone="warning"
+              title="Preview unavailable"
+              hint={message}
+              onRetry={() => setAttempt((n) => n + 1)}
+              onDownload={handleDownload}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

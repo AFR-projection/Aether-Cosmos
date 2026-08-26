@@ -4,7 +4,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { activityLogs, users, activityActionEnum } from "@/lib/db/schema";
 import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
+import { validateCsrf } from "@/lib/security";
+import { apiError, apiSuccess, handleApiError } from "@/lib/api/response";
 
 const logsSchema = z.object({
   userId: z.string().uuid().optional(),
@@ -16,6 +17,9 @@ const logsSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    // POST-as-query: no state changes, but it reads the whole audit trail, so it
+    // gets the same gate as every other privileged POST in the app.
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     await requireMasterOrApiKey(request, "monitoring");
     const params = logsSchema.parse(await request.json());
 

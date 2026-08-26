@@ -3,7 +3,7 @@ import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { users, type User } from "@/lib/db/schema";
-import { verifyPassword } from "@/lib/auth/password";
+import { verifyPassword, verifyDecoyPassword } from "@/lib/auth/password";
 import {
   getClientIp,
   destroySession,
@@ -11,10 +11,10 @@ import {
   AuthError,
 } from "@/lib/auth/session";
 import { logActivity } from "@/lib/auth/audit";
-import { peekRateLimit, checkRateLimit } from "@/lib/security";
+import { peekRateLimit, checkRateLimit, resetRateLimit } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { notifyUser } from "@/lib/email/notify-user";
-import { getAdminSettings } from "@/lib/admin-settings";
+import { getAdminSettings, loginLockoutPolicy, type LoginLockoutPolicy } from "@/lib/admin-settings";
 import { completeLogin } from "@/lib/auth/login-complete";
 import { verifyTotpCode, consumeRecoveryCode } from "@/lib/security/totp";
 import {
@@ -56,29 +56,53 @@ const loginSchema = z
     { message: "Credentials required" }
   );
 
-const ACCOUNT_MAX_FAILED = parseInt(process.env.RATE_LIMIT_LOGIN_MAX ?? "5", 10) || 5;
-const LOCKOUT_WINDOW_MS =
-  parseInt(process.env.RATE_LIMIT_LOGIN_WINDOW_MS ?? "900000", 10) || 15 * 60 * 1000;
-const IP_MAX_FAILED = parseInt(process.env.RATE_LIMIT_LOGIN_IP_MAX ?? "30", 10) || 30;
+/**
+ * Lockout thresholds come from Admin → Settings, read per request.
+ *
+ * They used to be module-level consts built from `RATE_LIMIT_LOGIN_*` env vars,
+ * which froze them at import time — changing a threshold meant a redeploy, and
+ * the "15 minutes" in the copy below was a separate hardcoded number that could
+ * disagree with the window actually being enforced.
+ */
+async function lockoutPolicy(): Promise<LoginLockoutPolicy> {
+  const settings = await getAdminSettings().catch(() => undefined);
+  return loginLockoutPolicy(settings);
+}
 
-const MSG_ACCOUNT_LOCKED =
-  "This account has been temporarily locked due to multiple failed login attempts. Please try again in 15 minutes.";
-const MSG_IP_THROTTLE =
-  "Too many login attempts from this IP address. Please try again in 15 minutes.";
+/**
+ * One message for "no such account" and for "wrong password". The old copy
+ * appended "N attempt(s) remaining before account lock" only when the account
+ * existed, which turned the login form into an account-existence oracle for
+ * anyone with a username list.
+ */
+const MSG_INVALID = "Invalid credentials";
+const msgAccountLocked = (minutes: number) =>
+  `This account has been temporarily locked due to multiple failed login attempts. Please try again in ${minutes} minutes.`;
+const msgIpThrottle = (minutes: number) =>
+  `Too many login attempts from this IP address. Please try again in ${minutes} minutes.`;
 
-async function recordIpFailure(ip: string, userId?: string) {
-  const result = await checkRateLimit(`login:${ip}`, IP_MAX_FAILED, LOCKOUT_WINDOW_MS);
+async function recordIpFailure(ip: string, policy: LoginLockoutPolicy, userId?: string) {
+  const result = await checkRateLimit(`login:${ip}`, policy.ipMax, policy.windowMs);
   if (!result.allowed && userId) {
     const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     if (u) {
       await logActivity(u, "ip_rate_limit", {
         ip,
-        metadata: { max: IP_MAX_FAILED, windowMs: LOCKOUT_WINDOW_MS },
+        metadata: { max: policy.ipMax, windowMs: policy.windowMs },
       });
     }
   }
   return result;
 }
+
+/**
+ * A 6-digit authenticator code is a 1-in-a-million guess, so the layer needs its
+ * own per-ACCOUNT ceiling: the IP limit alone lets a distributed guesser keep
+ * trying against a password it already knows, and the `users` lockout columns
+ * only cover the password and 2-Step Code layers.
+ */
+const TOTP_MAX_FAILED = 10;
+const totpKey = (userId: string) => `login:totp:${userId}`;
 
 /** Loads the user behind a staged token, re-checking status on every layer. */
 async function loadStagedUser(userId: string): Promise<User | null> {
@@ -130,10 +154,11 @@ export async function POST(request: NextRequest) {
   try {
     const ip = getClientIp(request);
     const userAgent = request.headers.get("user-agent") ?? "unknown";
+    const policy = await lockoutPolicy();
 
-    const ipStatus = await peekRateLimit(`login:${ip}`, IP_MAX_FAILED, LOCKOUT_WINDOW_MS);
+    const ipStatus = await peekRateLimit(`login:${ip}`, policy.ipMax, policy.windowMs);
     if (!ipStatus.allowed) {
-      return apiError(MSG_IP_THROTTLE, 429, { code: "IP_RATE_LIMIT" });
+      return apiError(msgIpThrottle(policy.windowMinutes), 429, { code: "IP_RATE_LIMIT" });
     }
 
     const body = await request.json();
@@ -148,7 +173,20 @@ export async function POST(request: NextRequest) {
       }
 
       const user = await loadStagedUser(pending.userId);
-      if (!user) return apiError("Invalid credentials", 401);
+      if (!user) return apiError(MSG_INVALID, 401);
+
+      const totpStatus = await peekRateLimit(
+        totpKey(user.id),
+        TOTP_MAX_FAILED,
+        policy.windowMs
+      );
+      if (!totpStatus.allowed) {
+        return apiError(
+          `Too many incorrect authentication codes. Please try again in ${policy.windowMinutes} minutes.`,
+          429,
+          { code: "2FA_LOCKED" }
+        );
+      }
 
       let totpOk = false;
       if (totpCode && user.totpSecret) {
@@ -168,15 +206,20 @@ export async function POST(request: NextRequest) {
         }
       }
       if (!totpOk) {
-        await recordIpFailure(ip, user.id);
+        await checkRateLimit(totpKey(user.id), TOTP_MAX_FAILED, policy.windowMs);
+        await recordIpFailure(ip, policy, user.id);
         return apiError("Invalid authentication code", 401, { code: "2FA_INVALID" });
       }
+
+      // A completed layer clears its own counter so a user who fumbled a code
+      // twice is not still one mistake from a lockout tomorrow.
+      await resetRateLimit(totpKey(user.id), policy.windowMs);
 
       return apiSuccess(
         await completeLogin(user, {
           ip,
           userAgent,
-          lockoutWindowMs: LOCKOUT_WINDOW_MS,
+          lockoutWindowMs: policy.windowMs,
           layers: ["password", "step_code", "totp"],
         })
       );
@@ -192,7 +235,7 @@ export async function POST(request: NextRequest) {
       }
 
       const user = await loadStagedUser(pending.userId);
-      if (!user) return apiError("Invalid credentials", 401);
+      if (!user) return apiError(MSG_INVALID, 401);
       if (!stepCode) return apiError("2-Step Code is required", 400);
 
       // Enrolment is handled by its own endpoint so this branch only ever
@@ -227,7 +270,7 @@ export async function POST(request: NextRequest) {
           })
           .where(eq(users.id, user.id));
 
-        await recordIpFailure(ip, user.id);
+        await recordIpFailure(ip, policy, user.id);
 
         if (shouldLock) {
           await logActivity(user, "step_code_lock", {
@@ -272,7 +315,7 @@ export async function POST(request: NextRequest) {
         await completeLogin(user, {
           ip,
           userAgent,
-          lockoutWindowMs: LOCKOUT_WINDOW_MS,
+          lockoutWindowMs: policy.windowMs,
           layers: ["password", "step_code"],
         })
       );
@@ -286,11 +329,15 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (!user) {
-      const ipResult = await recordIpFailure(ip);
+      // Spend a real argon2 verification anyway: an instant "no such user" reply
+      // next to a ~0.5 s "wrong password" reply is the same oracle, told by the
+      // clock instead of the body.
+      await verifyDecoyPassword(password!);
+      const ipResult = await recordIpFailure(ip, policy);
       if (!ipResult.allowed) {
-        return apiError(MSG_IP_THROTTLE, 429, { code: "IP_RATE_LIMIT" });
+        return apiError(msgIpThrottle(policy.windowMinutes), 429, { code: "IP_RATE_LIMIT" });
       }
-      return apiError("Invalid credentials", 401);
+      return apiError(MSG_INVALID, 401);
     }
 
     if (user.lockedUntil && new Date(user.lockedUntil) <= new Date()) {
@@ -303,7 +350,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
-      return apiError(MSG_ACCOUNT_LOCKED, 429, { code: "ACCOUNT_LOCKED" });
+      return apiError(msgAccountLocked(policy.windowMinutes), 429, { code: "ACCOUNT_LOCKED" });
     }
 
     if (user.status === "suspended") {
@@ -318,13 +365,13 @@ export async function POST(request: NextRequest) {
     const valid = await verifyPassword(password!, user.passwordHash);
     if (!valid) {
       const newAttempts = (user.failedLoginAttempts ?? 0) + 1;
-      const shouldLock = newAttempts >= ACCOUNT_MAX_FAILED;
+      const shouldLock = newAttempts >= policy.accountMax;
 
       await db
         .update(users)
         .set({
           failedLoginAttempts: newAttempts,
-          lockedUntil: shouldLock ? new Date(Date.now() + LOCKOUT_WINDOW_MS) : null,
+          lockedUntil: shouldLock ? new Date(Date.now() + policy.windowMs) : null,
           updatedAt: new Date(),
         })
         .where(eq(users.id, user.id));
@@ -335,14 +382,14 @@ export async function POST(request: NextRequest) {
           userAgent,
           success: false,
           attempt: newAttempts,
-          maxAttempts: ACCOUNT_MAX_FAILED,
+          maxAttempts: policy.accountMax,
           locked: shouldLock,
         },
       });
 
-      const ipResult = await recordIpFailure(ip, user.id);
+      const ipResult = await recordIpFailure(ip, policy, user.id);
       if (!ipResult.allowed) {
-        return apiError(MSG_IP_THROTTLE, 429, { code: "IP_RATE_LIMIT" });
+        return apiError(msgIpThrottle(policy.windowMinutes), 429, { code: "IP_RATE_LIMIT" });
       }
 
       if (shouldLock) {
@@ -352,16 +399,12 @@ export async function POST(request: NextRequest) {
         });
         void notifyUser(user.id, {
           type: "account_locked",
-          minutes: Math.round(LOCKOUT_WINDOW_MS / 60000),
+          minutes: policy.windowMinutes,
         });
-        return apiError(MSG_ACCOUNT_LOCKED, 429, { code: "ACCOUNT_LOCKED" });
+        return apiError(msgAccountLocked(policy.windowMinutes), 429, { code: "ACCOUNT_LOCKED" });
       }
 
-      const remaining = ACCOUNT_MAX_FAILED - newAttempts;
-      return apiError(
-        `Invalid credentials. ${remaining} attempt(s) remaining before account lock.`,
-        401
-      );
+      return apiError(MSG_INVALID, 401);
     }
 
     await db
@@ -391,7 +434,7 @@ export async function POST(request: NextRequest) {
       await completeLogin(user, {
         ip,
         userAgent,
-        lockoutWindowMs: LOCKOUT_WINDOW_MS,
+        lockoutWindowMs: policy.windowMs,
         layers: ["password"],
       })
     );

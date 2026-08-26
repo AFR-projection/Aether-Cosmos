@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for Storage ByAFR deployment scripts
+# Shared helpers for Aether Cosmos ByAFR deployment scripts
 
 set -euo pipefail
 
@@ -204,9 +204,9 @@ start_nginx_container() {
 
 print_banner() {
   echo
-  echo -e "${BOLD}==========================================${NC}"
-  echo -e "${BOLD}  Storage ByAFR — Production Installer${NC}"
-  echo -e "${BOLD}==========================================${NC}"
+  echo -e "${BOLD}==============================================${NC}"
+  echo -e "${BOLD}  Aether Cosmos ByAFR — Production Installer${NC}"
+  echo -e "${BOLD}==============================================${NC}"
   echo
 }
 

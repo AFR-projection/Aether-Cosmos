@@ -1,6 +1,6 @@
 # Development
 
-Working on Storage ByAFR: commands, verification gates, and the conventions the
+Working on Aether Cosmos ByAFR: commands, verification gates, and the conventions the
 codebase already follows.
 
 Initial setup is in [Getting Started](getting-started.md).

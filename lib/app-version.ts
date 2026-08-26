@@ -16,3 +16,26 @@ export const APP_VERSION = "0.4.0";
 
 /** Display form, e.g. for a settings row or an about dialog. */
 export const APP_VERSION_LABEL = `v${APP_VERSION}`;
+
+/**
+ * The product name, in one place so a rebrand cannot leave half the app behind.
+ *
+ * Deliberately NOT used for four kinds of string that still contain the old name:
+ *   - the mail key-derivation salt in `lib/email/crypto.ts` — changing it makes
+ *     every stored Gmail App Password undecryptable, and it is invisible to users;
+ *   - the `storagebyafr:` DOM event in `lib/system/quick-actions.ts` and the
+ *     `sbyafr_*` storage keys in `lib/activity/*` — renaming these silently drops
+ *     state users already have saved in their browser;
+ *   - the deployment identifiers (the PM2 process, the npm package name, the
+ *     `/opt/storage-by-afr` path, the R2 bucket) — renaming those breaks the live VPS;
+ *   - `drizzle/*.sql` files that have already been applied.
+ * Those are infrastructure, not brand.
+ */
+export const APP_NAME = "Aether Cosmos ByAFR";
+
+/**
+ * The short form, for places with a hard character budget: the PWA `short_name`
+ * (home-screen label, truncated past ~12 chars by both iOS and Android) and the
+ * iOS web-app title. "Aether" alone is the distinctive half of the name.
+ */
+export const APP_SHORT_NAME = "Aether";

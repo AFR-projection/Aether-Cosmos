@@ -1,6 +1,6 @@
 # 🚀 Getting Started
 
-Complete guide for installing and configuring Storage ByAFR for local development.
+Complete guide for installing and configuring Aether Cosmos ByAFR for local development.
 
 ---
 
@@ -61,16 +61,12 @@ NODE_ENV="development"
 # Redis (optional)
 REDIS_URL="redis://localhost:6379"
 REDIS_DISABLED="true"  # Set true if not using Redis
-
-# Upload Limits
-MAX_FILE_SIZE_BYTES="5368709120"  # 5GB default
-UPLOAD_URL_EXPIRY_SECONDS="900"   # 15 minutes
-DOWNLOAD_URL_EXPIRY_SECONDS="60"  # 1 minute
-
-# Rate Limiting
-RATE_LIMIT_LOGIN_MAX="5"
-RATE_LIMIT_LOGIN_WINDOW_MS="900000"  # 15 minutes
 ```
+
+Upload ceilings, presigned-URL lifetimes, login lockout thresholds, session
+timeouts and sharing policy are **not** environment variables — they live in
+**Admin → Settings**, are stored in the database and take effect within about 30
+seconds without a redeploy.
 
 ### 3. Database Setup
 
@@ -154,13 +150,28 @@ Then set `REDIS_DISABLED=false` in `.env`.
 | `BRAIN_EMBEDDING_PROVIDER` | ❌ | `none` | Embedding provider: `none` (default, semantic search abstains) or `openai` / `voyageai` (requires API key). See [Second Brain 2.0 § Embeddings](second-brain-2.0.md#embeddings). |
 | `REDIS_URL` | ❌ | `redis://localhost:6379` | Redis connection string |
 | `REDIS_DISABLED` | ❌ | `false` | Set `true` to disable Redis |
-| `MAX_FILE_SIZE_BYTES` | ❌ | `5368709120` | Maximum file size (5GB) |
-| `UPLOAD_URL_EXPIRY_SECONDS` | ❌ | `900` | Presigned upload URL expiry (15 min) |
-| `DOWNLOAD_URL_EXPIRY_SECONDS` | ❌ | `60` | Presigned download URL expiry (1 min) |
-| `RATE_LIMIT_LOGIN_MAX` | ❌ | `5` | Maximum login attempts |
-| `RATE_LIMIT_LOGIN_WINDOW_MS` | ❌ | `900000` | Rate limit window (15 minutes) |
 | `NODE_ENV` | ❌ | `development` | Environment mode |
 | `COOKIE_SECURE` | ❌ | `false` | Set `true` for production (HTTPS) |
+
+### Configured in the UI, not the environment
+
+These used to be environment variables and are now fields in **Admin → Settings**,
+persisted in the database and applied within ~30 seconds:
+
+| Setting | Section | Default | Replaces |
+|---------|---------|---------|----------|
+| Max Upload Size | Storage | `500 MB` | `MAX_FILE_SIZE_BYTES` |
+| Upload URL Lifetime | Storage | `15 min` | `UPLOAD_URL_EXPIRY_SECONDS` |
+| Download URL Lifetime | Storage | `60 s` | `DOWNLOAD_URL_EXPIRY_SECONDS` |
+| Idle Timeout | Security | `0` (off) | `SESSION_INACTIVITY_MS` |
+| IP Binding | Security | `auto` (production only) | `SESSION_IP_BIND` |
+| Failed Logins per Account | Limits | `5` | `RATE_LIMIT_LOGIN_MAX` |
+| Failed Logins per IP | Limits | `30` | `RATE_LIMIT_LOGIN_IP_MAX` |
+| Lockout Window | Limits | `15 min` | `RATE_LIMIT_LOGIN_WINDOW_MS` |
+
+`COOKIE_SECURE` and `HSTS_ENABLED` stay environment-only on purpose: a
+database-backed toggle would let a compromised admin account downgrade transport
+security.
 
 ---
 

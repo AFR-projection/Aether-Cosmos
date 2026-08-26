@@ -111,7 +111,7 @@ export function buildArchiveMembers(
     format: BRAIN_ARCHIVE_FORMAT,
     formatVersion: BRAIN_ARCHIVE_VERSION,
     exportedAt: new Date().toISOString(),
-    generator: "storage-byafr/second-brain",
+    generator: "aether-cosmos-byafr/second-brain",
     brain: { id: brain.id, name: brain.name, description: brain.description ?? null },
     members: members.map((member) => ({
       path: member.path,

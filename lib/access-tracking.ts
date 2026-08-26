@@ -73,7 +73,7 @@ async function queryIpapi(ip: string): Promise<LocationInfo | null> {
   try {
     const res = await fetch(`https://ipapi.co/${ip}/json/`, {
       signal: controller.signal,
-      headers: { "User-Agent": "StorageByAFR/1.0" },
+      headers: { "User-Agent": "AetherCosmosByAFR/1.0" },
     });
     clearTimeout(timeout);
     if (!res.ok) return null;

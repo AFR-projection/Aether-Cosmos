@@ -1,6 +1,7 @@
 import { appPublicUrl } from "@/lib/env/runtime";
 import { API_V1_ENDPOINTS } from "@/lib/api/v1-docs";
 import { MASTER_API_ENDPOINTS } from "@/lib/api/master-v1-docs";
+import { APP_NAME } from "@/lib/app-version";
 
 export function buildOpenApiSpec(includeAdmin = false) {
   const baseUrl = appPublicUrl() || "https://storage.example.com";
@@ -30,7 +31,7 @@ export function buildOpenApiSpec(includeAdmin = false) {
   return {
     openapi: "3.0.3",
     info: {
-      title: includeAdmin ? "Storage ByAFR — Master API" : "Storage ByAFR API",
+      title: includeAdmin ? `${APP_NAME} — Master API` : `${APP_NAME} API`,
       version: "1.0.0",
       description: includeAdmin
         ? "Full platform API including admin routes. Requires skm_ master key with appropriate scopes."

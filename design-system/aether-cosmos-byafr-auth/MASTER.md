@@ -6,7 +6,7 @@
 
 ---
 
-**Project:** Storage ByAFR Auth
+**Project:** Aether Cosmos ByAFR Auth
 **Generated:** 2026-08-09 02:47:46
 **Category:** File Manager & Transfer
 **Design Dials:** Variance 7/10 (Balanced / Modern) | Motion 5/10 (Standard) | Density 3/10 (Spacious)

@@ -76,6 +76,24 @@ function subscribeCollapsed(callback: () => void) {
   return () => window.removeEventListener("storage", callback);
 }
 
+/**
+ * The wordmark, in one place because the header renders it twice — once inside a
+ * `motion.div` that collapses on desktop, once plain on mobile. "Aether Cosmos"
+ * stays in the foreground so it holds contrast; only "ByAFR" takes the accent
+ * gradient, which is what makes the initials read as the signature.
+ *
+ * 13px, not the 14px the rest of the header uses: the expanded rail is 240px and
+ * the mark has ~160px after the icon and padding, which nineteen characters of
+ * bold 14px would overrun into a truncated brand name.
+ */
+function Wordmark() {
+  return (
+    <p className="truncate text-[13px] font-bold leading-tight tracking-tight">
+      Aether Cosmos <span className="text-gradient">ByAFR</span>
+    </p>
+  );
+}
+
 function SidebarInner({
   user,
   collapsed,
@@ -129,12 +147,12 @@ function SidebarInner({
             animate={{ opacity: collapsed ? 0 : 1, width: collapsed ? 0 : "auto" }}
             className="min-w-0 overflow-hidden"
           >
-            <p className="truncate text-sm font-bold text-gradient">Storage ByAFR</p>
+            <Wordmark />
             <p className="truncate text-xs text-muted-foreground/80">@{user.username}</p>
           </motion.div>
         ) : (
           <div className="min-w-0 overflow-hidden">
-            <p className="truncate text-sm font-bold text-gradient">Storage ByAFR</p>
+            <Wordmark />
             <p className="truncate text-xs text-muted-foreground/80">@{user.username}</p>
           </div>
         )}

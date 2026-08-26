@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
+import { appSecret } from "@/lib/security/app-secret";
 
 /**
  * At-rest encryption for Gmail App Passwords. Admins paste a 16-char App
@@ -6,14 +7,15 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypt
  * transport, so it can't be one-way hashed — instead it's encrypted with
  * AES-256-GCM under a key derived from SESSION_SECRET. The DB only ever holds
  * ciphertext, so a DB dump alone can't send mail as the sender.
+ *
+ * The key comes from `lib/security/app-secret.ts`, which refuses to fall back to
+ * the public development placeholder in production — otherwise a deployment with
+ * SESSION_SECRET unset would encrypt every App Password under a key that is in
+ * the source tree.
  */
 
 const ALGO = "aes-256-gcm";
 const KEY_SALT = "storagebyafr:mail-sender:v1";
-
-function appSecret(): string {
-  return process.env.SESSION_SECRET || process.env.CSRF_SECRET || "dev-insecure-secret-change-me";
-}
 
 /** Derive a stable 32-byte key from the app secret (scrypt, fixed salt). */
 function key(): Buffer {

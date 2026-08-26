@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { APP_NAME, APP_SHORT_NAME } from "@/lib/app-version";
 
 /**
  * PWA manifest — makes the app installable to the home screen and lets it run
@@ -7,8 +8,8 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Storage ByAFR",
-    short_name: "Storage",
+    name: APP_NAME,
+    short_name: APP_SHORT_NAME,
     description: "Premium cloud storage — fast, secure, and elegant",
     start_url: "/files",
     scope: "/",

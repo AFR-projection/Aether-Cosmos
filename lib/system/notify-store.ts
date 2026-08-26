@@ -16,6 +16,8 @@ export type SystemNotice = {
   tone: NotifyTone;
   duration: number;
   createdAt: number;
+  /** How many times this same message arrived while it was on screen. */
+  count: number;
 };
 
 type Listener = () => void;
@@ -28,6 +30,14 @@ type NotifyInput = {
 };
 
 const MAX_TOASTS = 4;
+/**
+ * Two subsystems can describe the same event — a local upload queue finishing
+ * and the realtime channel reporting the same file, "Back online" and
+ * "Reconnected" — and the user reads that as the app stuttering. An identical
+ * message that lands while the first is still on screen bumps a counter
+ * instead of stacking a second card.
+ */
+const DEDUP_WINDOW_MS = 8000;
 
 /** Stable empty snapshot for useSyncExternalStore getServerSnapshot (never allocate a new []). */
 export const EMPTY_NOTICES: readonly SystemNotice[] = Object.freeze([]);
@@ -60,22 +70,59 @@ export function subscribeSystemNotices(listener: Listener) {
   };
 }
 
+/** Auto-dismiss timers, kept so a collapsed repeat can restart its own clock. */
+const dismissTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearDismiss(id: string) {
+  const timer = dismissTimers.get(id);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  dismissTimers.delete(id);
+}
+
+function scheduleDismiss(notice: SystemNotice) {
+  clearDismiss(notice.id);
+  if (notice.duration <= 0 || typeof window === "undefined") return;
+  dismissTimers.set(
+    notice.id,
+    setTimeout(() => dismissNotice(notice.id), notice.duration)
+  );
+}
+
 export function notify(input: NotifyInput): string {
+  const description = input.description;
+  const duration = input.duration ?? 4200;
+  const now = Date.now();
+
+  const twin = notices.find(
+    (candidate) =>
+      candidate.title === input.title &&
+      candidate.description === description &&
+      now - candidate.createdAt < DEDUP_WINDOW_MS
+  );
+  if (twin) {
+    const merged: SystemNotice = { ...twin, count: twin.count + 1, createdAt: now, duration };
+    notices = notices.map((candidate) => (candidate.id === twin.id ? merged : candidate));
+    emit(noticeListeners);
+    scheduleDismiss(merged);
+    return twin.id;
+  }
+
   const id = uid();
   const notice: SystemNotice = {
     id,
     title: input.title,
-    description: input.description,
+    description,
     tone: input.tone ?? "system",
-    duration: input.duration ?? 4200,
-    createdAt: Date.now(),
+    duration,
+    createdAt: now,
+    count: 1,
   };
+  const dropped = notices.slice(MAX_TOASTS - 1);
   notices = [notice, ...notices].slice(0, MAX_TOASTS);
+  for (const gone of dropped) clearDismiss(gone.id);
   emit(noticeListeners);
-
-  if (notice.duration > 0) {
-    window.setTimeout(() => dismissNotice(id), notice.duration);
-  }
+  scheduleDismiss(notice);
   return id;
 }
 
@@ -83,6 +130,7 @@ export function dismissNotice(id: string) {
   const next = notices.filter((n) => n.id !== id);
   if (next.length === notices.length) return;
   notices = next;
+  clearDismiss(id);
   emit(noticeListeners);
 }
 

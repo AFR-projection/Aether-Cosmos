@@ -14,6 +14,7 @@ import {
   getPasswordPolicyRules,
 } from "@/lib/security/password-policy";
 import { cn } from "@/lib/utils";
+import { APP_NAME } from "@/lib/app-version";
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -131,7 +132,7 @@ export default function ChangePasswordPage() {
         </form>
 
         <p className="mt-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-          <Cloud className="h-3.5 w-3.5" /> Storage ByAFR
+          <Cloud className="h-3.5 w-3.5" /> {APP_NAME}
         </p>
       </motion.div>
     </div>

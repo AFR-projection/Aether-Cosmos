@@ -1,56 +1,69 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Spinner } from "@/components/system/spinner";
+import { useEffect, useMemo, useState } from "react";
 import DOMPurify from "isomorphic-dompurify";
+import { ViewerLoading } from "./viewer-chrome";
 
 interface SvgViewerProps {
   src: string;
   fileName: string;
 }
 
+/**
+ * Inlines the SVG (sanitized) so it scales crisply and can inherit page zoom.
+ * If the text fetch fails we still fall back to the browser's own image
+ * decoding rather than showing an error for a file it can probably display.
+ */
 export function SvgViewer({ src, fileName }: SvgViewerProps) {
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     fetch(src, { credentials: "include" })
       .then((r) => {
         if (!r.ok) throw new Error("Failed to load");
         return r.text();
       })
       .then((text) => {
+        if (cancelled) return;
         setSvgContent(text);
         setLoading(false);
       })
       .catch(() => {
+        if (cancelled) return;
         setError(true);
         setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [src]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Spinner size="md" />
-      </div>
-    );
-  }
+  const sanitized = useMemo(
+    () => (svgContent ? DOMPurify.sanitize(svgContent) : ""),
+    [svgContent]
+  );
+
+  if (loading) return <ViewerLoading label="Loading vector…" />;
 
   if (error || !svgContent) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <img src={src} alt={fileName} className="max-w-full max-h-full object-contain" />
+      <div className="checkerboard flex h-full items-center justify-center p-6">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={fileName} className="max-h-full max-w-full object-contain" />
       </div>
     );
   }
 
   return (
-    <div className="flex items-center justify-center h-full p-6 bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#222_0%_50%)] bg-[length:20px_20px] dark:bg-[repeating-conic-gradient(#333_0%_25%,#2a2a2a_0%_50%)]">
+    <div className="checkerboard flex h-full items-center justify-center p-6">
       <div
-        className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:h-auto"
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(svgContent) }}
+        role="img"
+        aria-label={fileName}
+        className="max-h-full max-w-full [&>svg]:h-auto [&>svg]:max-h-full [&>svg]:max-w-full"
+        dangerouslySetInnerHTML={{ __html: sanitized }}
       />
     </div>
   );

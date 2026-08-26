@@ -9,7 +9,7 @@ POST /api/brain/mcp
 
 - Transport: **Streamable HTTP**, stateless
 - Auth: `Authorization: Bearer sk_<agent key>`
-- Server name: `storage-byafr-brain`
+- Server name: `aether-cosmos-brain`
 
 Stateless matters: no `Mcp-Session-Id` is issued or required, so nothing depends on
 a session map held in one process's memory. The endpoint works unchanged behind
@@ -44,7 +44,7 @@ agents already connected — no secrets.
 ```json
 {
   "mcpServers": {
-    "storage-byafr-brain": {
+    "aether-cosmos-brain": {
       "type": "http",
       "url": "https://your-app.example.com/api/brain/mcp",
       "headers": { "Authorization": "Bearer sk_YOUR_AGENT_KEY" }

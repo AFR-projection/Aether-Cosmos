@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Cloud, Loader2, AlertCircle, Eye, Clock } from "lucide-react";
-import { formatBytes, getMimeCategory, getFileExtension } from "@/lib/utils";
+import { cn, formatBytes, getMimeCategory, getFileExtension } from "@/lib/utils";
 import dynamic from "next/dynamic";
 
 const PdfViewer = dynamic(() => import("@/components/media-viewers/pdf-viewer").then((m) => m.PdfViewer), { ssr: false });
@@ -13,6 +13,52 @@ const AudioViewer = dynamic(() => import("@/components/media-viewers/audio-viewe
 const TextViewer = dynamic(() => import("@/components/media-viewers/text-viewer").then((m) => m.TextViewer), { ssr: false });
 const SvgViewer = dynamic(() => import("@/components/media-viewers/svg-viewer").then((m) => m.SvgViewer), { ssr: false });
 const SharedNoteView = dynamic(() => import("@/components/editors/shared-note-view").then((m) => m.SharedNoteView), { ssr: false });
+
+/**
+ * The limits attached to the link, as the recipient sees them: how many views are left and
+ * when it stops working. Written once and used by all three layouts below — the same two
+ * facts were hand-repeated in each, which is how "12 / 20" ended up meaning nothing on its
+ * own and how a quota of 0 used to render a stray "0" instead of the row.
+ */
+function ShareMeta({
+  accessCount,
+  maxAccessCount,
+  expiresAt,
+  center,
+}: {
+  accessCount?: number;
+  maxAccessCount?: number;
+  expiresAt?: string;
+  center?: boolean;
+}) {
+  const hasQuota = typeof maxAccessCount === "number" && maxAccessCount > 0;
+  if (!hasQuota && !expiresAt) return null;
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground",
+        center && "justify-center"
+      )}
+    >
+      {hasQuota && (
+        <span className="flex items-center gap-1" title="Views used">
+          <Eye aria-hidden className="h-3 w-3 shrink-0" />
+          <span className="tabular-nums">
+            {accessCount ?? 0} / {maxAccessCount}
+          </span>
+          {/* The numbers alone read as "12 slash 20" and mean nothing without this. */}
+          <span className="sr-only">views used</span>
+        </span>
+      )}
+      {expiresAt && (
+        <span className="flex items-center gap-1" title="When this link stops working">
+          <Clock aria-hidden className="h-3 w-3 shrink-0" />
+          <span>Expires {new Date(expiresAt).toLocaleString()}</span>
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function PublicSharedPage() {
   const params = useParams();
@@ -40,18 +86,25 @@ export default function PublicSharedPage() {
 
   if (!data) {
     return (
-      <div className="flex min-h-dvh items-center justify-center">
+      <main className="flex min-h-dvh items-center justify-center p-4">
         <div className="text-center">
           {error ? (
             <>
-              <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground/30 mb-4" />
-              <p className="text-muted-foreground">{error}</p>
+              <AlertCircle aria-hidden className="mx-auto mb-4 h-12 w-12 text-muted-foreground/30" />
+              {/* A share that refuses to open is the whole page, so the reason has to be
+                  announced rather than just drawn. */}
+              <p role="alert" className="text-muted-foreground">
+                {error}
+              </p>
             </>
           ) : (
-            <Loader2 className="h-8 w-8 animate-spin text-accent" />
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 aria-hidden className="h-4 w-4 animate-spin text-accent" />
+              Loading shared file…
+            </p>
           )}
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -65,7 +118,7 @@ export default function PublicSharedPage() {
 
   const canPreview = category === "pdf" || category === "image" || category === "video" || category === "audio" || isSvg || isText;
 
-  // Gunakan streaming endpoint publik — view only, no download
+  // Public streaming endpoint — view only, never a download URL.
   const previewUrl = `/api/shared/${token}/preview`;
 
   const noteTitle = data.file.name.replace(/\.note$/, "");
@@ -74,65 +127,49 @@ export default function PublicSharedPage() {
   // streaming a file that doesn't exist.
   if (isNote) {
     return (
-      <div className="min-h-dvh bg-background">
-        <div className="flex flex-col min-h-dvh">
+      <main className="min-h-dvh bg-background">
+        <div className="flex min-h-dvh flex-col">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 shrink-0">
-            <div className="flex items-center gap-3 min-w-0">
-              <Cloud className="h-5 w-5 text-accent shrink-0" />
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Cloud aria-hidden className="h-5 w-5 shrink-0 text-accent" />
               <h1 className="truncate text-sm font-semibold">{noteTitle}</h1>
             </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              {data.maxAccessCount && (
-                <div className="flex items-center gap-1">
-                  <Eye className="h-3 w-3" />
-                  <span>{data.accessCount} / {data.maxAccessCount}</span>
-                </div>
-              )}
-              {data.expiresAt && (
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  <span>{new Date(data.expiresAt).toLocaleString()}</span>
-                </div>
-              )}
-            </div>
+            <ShareMeta
+              accessCount={data.accessCount}
+              maxAccessCount={data.maxAccessCount}
+              expiresAt={data.expiresAt}
+            />
           </div>
 
           <div className="flex-1 overflow-y-auto">
             <SharedNoteView token={token} content={data.note?.content ?? null} canEdit={canEdit} />
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="min-h-dvh bg-background">
+    <main className="min-h-dvh bg-background">
       {canPreview ? (
-        <div className="h-screen flex flex-col">
+        // dvh, not vh: the phone's own chrome counts towards vh, so the viewer's bottom
+        // edge — and its controls — sat under the address bar.
+        <div className="flex h-dvh flex-col">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 shrink-0">
-            <div className="flex items-center gap-3 min-w-0">
-              <Cloud className="h-5 w-5 text-accent shrink-0" />
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Cloud aria-hidden className="h-5 w-5 shrink-0 text-accent" />
               <div className="min-w-0">
                 <h1 className="truncate text-sm font-semibold">{data.file.name}</h1>
-                <p className="text-[11px] text-muted-foreground">{formatBytes(data.file.sizeBytes)}</p>
+                <p className="text-xs text-muted-foreground">{formatBytes(data.file.sizeBytes)}</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              {data.maxAccessCount && (
-                <div className="flex items-center gap-1">
-                  <Eye className="h-3 w-3" />
-                  <span>{data.accessCount} / {data.maxAccessCount}</span>
-                </div>
-              )}
-              {data.expiresAt && (
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  <span>{new Date(data.expiresAt).toLocaleString()}</span>
-                </div>
-              )}
-            </div>
+            <ShareMeta
+              accessCount={data.accessCount}
+              maxAccessCount={data.maxAccessCount}
+              expiresAt={data.expiresAt}
+            />
           </div>
 
           {/* Preview — view only, no download button */}
@@ -148,27 +185,23 @@ export default function PublicSharedPage() {
       ) : (
         <div className="flex min-h-dvh items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 text-center shadow-medium">
-            <Cloud className="mx-auto h-12 w-12 text-accent mb-4" />
-            <h1 className="text-xl font-bold truncate">{data.file.name}</h1>
-            <p className="text-sm text-muted-foreground mt-1">{formatBytes(data.file.sizeBytes)}</p>
-            <div className="mt-4 space-y-2 text-xs text-muted-foreground">
-              {data.maxAccessCount && (
-                <div className="flex items-center justify-center gap-1">
-                  <Eye className="h-3 w-3" />
-                  <span>{data.accessCount} / {data.maxAccessCount} akses</span>
-                </div>
-              )}
-              {data.expiresAt && (
-                <div className="flex items-center justify-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  <span>Kadaluarsa: {new Date(data.expiresAt).toLocaleString()}</span>
-                </div>
-              )}
+            <Cloud aria-hidden className="mx-auto mb-4 h-12 w-12 text-accent" />
+            <h1 className="truncate text-xl font-bold">{data.file.name}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{formatBytes(data.file.sizeBytes)}</p>
+            <div className="mt-4">
+              <ShareMeta
+                center
+                accessCount={data.accessCount}
+                maxAccessCount={data.maxAccessCount}
+                expiresAt={data.expiresAt}
+              />
             </div>
-            <p className="mt-4 text-xs text-muted-foreground/60">Tipe file ini tidak bisa dipratinjau</p>
+            <p className="mt-4 text-xs text-muted-foreground">
+              This file type can&apos;t be previewed here.
+            </p>
           </div>
         </div>
       )}
-    </div>
+    </main>
   );
 }

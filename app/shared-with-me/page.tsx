@@ -1,28 +1,27 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { motion, AnimatePresence } from "framer-motion";
-import { apiFetch } from "@/lib/api/client";
-import { cn, formatDate } from "@/lib/utils";
+import { motion, AnimatePresence, MotionConfig } from "framer-motion";
 import {
-  Mail,
+  AlertCircle,
+  ArrowUpRight,
   Check,
-  X,
-  ArrowLeft,
-  Loader2,
   Eye,
-  Pencil,
-  FolderOpen,
-  Users,
-  Clock,
-  FolderClosed,
   Folder,
-  Bell,
-  Sparkles,
-  UserPlus,
+  FolderOpen,
+  Inbox,
+  Loader2,
+  Mail,
+  Pencil,
+  RefreshCw,
+  Search,
+  X,
 } from "lucide-react";
+import { apiFetch } from "@/lib/api/client";
+import { formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useState, useRef, useEffect } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 
 interface Invitation {
@@ -45,11 +44,38 @@ interface SharedEntry {
   ownerUsername: string;
 }
 
+type SortKey = "recent" | "name" | "owner";
+
+/**
+ * One wording for each access level, used by both the invitation rows and the
+ * folder cards — the old page said "Edit" in one place and "Can Edit" in the
+ * other for the same permission.
+ */
+const ROLE = {
+  edit: { label: "Can edit", icon: Pencil },
+  view: { label: "View only", icon: Eye },
+} as const;
+
+function RoleChip({ role }: { role: "view" | "edit" }) {
+  const { label, icon: Icon } = ROLE[role];
+  // Icon plus word, never colour alone: the accent tint on "Can edit" is a
+  // second signal, not the only one.
+  return (
+    <span className="shr-role" data-role={role}>
+      <Icon aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+function initial(name: string) {
+  return name.trim().charAt(0) || "?";
+}
+
 export default function SharedWithMePage() {
   const queryClient = useQueryClient();
-  const [invitationsOpen, setInvitationsOpen] = useState(false);
-  const popupRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortKey>("recent");
 
   const invitationsQuery = useQuery({
     queryKey: ["invitations"],
@@ -84,311 +110,304 @@ export default function SharedWithMePage() {
     },
   });
 
-  // Close popup when clicking outside
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        popupRef.current &&
-        buttonRef.current &&
-        !popupRef.current.contains(e.target as Node) &&
-        !buttonRef.current.contains(e.target as Node)
-      ) {
-        setInvitationsOpen(false);
-      }
-    }
-    if (invitationsOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [invitationsOpen]);
+  // Memoised rather than derived inline: the filtered list below takes these as
+  // dependencies, and a fresh array on every render defeats that memo (the
+  // React Compiler lint treats it as a hard error, not a warning).
+  const invitations = useMemo(() => invitationsQuery.data?.invitations ?? [], [invitationsQuery.data]);
+  const shared = useMemo(() => sharedQuery.data?.shared ?? [], [sharedQuery.data]);
 
-  const invitations = invitationsQuery.data?.invitations ?? [];
-  const shared = sharedQuery.data?.shared ?? [];
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const rows = needle
+      ? shared.filter(
+          (item) =>
+            item.folderName.toLowerCase().includes(needle) ||
+            item.ownerUsername.toLowerCase().includes(needle)
+        )
+      : [...shared];
+
+    if (sort === "name") return rows.sort((a, b) => a.folderName.localeCompare(b.folderName));
+    if (sort === "owner") return rows.sort((a, b) => a.ownerUsername.localeCompare(b.ownerUsername));
+    // Newest first — the API returns oldest first, which buries a folder that
+    // was just accepted at the bottom of the grid.
+    return rows.sort((a, b) => b.sharedAt.localeCompare(a.sharedAt));
+  }, [shared, query, sort]);
+
   const pendingCount = invitations.length;
+  // The mutation is shared by every row, so the row being answered is read off
+  // the in-flight variables instead of disabling the whole list.
+  const busy = respondMutation.isPending ? respondMutation.variables : undefined;
+  const showTools = shared.length > 3;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/10">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {/* Back Button */}
-        <a
-          href="/files"
-          className="group mb-6 inline-flex items-center gap-2 rounded-xl border border-border/50 bg-card/60 px-4 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-all hover:border-accent/40 hover:bg-accent/5 hover:text-foreground hover:shadow-md"
-        >
-          <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
-          Back to My Files
-        </a>
+    <MotionConfig reducedMotion="user">
+      <div className="shr-page">
+        <header className="shr-header">
+          <div className="shr-header__copy">
+            <p className="shr-kicker"><span aria-hidden="true" /> Collaboration</p>
+            <h1>Shared with me</h1>
+            <p>
+              Folders other people have given you access to. Invitations arrive here first — accept
+              one and the folder joins the list below.
+            </p>
+          </div>
 
-        {/* Hero Header */}
-        <header className="mb-10">
-          <div className="flex items-start justify-between gap-6">
-            <div className="flex-1">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-accent/10 px-4 py-1.5 ring-1 ring-accent/20">
-                <Sparkles className="h-3.5 w-3.5 text-accent" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-accent">
-                  Collaboration Hub
-                </span>
-              </div>
-              <h1 className="mb-3 text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
-                Shared with me
-              </h1>
-              <p className="max-w-2xl text-base text-muted-foreground">
-                Access folders shared by your team. Accept invitations and collaborate seamlessly.
-              </p>
+          <div className="shr-tally">
+            <div className="shr-tally__item">
+              <span className="shr-tally__value">{sharedQuery.isLoading ? "—" : shared.length}</span>
+              <span className="shr-tally__label">Folders</span>
             </div>
-
-            {/* Invitations Trigger Button */}
-            <div className="relative">
-              <button
-                ref={buttonRef}
-                onClick={() => setInvitationsOpen(!invitationsOpen)}
-                className={cn(
-                  "group relative flex items-center gap-3 rounded-2xl border px-5 py-3 shadow-lg backdrop-blur-sm transition-all duration-200",
-                  invitationsOpen
-                    ? "border-accent/40 bg-accent/10 shadow-accent/10"
-                    : "border-border/60 bg-card/90 hover:border-accent/30 hover:bg-accent/5 hover:shadow-xl"
-                )}
-              >
-                <div className="relative">
-                  <div className={cn(
-                    "flex h-10 w-10 items-center justify-center rounded-xl transition-all",
-                    invitationsOpen
-                      ? "bg-accent/20 ring-2 ring-accent/30"
-                      : "bg-accent/10 group-hover:bg-accent/15"
-                  )}>
-                    <Mail className="h-5 w-5 text-accent" />
-                  </div>
-                  {pendingCount > 0 && (
-                    <motion.span
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-red-600 text-[11px] font-bold text-white shadow-lg ring-2 ring-background"
-                    >
-                      {pendingCount > 9 ? "9+" : pendingCount}
-                    </motion.span>
-                  )}
-                </div>
-                <div className="hidden text-left sm:block">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Invitations
-                  </div>
-                  <div className="text-sm font-bold text-foreground">
-                    {pendingCount === 0 ? "All caught up" : `${pendingCount} pending`}
-                  </div>
-                </div>
-              </button>
-
-              {/* Invitations Popup */}
-              <AnimatePresence>
-                {invitationsOpen && (
-                  <>
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
-                      onClick={() => setInvitationsOpen(false)}
-                    />
-                    <motion.div
-                      ref={popupRef}
-                      initial={{ opacity: 0, y: -12, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -12, scale: 0.95 }}
-                      transition={{ type: "spring", duration: 0.3, bounce: 0.2 }}
-                      className="absolute right-0 top-full z-50 mt-3 w-[440px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl border border-border/60 bg-card shadow-2xl"
-                    >
-                      {/* Popup Header */}
-                      <div className="relative overflow-hidden border-b border-border/40 bg-gradient-to-br from-accent/5 to-transparent px-6 py-5">
-                        <div className="relative z-10 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 ring-1 ring-accent/20">
-                              <Mail className="h-5 w-5 text-accent" />
-                            </div>
-                            <div>
-                              <h3 className="text-base font-bold text-foreground">Folder Invitations</h3>
-                              <p className="text-xs text-muted-foreground">Review and respond</p>
-                            </div>
-                          </div>
-                          {pendingCount > 0 && (
-                            <span className="rounded-xl bg-accent/15 px-3 py-1 text-sm font-bold text-accent ring-1 ring-accent/20">
-                              {pendingCount}
-                            </span>
-                          )}
-                        </div>
-                        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-accent/10 blur-3xl" />
-                      </div>
-
-                      {/* Popup Content */}
-                      <div className="max-h-[520px] overflow-y-auto">
-                        {invitationsQuery.isLoading ? (
-                          <div className="flex items-center justify-center py-16">
-                            <Loader2 className="h-6 w-6 animate-spin text-accent" />
-                          </div>
-                        ) : invitations.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-                            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-muted/50 to-muted/20 ring-1 ring-border/40">
-                              <Bell className="h-9 w-9 text-muted-foreground/30" />
-                            </div>
-                            <p className="mb-1 text-sm font-semibold text-foreground/80">All caught up!</p>
-                            <p className="text-xs text-muted-foreground">No pending invitations right now.</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-3 p-4">
-                            {invitations.map((inv, i) => (
-                              <motion.div
-                                key={inv.id}
-                                initial={{ opacity: 0, x: -12 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: i * 0.05 }}
-                                className="group relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-surface to-surface-hover/30 p-4 shadow-sm transition-all hover:border-accent/30 hover:shadow-md"
-                              >
-                                <div className="mb-4 flex items-start gap-3">
-                                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent/20 to-accent/5 ring-1 ring-accent/20">
-                                    <FolderClosed className="h-6 w-6 text-accent" />
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <h4 className="mb-1 truncate text-sm font-bold text-foreground">
-                                      {inv.folderName}
-                                    </h4>
-                                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                      <span className="flex items-center gap-1">
-                                        <UserPlus className="h-3 w-3" />
-                                        <span className="font-medium text-foreground/70">{inv.invitedByUsername}</span>
-                                      </span>
-                                      <span>•</span>
-                                      <span className="flex items-center gap-1">
-                                        <Clock className="h-3 w-3" />
-                                        {formatDate(inv.createdAt, "short")}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <span
-                                    className={cn(
-                                      "flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ring-1",
-                                      inv.role === "edit"
-                                        ? "bg-accent/15 text-accent ring-accent/30"
-                                        : "bg-muted/80 text-muted-foreground ring-border/40"
-                                    )}
-                                  >
-                                    {inv.role === "edit" ? (
-                                      <><Pencil className="h-3 w-3" /> Edit</>
-                                    ) : (
-                                      <><Eye className="h-3 w-3" /> View</>
-                                    )}
-                                  </span>
-                                </div>
-                                <div className="flex gap-2">
-                                  <Button
-                                    onClick={() => respondMutation.mutate({ invitationId: inv.id, action: "accept" })}
-                                    disabled={respondMutation.isPending}
-                                    className="flex-1 h-9 gap-2 rounded-xl font-semibold shadow-sm"
-                                  >
-                                    <Check className="h-4 w-4" />
-                                    Accept
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    onClick={() => respondMutation.mutate({ invitationId: inv.id, action: "reject" })}
-                                    disabled={respondMutation.isPending}
-                                    className="flex-1 h-9 gap-2 rounded-xl font-semibold"
-                                  >
-                                    <X className="h-4 w-4" />
-                                    Decline
-                                  </Button>
-                                </div>
-                              </motion.div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
+            <div className="shr-tally__item" data-tone={pendingCount > 0 ? "accent" : undefined}>
+              <span className="shr-tally__value">
+                {invitationsQuery.isLoading ? "—" : pendingCount}
+              </span>
+              <span className="shr-tally__label">Pending</span>
             </div>
           </div>
         </header>
 
-        {/* Shared Folders Grid */}
-        {sharedQuery.isLoading ? (
-          <div className="flex min-h-[50vh] items-center justify-center">
-            <div className="text-center">
-              <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-accent" />
-              <p className="text-sm text-muted-foreground">Loading shared folders...</p>
-            </div>
-          </div>
-        ) : shared.length === 0 ? (
-          <div className="flex min-h-[50vh] items-center justify-center">
-            <div className="text-center">
-              <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-muted/50 to-muted/20 ring-1 ring-border/40">
-                <FolderOpen className="h-12 w-12 text-muted-foreground/30" />
-              </div>
-              <h3 className="mb-2 text-lg font-bold text-foreground/80">No shared folders yet</h3>
-              <p className="text-sm text-muted-foreground">
-                Accept invitations to see shared folders here.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {shared.map((item, i) => (
-              <motion.a
-                key={item.memberId}
-                href={`/shared-with-me/${item.folderId}`}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05, duration: 0.3 }}
-                className={cn(
-                  "group relative block overflow-hidden rounded-3xl border border-border/60 bg-card p-6 shadow-lg transition-all duration-300 hover:border-accent/40 hover:shadow-2xl hover:shadow-accent/5 hover:-translate-y-1"
-                )}
-              >
-                {/* Decorative gradient */}
-                <div className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br from-accent/10 to-transparent opacity-0 blur-3xl transition-opacity group-hover:opacity-100" />
-
-                <div className="relative">
-                  <div className="mb-5 flex items-start gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 shadow-md ring-1 ring-accent/20 transition-all group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-accent/20">
-                      <Folder className="h-7 w-7 text-accent" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="mb-2 truncate text-base font-bold text-foreground transition-colors group-hover:text-accent">
-                        {item.folderName}
-                      </h3>
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ring-1",
-                          item.role === "edit"
-                            ? "bg-accent/15 text-accent ring-accent/30"
-                            : "bg-muted/80 text-muted-foreground ring-border/40"
-                        )}
-                      >
-                        {item.role === "edit" ? (
-                          <><Pencil className="h-3 w-3" /> Can Edit</>
-                        ) : (
-                          <><Eye className="h-3 w-3" /> View Only</>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5 text-xs">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Users className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">
-                        <span className="text-foreground/50">Owner:</span>{" "}
-                        <span className="font-semibold text-foreground/80">{item.ownerUsername}</span>
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Clock className="h-3.5 w-3.5 shrink-0" />
-                      <span>Shared {formatDate(item.sharedAt, "short")}</span>
-                    </div>
-                  </div>
+        {/* Only mounted when something is actually waiting — an "all caught up"
+            panel would take permanent space to say nothing. */}
+        <AnimatePresence initial={false}>
+          {pendingCount > 0 && (
+            <motion.section
+              key="invitations"
+              className="shr-panel shr-panel--action"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              aria-labelledby="invitations-heading"
+            >
+              <div className="shr-panel__head">
+                <span className="shr-panel__icon" aria-hidden="true"><Mail /></span>
+                <div>
+                  <h2 className="shr-panel__title" id="invitations-heading">
+                    Pending invitations
+                  </h2>
+                  <p className="shr-panel__sub">Accept to add the folder, decline to remove it.</p>
                 </div>
-              </motion.a>
-            ))}
+                <span className="shr-count">{pendingCount}</span>
+              </div>
+
+              <div className="shr-panel__body shr-panel__body--flush">
+                {respondMutation.isError && (
+                  <p className="shr-note" data-tone="danger" role="alert">
+                    <AlertCircle aria-hidden="true" />
+                    <span>
+                      {respondMutation.error instanceof Error
+                        ? respondMutation.error.message
+                        : "Could not respond to that invitation."}{" "}
+                      Nothing changed — try again.
+                    </span>
+                  </p>
+                )}
+                <ul className="list-none p-0 m-0">
+                  {invitations.map((inv) => (
+                    <InvitationRow
+                      key={inv.id}
+                      invitation={inv}
+                      acting={busy?.invitationId === inv.id ? busy.action : null}
+                      onRespond={(action) =>
+                        respondMutation.mutate({ invitationId: inv.id, action })
+                      }
+                    />
+                  ))}
+                </ul>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+
+        <motion.section
+          className="shr-panel"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          aria-labelledby="shared-heading"
+        >
+          <div className="shr-panel__head">
+            <span className="shr-panel__icon" aria-hidden="true"><FolderOpen /></span>
+            <h2 className="shr-panel__title" id="shared-heading">Shared folders</h2>
+            {!sharedQuery.isLoading && shared.length > 0 && (
+              <span className="shr-count">{shared.length}</span>
+            )}
+
+            {showTools && (
+              <div className="shr-panel__tools">
+                <div className="shr-search">
+                  <Search aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Folder or owner…"
+                    aria-label="Search shared folders"
+                  />
+                </div>
+                <select
+                  className="shr-select"
+                  value={sort}
+                  onChange={(event) => setSort(event.target.value as SortKey)}
+                  aria-label="Sort shared folders"
+                >
+                  <option value="recent">Recently shared</option>
+                  <option value="name">Folder name</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </div>
+            )}
           </div>
-        )}
+
+          <div className="shr-panel__body">
+            {sharedQuery.isLoading ? (
+              <div className="shr-grid" aria-busy="true" aria-label="Loading shared folders">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="skeleton shr-skel shr-skel--card" />
+                ))}
+              </div>
+            ) : sharedQuery.isError ? (
+              <div className="shr-empty" role="alert">
+                <AlertCircle aria-hidden="true" />
+                <p>Could not load your shared folders</p>
+                <span>The list is still there — this was a problem fetching it.</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void sharedQuery.refetch()}
+                  disabled={sharedQuery.isFetching}
+                >
+                  <RefreshCw className={sharedQuery.isFetching ? "animate-spin" : undefined} aria-hidden="true" />
+                  Try again
+                </Button>
+              </div>
+            ) : shared.length === 0 ? (
+              <EmptyState
+                icon={Inbox}
+                title="Nothing shared with you yet"
+                description="When a teammate shares a folder, the invitation shows up above. Accepted folders then live here."
+                action={
+                  <Button asChild variant="secondary">
+                    <Link href="/files">Open my files</Link>
+                  </Button>
+                }
+              />
+            ) : visible.length === 0 ? (
+              <div className="shr-empty">
+                <Search aria-hidden="true" />
+                <p>No folder matches “{query.trim()}”</p>
+                <span>Try the owner’s name, or clear the search to see all {shared.length}.</span>
+                <Button variant="secondary" size="sm" onClick={() => setQuery("")}>
+                  <X aria-hidden="true" />
+                  Clear search
+                </Button>
+              </div>
+            ) : (
+              <div className="shr-grid">
+                {visible.map((item) => (
+                  <FolderCard key={item.memberId} item={item} />
+                ))}
+              </div>
+            )}
+          </div>
+        </motion.section>
       </div>
-    </div>
+    </MotionConfig>
+  );
+}
+
+/**
+ * One pending invitation. Both answers are on the row rather than behind a menu
+ * or a popover — responding is the reason this page exists. Only the row being
+ * answered goes busy, so a slow accept never freezes the others.
+ */
+function InvitationRow({
+  invitation,
+  acting,
+  onRespond,
+}: {
+  invitation: Invitation;
+  acting: "accept" | "reject" | null;
+  onRespond: (action: "accept" | "reject") => void;
+}) {
+  return (
+    <li className="shr-invite">
+      <span className="shr-invite__icon" aria-hidden="true"><Mail /></span>
+
+      <div className="shr-invite__main">
+        <p className="shr-invite__name" title={invitation.folderName}>
+          {invitation.folderName}
+        </p>
+        <p className="shr-invite__meta">
+          <span>
+            From <strong>{invitation.invitedByUsername}</strong>
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>{formatDate(invitation.createdAt, "short")}</span>
+        </p>
+      </div>
+
+      <RoleChip role={invitation.role} />
+
+      <div className="shr-invite__actions">
+        <Button
+          size="sm"
+          onClick={() => onRespond("accept")}
+          disabled={acting !== null}
+          aria-label={`Accept invitation to ${invitation.folderName}`}
+        >
+          {acting === "accept" ? (
+            <Loader2 className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Check aria-hidden="true" />
+          )}
+          Accept
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => onRespond("reject")}
+          disabled={acting !== null}
+          aria-label={`Decline invitation to ${invitation.folderName}`}
+        >
+          {acting === "reject" ? (
+            <Loader2 className="animate-spin" aria-hidden="true" />
+          ) : (
+            <X aria-hidden="true" />
+          )}
+          Decline
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/** A folder someone else owns. The whole card is the link; hover only changes colour. */
+function FolderCard({ item }: { item: SharedEntry }) {
+  return (
+    <Link href={`/shared-with-me/${item.folderId}`} className="shr-card">
+      <div className="shr-card__top">
+        <span className="shr-card__icon" aria-hidden="true"><Folder /></span>
+        <div className="min-w-0 flex-1">
+          <p className="shr-card__name" title={item.folderName}>{item.folderName}</p>
+          <div className="mt-1.5">
+            <RoleChip role={item.role} />
+          </div>
+        </div>
+        <ArrowUpRight className="shr-card__go" aria-hidden="true" />
+      </div>
+
+      <div className="shr-card__meta">
+        <span className="shr-card__owner" aria-hidden="true">{initial(item.ownerUsername)}</span>
+        <span className="shr-card__who">
+          <span className="sr-only">Owned by </span>
+          {item.ownerUsername}
+        </span>
+        <span className="shr-card__when">
+          <span className="sr-only">shared </span>
+          {formatDate(item.sharedAt, "short")}
+        </span>
+      </div>
+    </Link>
   );
 }

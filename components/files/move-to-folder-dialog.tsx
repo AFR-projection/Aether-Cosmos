@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, FolderIcon, Home, Loader2, Move, X } from "lucide-react";
+import { ChevronRight, FolderIcon, Home, Loader2, Move, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { apiFetch } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import type { Folder as FolderRecord } from "@/lib/db/schema";
@@ -11,7 +11,11 @@ import type { Folder as FolderRecord } from "@/lib/db/schema";
 type MoveToFolderDialogProps = {
   /** How many items are being moved (for the header). */
   count: number;
-  /** Folder ids that must be disabled (e.g. moving a folder into itself). */
+  /**
+   * Folders that are not valid destinations — in practice the folder the items are
+   * already in. They stay open-able (their subfolders are fine destinations); it is
+   * only "Move here" that is refused while one of them is the current folder.
+   */
   disabledFolderIds?: string[];
   onCancel: () => void;
   onConfirm: (dest: { folderId: string | null; folderName: string }) => void;
@@ -27,7 +31,11 @@ export function MoveToFolderDialog({
 }: MoveToFolderDialogProps) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([{ id: null, name: "My Files" }]);
   const [folders, setFolders] = useState<FolderRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts true: the first paint happens before the request resolves, and a
+  // spinner is honest there where "No subfolders" would be a guess.
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const current = crumbs[crumbs.length - 1];
   const disabled = new Set(disabledFolderIds);
@@ -35,12 +43,25 @@ export function MoveToFolderDialog({
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setError(null);
     const params = new URLSearchParams();
     if (current.id) params.set("parentId", current.id);
     apiFetch<{ folders: FolderRecord[] }>(`/api/folders?${params}`)
       .then((res) => {
         if (!alive) return;
-        setFolders(res.data?.folders ?? []);
+        // A request that failed is not an empty folder. Rendering the empty state
+        // here would invite someone to drop files into a folder we never read.
+        if (!res.success || !res.data) {
+          setFolders([]);
+          setError(res.error ?? "Could not load folders");
+          return;
+        }
+        setFolders(res.data.folders);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setFolders([]);
+        setError("Could not load folders");
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -48,130 +69,151 @@ export function MoveToFolderDialog({
     return () => {
       alive = false;
     };
-  }, [current.id]);
+  }, [current.id, reloadKey]);
 
-  const openFolder = (f: FolderRecord) => setCrumbs((c) => [...c, { id: f.id, name: f.name }]);
-  const jumpTo = (index: number) => setCrumbs((c) => c.slice(0, index + 1));
+  // Both navigations flip to loading in the same commit as the crumb change, so the
+  // list never shows the folder you just left as if it were the one you opened.
+  const openFolder = (f: FolderRecord) => {
+    setLoading(true);
+    setCrumbs((c) => [...c, { id: f.id, name: f.name }]);
+  };
+  const jumpTo = (index: number) => {
+    setLoading(true);
+    setCrumbs((c) => c.slice(0, index + 1));
+  };
+
+  const destinationBlocked = current.id !== null && disabled.has(current.id);
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="scrim fixed inset-0 z-[80] flex items-center justify-center p-4"
-        onClick={onCancel}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 16, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 16, scale: 0.97 }}
-          transition={{ duration: 0.18 }}
-          className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="relative border-b border-border bg-gradient-to-br from-accent/10 to-transparent px-5 py-4">
-            <button
-              onClick={onCancel}
-              className="absolute right-3 top-3 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    <Modal
+      open
+      onClose={onCancel}
+      icon={Move}
+      title={`Move ${count} item${count === 1 ? "" : "s"}`}
+      description="Open a folder to go deeper, then move into the folder you are viewing."
+      bodyClassName="flex min-h-0 flex-col overflow-y-hidden p-0"
+      footer={
+        <div className="flex w-full items-center justify-between gap-3">
+          {/* Says why "Move here" is refused, rather than leaving a dead button. */}
+          <p className="min-w-0 truncate text-xs text-muted-foreground">
+            {destinationBlocked ? (
+              <span className="text-warning">Already in {current.name}</span>
+            ) : (
+              <>
+                Into <span className="font-medium text-foreground">{current.name}</span>
+              </>
+            )}
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="ghost" size="sm" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={destinationBlocked}
+              onClick={() => onConfirm({ folderId: current.id, folderName: current.name })}
             >
-              <X className="h-4 w-4" />
-            </button>
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/15">
-                <Move className="h-4 w-4 text-accent" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold">Move {count} item{count === 1 ? "" : "s"}</h2>
-                <p className="text-[11px] text-muted-foreground">Pick a destination folder</p>
-              </div>
-            </div>
+              <Move className="h-3.5 w-3.5" aria-hidden="true" /> Move here
+            </Button>
           </div>
-
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-1 overflow-x-auto border-b border-border/50 bg-muted/20 px-4 py-2 text-xs no-scrollbar">
-            {crumbs.map((crumb, i) => (
-              <div key={`${crumb.id}-${i}`} className="flex shrink-0 items-center gap-1">
-                {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/50" />}
+        </div>
+      }
+    >
+      <nav
+        aria-label="Destination path"
+        className="no-scrollbar flex shrink-0 items-center overflow-x-auto border-b border-border/50 bg-background/40 px-4 py-2 text-xs"
+      >
+        <ol className="flex items-center gap-1">
+          {crumbs.map((crumb, i) => {
+            const isCurrent = i === crumbs.length - 1;
+            return (
+              <li key={`${crumb.id}-${i}`} className="flex shrink-0 items-center gap-1">
+                {i > 0 && (
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+                )}
                 <button
+                  type="button"
                   onClick={() => jumpTo(i)}
+                  aria-current={isCurrent ? "page" : undefined}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium transition-colors",
-                    i === crumbs.length - 1
-                      ? "text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
+                    "inline-flex min-h-8 items-center gap-1 rounded-md px-1.5 py-1 font-medium transition-colors duration-150",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+                    isCurrent ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {i === 0 && <Home className="h-3 w-3" />}
+                  {i === 0 && <Home className="h-3 w-3" aria-hidden="true" />}
                   {crumb.name}
                 </button>
-              </div>
-            ))}
-          </div>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
 
-          {/* Folder list */}
-          <div className="max-h-72 min-h-[9rem] overflow-y-auto p-2">
-            {loading ? (
-              <div className="flex h-32 items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : folders.length === 0 ? (
-              <div className="flex h-32 flex-col items-center justify-center text-center text-muted-foreground">
-                <FolderIcon className="h-7 w-7 opacity-40" />
-                <p className="mt-2 text-xs">No subfolders here</p>
-                <p className="text-[11px] text-muted-foreground/70">
-                  Move into &ldquo;{current.name}&rdquo; using the button below
-                </p>
-              </div>
-            ) : (
-              <ul className="space-y-0.5">
-                {folders.map((f) => {
-                  const isDisabled = disabled.has(f.id);
-                  return (
-                    <li key={f.id}>
-                      <button
-                        disabled={isDisabled}
-                        onClick={() => openFolder(f)}
-                        className={cn(
-                          "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
-                          isDisabled
-                            ? "cursor-not-allowed opacity-40"
-                            : "hover:bg-accent/10"
-                        )}
-                      >
-                        <FolderIcon className="h-4 w-4 shrink-0 text-accent" />
-                        <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-                        {!isDisabled && (
-                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+      <div className="min-h-[9rem] flex-1 overflow-y-auto p-2" aria-busy={loading}>
+        {loading ? (
+          <div className="flex h-32 items-center justify-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            <span role="status">Loading folders…</span>
           </div>
-
-          <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3.5">
-            <p className="min-w-0 truncate text-[11px] text-muted-foreground">
-              Into: <span className="font-medium text-foreground">{current.name}</span>
+        ) : error ? (
+          <div className="flex h-32 flex-col items-center justify-center px-6 text-center">
+            <TriangleAlert className="h-7 w-7 text-danger" aria-hidden="true" />
+            <p className="mt-2 text-xs font-medium" role="alert">
+              {error}
             </p>
-            <div className="flex shrink-0 gap-2">
-              <Button variant="ghost" size="sm" onClick={onCancel}>
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="gap-1.5"
-                disabled={current.id !== null && disabled.has(current.id)}
-                onClick={() => onConfirm({ folderId: current.id, folderName: current.name })}
-              >
-                <Move className="h-3.5 w-3.5" /> Move here
-              </Button>
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2"
+              onClick={() => setReloadKey((k) => k + 1)}
+            >
+              Try again
+            </Button>
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+        ) : folders.length === 0 ? (
+          <div className="flex h-32 flex-col items-center justify-center px-6 text-center">
+            <FolderIcon className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
+            <p className="mt-2 text-xs font-medium">
+              No subfolders in &ldquo;{current.name}&rdquo;
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {destinationBlocked
+                ? "The items are already here — go up a level to pick a different folder."
+                : "This is as deep as it goes — use Move here to drop the items in this folder."}
+            </p>
+          </div>
+        ) : (
+          <ul className="space-y-0.5">
+            {folders.map((f) => {
+              // Not a valid destination, still worth opening: its subfolders are.
+              const isSource = disabled.has(f.id);
+              return (
+                <li key={f.id}>
+                  <button
+                    type="button"
+                    onClick={() => openFolder(f)}
+                    title={isSource ? "The items are already in this folder" : undefined}
+                    className={cn(
+                      "flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-accent/10",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+                      isSource && "text-muted-foreground"
+                    )}
+                  >
+                    <FolderIcon
+                      className={cn("h-4 w-4 shrink-0", isSource ? "text-muted-foreground" : "text-accent")}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+                    {isSource && <span className="shrink-0 text-xs">Current</span>}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Modal>
   );
 }

@@ -10,51 +10,7 @@ import {
 import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
 import { apiSuccess, apiError } from "@/lib/api/response";
 import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
-
-function parseRangeHeader(
-  rangeHeader: string,
-  totalSize: number
-): { start: number; end: number; byteRange: string } | null {
-  const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
-  if (!match) return null;
-
-  let start = match[1] ? parseInt(match[1], 10) : NaN;
-  let end = match[2] ? parseInt(match[2], 10) : NaN;
-
-  if (Number.isNaN(start) && Number.isNaN(end)) return null;
-
-  if (Number.isNaN(start)) {
-    // suffix range: bytes=-500
-    const suffixLength = end;
-    if (Number.isNaN(suffixLength) || suffixLength <= 0) return null;
-    start = Math.max(0, totalSize - suffixLength);
-    end = totalSize - 1;
-  } else if (Number.isNaN(end)) {
-    end = totalSize - 1;
-  }
-
-  if (start < 0 || end < start || start >= totalSize) return null;
-  end = Math.min(end, totalSize - 1);
-
-  return { start, end, byteRange: `bytes=${start}-${end}` };
-}
-
-function toReadableStream(body: unknown): ReadableStream {
-  if (body instanceof ReadableStream) return body;
-  if (body && typeof body === "object" && "pipe" in body && typeof (body as { pipe: unknown }).pipe === "function") {
-    return new ReadableStream({
-      start(controller) {
-        const nodeStream = body as NodeJS.ReadableStream & {
-          on: (event: string, cb: (...args: unknown[]) => void) => void;
-        };
-        nodeStream.on("data", (chunk: Uint8Array) => controller.enqueue(chunk));
-        nodeStream.on("end", () => controller.close());
-        nodeStream.on("error", (err: Error) => controller.error(err));
-      },
-    });
-  }
-  return body as ReadableStream;
-}
+import { parseRangeHeader, rangeLength, toReadableStream } from "@/lib/storage/http-range";
 
 export async function GET(
   request: NextRequest,
@@ -77,7 +33,7 @@ export async function GET(
 
     const exists = await objectExists(file.r2Key);
     if (!exists) {
-      return apiError("File belum ada di storage. Coba upload ulang.", 404);
+      return apiError("This file isn't in storage yet. Try uploading it again.", 404);
     }
 
     if (format === "json") {
@@ -98,9 +54,7 @@ export async function GET(
     const rangeHeader = request.headers.get("range");
     const parsedRange = rangeHeader ? parseRangeHeader(rangeHeader, totalSize) : null;
 
-    const bytesToBill = parsedRange
-      ? parsedRange.end - parsedRange.start + 1
-      : totalSize;
+    const bytesToBill = parsedRange ? rangeLength(parsedRange) : totalSize;
 
     try {
       await recordBandwidth(file.userId, bytesToBill);
@@ -117,7 +71,7 @@ export async function GET(
     );
 
     if (!r2.body) {
-      return apiError("File kosong", 404);
+      return apiError("This file is empty", 404);
     }
 
     const stream = toReadableStream(r2.body);
@@ -142,7 +96,7 @@ export async function GET(
     );
 
     if (isPartial && parsedRange) {
-      const chunkSize = parsedRange.end - parsedRange.start + 1;
+      const chunkSize = rangeLength(parsedRange);
       headers.set("Content-Length", String(chunkSize));
       headers.set(
         "Content-Range",
@@ -155,6 +109,6 @@ export async function GET(
     return new Response(stream, { status: 200, headers });
   } catch (error) {
     console.error("[PREVIEW ERROR]", error);
-    return apiError("Gagal memuat preview", 500);
+    return apiError("Couldn't load the preview", 500);
   }
 }

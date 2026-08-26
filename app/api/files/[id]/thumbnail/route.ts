@@ -1,9 +1,6 @@
 import { NextRequest } from "next/server";
-import { eq, and, isNull } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId, canAccessUserResource } from "@/lib/auth/permissions";
+import { resolveFileAccess } from "@/lib/auth/permissions";
 import { downloadFromR2Stream } from "@/lib/storage/r2";
 import { apiError } from "@/lib/api/response";
 
@@ -33,19 +30,16 @@ export async function GET(
 ) {
   try {
     const sessionUser = await requireAuth();
-    const userId = getEffectiveUserId(sessionUser);
     const { id } = await params;
     const size = parseSize(request.nextUrl.searchParams.get("size"));
 
-    const [file] = await db
-      .select()
-      .from(files)
-      .where(and(eq(files.id, id), isNull(files.deletedAt)))
-      .limit(1);
-
-    if (!file || !canAccessUserResource(sessionUser, file.userId)) {
+    // Ownership was not the right question: a member browsing a shared folder could list
+    // the files but every thumbnail 404'd, so the grid rendered nothing but placeholders.
+    const accessible = await resolveFileAccess(sessionUser, id);
+    if (!accessible?.canView) {
       return apiError("File not found", 404);
     }
+    const file = accessible.file;
 
     const thumbKey = getThumbKey(file.id, size);
     const legacyKey = getLegacyThumbKey(file.id);

@@ -1,11 +1,14 @@
 "use client";
 
 import type { Editor } from "@tiptap/react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Bold, Italic, Strikethrough, Underline as UnderlineIcon, Code,
   Heading1, Heading2, Heading3, List, ListOrdered, ListChecks,
-  Quote, Code2, Minus, Highlighter, Link2, Undo2, Redo2,
+  Quote, Code2, Minus, Highlighter, Link2, Link2Off, Undo2, Redo2,
 } from "lucide-react";
+import { useDialogs } from "@/components/ui/dialog-prompts";
+import { notify } from "@/lib/system/notify-store";
 import { cn } from "@/lib/utils";
 
 function TBtn({
@@ -20,6 +23,10 @@ function TBtn({
   return (
     <button
       type="button"
+      // Marks this as one of the toolbar's own controls. The roving tabindex below
+      // collects them by this attribute rather than by tag, so it can never reach
+      // into anything else that happens to render a button.
+      data-tbtn
       title={title}
       aria-label={title}
       aria-pressed={active}
@@ -38,46 +45,146 @@ function TBtn({
 }
 
 function Sep() {
-  return (
-    <span
-      className="mx-1 block h-4 w-px shrink-0 rounded-full"
-      style={{ background: "var(--border)" }}
-      aria-hidden
-    />
-  );
+  return <span className="mx-1 block h-4 w-px shrink-0 rounded-full bg-border" aria-hidden="true" />;
 }
 
+/* These hex values are the colour being written into the document, not theming:
+   a note keeps its highlight when the app theme changes, so they cannot come
+   from a theme token. */
 const HIGHLIGHT_COLORS = [
-  { color: "#fde68a", label: "Kuning" },
-  { color: "#bbf7d0", label: "Hijau" },
-  { color: "#bfdbfe", label: "Biru" },
-  { color: "#fbcfe8", label: "Pink" },
-  { color: "#ddd6fe", label: "Ungu" },
+  { color: "#fde68a", label: "yellow" },
+  { color: "#bbf7d0", label: "green" },
+  { color: "#bfdbfe", label: "blue" },
+  { color: "#fbcfe8", label: "pink" },
+  { color: "#ddd6fe", label: "purple" },
 ];
 
 const TEXT_COLORS = [
-  { color: "#f87171", label: "Merah" },
-  { color: "#fb923c", label: "Oranye" },
-  { color: "#facc15", label: "Kuning" },
-  { color: "#34d399", label: "Hijau" },
-  { color: "#60a5fa", label: "Biru" },
-  { color: "#a78bfa", label: "Ungu" },
+  { color: "#f87171", label: "red" },
+  { color: "#fb923c", label: "orange" },
+  { color: "#facc15", label: "yellow" },
+  { color: "#34d399", label: "green" },
+  { color: "#60a5fa", label: "blue" },
+  { color: "#a78bfa", label: "purple" },
 ];
 
+/** TipTap accepts a bare "example.com" as a path, which would then resolve
+ *  against the current route. Anything already carrying a scheme, an anchor or
+ *  an absolute path is left exactly as typed. */
+function normalizeUrl(input: string): string {
+  const value = input.trim();
+  if (!value) return value;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith("/") || value.startsWith("#")) {
+    return value;
+  }
+  return `https://${value}`;
+}
+
 export function NoteToolbar({ editor }: { editor: Editor }) {
-  const setLink = () => {
-    const prev = editor.getAttributes("link").href as string | undefined;
-    const url = window.prompt("URL tautan:", prev ?? "https://");
-    if (url === null) return;
-    if (url === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+  const { askPrompt, dialogs } = useDialogs();
+  const hasLink = editor.isActive("link");
+
+  const barRef = useRef<HTMLDivElement | null>(null);
+  /** Which control currently owns the toolbar's single tab stop. */
+  const activeIdx = useRef(0);
+
+  const controls = useCallback(
+    () =>
+      Array.from(
+        barRef.current?.querySelectorAll<HTMLButtonElement>("[data-tbtn]") ?? []
+      ).filter((node) => !node.disabled),
+    []
+  );
+
+  /**
+   * Roving tabindex, the ARIA toolbar pattern: the whole bar is one tab stop and the
+   * arrow keys move between its thirty-odd controls. Tabbing used to walk through every
+   * one of them before reaching the note, which is a long way to travel to start typing.
+   * Re-applied after each render because which controls are enabled changes with the
+   * selection — undo, redo and "remove link" come and go.
+   */
+  useEffect(() => {
+    const nodes = controls();
+    if (nodes.length === 0) return;
+    if (activeIdx.current >= nodes.length) activeIdx.current = 0;
+    nodes.forEach((node, i) => {
+      node.tabIndex = i === activeIdx.current ? 0 : -1;
+    });
+  });
+
+  function onToolbarKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const { key } = e;
+    if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") {
       return;
     }
-    editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
-  };
+    const nodes = controls();
+    const current = nodes.indexOf(document.activeElement as HTMLButtonElement);
+    if (current === -1) return;
+    e.preventDefault();
+    const next =
+      key === "Home"
+        ? 0
+        : key === "End"
+          ? nodes.length - 1
+          : key === "ArrowRight"
+            ? (current + 1) % nodes.length
+            : (current - 1 + nodes.length) % nodes.length;
+    nodes[current].tabIndex = -1;
+    nodes[next].tabIndex = 0;
+    activeIdx.current = next;
+    nodes[next].focus();
+  }
+
+  // Keeps the tab stop wherever the author last was, so leaving the toolbar and coming
+  // back does not send them to the far left again.
+  function onToolbarFocus() {
+    const nodes = controls();
+    const idx = nodes.indexOf(document.activeElement as HTMLButtonElement);
+    if (idx === -1 || idx === activeIdx.current) return;
+    const previous = nodes[activeIdx.current];
+    if (previous) previous.tabIndex = -1;
+    activeIdx.current = idx;
+    nodes[idx].tabIndex = 0;
+  }
+
+  async function setLink() {
+    const previous = editor.getAttributes("link").href as string | undefined;
+    const answer = await askPrompt({
+      title: previous ? "Edit link" : "Add link",
+      label: "URL",
+      initialValue: previous ?? "",
+      placeholder: "https://example.com",
+      confirmText: "Apply",
+    });
+    if (answer === null) return;
+    const href = normalizeUrl(answer);
+    const applied = editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
+    if (!applied) {
+      // setLink refuses anything outside its scheme allow-list (javascript:,
+      // data:, …) and returns false without touching the document — silently,
+      // which reads as a dead button.
+      notify({
+        title: "Link not added",
+        description: "That address uses a scheme this editor will not link to.",
+        tone: "warning",
+        duration: 4000,
+      });
+    }
+  }
 
   return (
-    <div className="note-toolbar">
+    <div
+      ref={barRef}
+      // role="toolbar" is the promise that the arrow keys work — see the roving
+      // tabindex above. It was role="group", which makes no such promise and left
+      // every button in the tab order.
+      role="toolbar"
+      aria-label="Formatting"
+      aria-orientation="horizontal"
+      onKeyDown={onToolbarKeyDown}
+      onFocus={onToolbarFocus}
+      className="note-toolbar"
+    >
       {/* Undo / Redo */}
       <TBtn title="Undo (Ctrl+Z)" onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()}>
         <Undo2 className="h-3.5 w-3.5" />
@@ -125,26 +232,39 @@ export function NoteToolbar({ editor }: { editor: Editor }) {
         onClick={() => editor.chain().focus().toggleCode().run()}>
         <Code className="h-3.5 w-3.5" />
       </TBtn>
-      <TBtn title="Tautan" active={editor.isActive("link")} onClick={setLink}>
+      <TBtn title="Link" active={hasLink} onClick={() => void setLink()}>
         <Link2 className="h-3.5 w-3.5" />
+      </TBtn>
+      {/* Kept mounted rather than swapped in when a link is selected: a control
+          that appears and disappears shifts every button beside it. */}
+      <TBtn
+        title="Remove link"
+        disabled={!hasLink}
+        onClick={() => editor.chain().focus().extendMarkRange("link").unsetLink().run()}
+      >
+        <Link2Off className="h-3.5 w-3.5" />
       </TBtn>
 
       <Sep />
 
       {/* Highlights */}
-      <div className="flex items-center gap-0.5">
-        <Highlighter className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--muted-foreground)", opacity: 0.7 }} />
-        <div className="ml-1 flex items-center gap-1">
+      <div className="flex items-center gap-0.5" role="group" aria-label="Highlight color">
+        <Highlighter className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <div className="ml-1 flex items-center gap-0.5">
           {HIGHLIGHT_COLORS.map(({ color, label }) => (
             <button
               key={color}
               type="button"
+              data-tbtn
               title={`Highlight ${label}`}
+              aria-label={`Highlight ${label}`}
+              aria-pressed={editor.isActive("highlight", { color })}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => editor.chain().focus().toggleHighlight({ color }).run()}
               className="note-color-swatch"
-              style={{ backgroundColor: color }}
-            />
+            >
+              <span className="note-color-swatch__dot" style={{ backgroundColor: color }} />
+            </button>
           ))}
         </div>
       </div>
@@ -152,29 +272,35 @@ export function NoteToolbar({ editor }: { editor: Editor }) {
       <Sep />
 
       {/* Text colors */}
-      <div className="flex items-center gap-0.5">
-        <span className="select-none text-[11px] font-bold" style={{ color: "var(--muted-foreground)", opacity: 0.7 }}>A</span>
-        <div className="ml-1 flex items-center gap-1">
+      <div className="flex items-center gap-0.5" role="group" aria-label="Text color">
+        <span aria-hidden="true" className="select-none text-xs font-bold text-muted-foreground">
+          A
+        </span>
+        <div className="ml-1 flex items-center gap-0.5">
           {TEXT_COLORS.map(({ color, label }) => (
             <button
               key={color}
               type="button"
-              title={`Warna teks ${label}`}
+              data-tbtn
+              title={`Text ${label}`}
+              aria-label={`Text color ${label}`}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => editor.chain().focus().setColor(color).run()}
               className="note-color-swatch"
-              style={{ backgroundColor: color }}
-            />
+            >
+              <span className="note-color-swatch__dot" style={{ backgroundColor: color }} />
+            </button>
           ))}
         </div>
         <button
           type="button"
-          title="Reset warna teks"
+          data-tbtn
+          title="Reset text color"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => editor.chain().focus().unsetColor().run()}
           className="note-reset-btn ml-1"
         >
-          reset
+          Reset
         </button>
       </div>
 
@@ -204,6 +330,7 @@ export function NoteToolbar({ editor }: { editor: Editor }) {
       <TBtn title="Divider" onClick={() => editor.chain().focus().setHorizontalRule().run()}>
         <Minus className="h-3.5 w-3.5" />
       </TBtn>
+      {dialogs}
     </div>
   );
 }

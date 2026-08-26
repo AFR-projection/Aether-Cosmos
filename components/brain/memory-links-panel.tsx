@@ -472,9 +472,9 @@ function AddLinkForm({
             value={customType}
             onChange={(event) => setCustomType(event.target.value)}
             placeholder="e.g., supersedes, mentions, implements"
-            className={cn(typeError && "border-destructive")}
+            className={cn(typeError && "border-danger")}
           />
-          {typeError && <p className="mt-1 text-xs text-destructive">{typeError}</p>}
+          {typeError && <p className="mt-1 text-xs text-danger">{typeError}</p>}
         </div>
       )}
 

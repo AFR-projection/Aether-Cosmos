@@ -1,6 +1,6 @@
-# Storage ByAFR — Documentation
+# Aether Cosmos ByAFR — Documentation
 
-Documentation for Storage ByAFR **v0.4.0** — a self-hosted cloud storage platform
+Documentation for Aether Cosmos ByAFR **v0.4.0** — a self-hosted cloud storage platform
 with a Second Brain knowledge layer for AI agents.
 
 This directory is the single home for all project documentation. The root

@@ -7,60 +7,41 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
-import { ScrollText, Search, RefreshCw, Activity, Upload, Download, Trash2, Loader2, FileDown, ChevronDown, LogIn, LogOut, Share2, Edit3, FolderPlus, FolderMinus, UserPlus, UserMinus, Shield, Star, Clock, Globe, FileText, HardDrive, X, Users, Layers } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-const actionConfig: Record<string, { icon: typeof Upload; color: string; bg: string; label: string; description: string }> = {
-  login: { icon: LogIn, color: "text-emerald-500", bg: "bg-emerald-500/10", label: "Login", description: "User logged in" },
-  logout: { icon: LogOut, color: "text-slate-500 dark:text-slate-400", bg: "bg-slate-400/10", label: "Logout", description: "User logged out" },
-  upload: { icon: Upload, color: "text-blue-500", bg: "bg-blue-500/10", label: "Upload", description: "File uploaded" },
-  download: { icon: Download, color: "text-violet-500", bg: "bg-violet-500/10", label: "Download", description: "File downloaded" },
-  delete: { icon: Trash2, color: "text-red-500", bg: "bg-red-500/10", label: "Delete", description: "File deleted" },
-  restore: { icon: Upload, color: "text-amber-500", bg: "bg-amber-500/10", label: "Restore", description: "File restored" },
-  share: { icon: Share2, color: "text-cyan-500", bg: "bg-cyan-500/10", label: "Share", description: "File shared" },
-  edit: { icon: Edit3, color: "text-orange-500", bg: "bg-orange-500/10", label: "Edit", description: "File metadata edited" },
-  rename: { icon: Edit3, color: "text-orange-400", bg: "bg-orange-400/10", label: "Rename", description: "File renamed" },
-  move: { icon: HardDrive, color: "text-teal-500", bg: "bg-teal-500/10", label: "Move", description: "File moved" },
-  copy: { icon: FileText, color: "text-indigo-400", bg: "bg-indigo-400/10", label: "Copy", description: "File copied" },
-  create_folder: { icon: FolderPlus, color: "text-green-500", bg: "bg-green-500/10", label: "Create Folder", description: "Folder created" },
-  delete_folder: { icon: FolderMinus, color: "text-red-400", bg: "bg-red-400/10", label: "Delete Folder", description: "Folder deleted" },
-  impersonate: { icon: Shield, color: "text-amber-500", bg: "bg-yellow-500/10", label: "Impersonate", description: "Admin impersonated user" },
-  create_user: { icon: UserPlus, color: "text-emerald-400", bg: "bg-emerald-400/10", label: "Create User", description: "New user created" },
-  update_user: { icon: UserMinus, color: "text-blue-400", bg: "bg-blue-400/10", label: "Update User", description: "User updated" },
-  delete_user: { icon: UserMinus, color: "text-red-500", bg: "bg-red-500/10", label: "Delete User", description: "User deleted" },
-  suspend_user: { icon: UserMinus, color: "text-orange-500", bg: "bg-orange-500/10", label: "Suspend User", description: "User suspended" },
-  favorite: { icon: Star, color: "text-amber-500", bg: "bg-yellow-400/10", label: "Favorite", description: "File favorited" },
-  account_lock: { icon: Shield, color: "text-red-500", bg: "bg-red-500/10", label: "Account Lock", description: "Account locked after failed logins" },
-  ip_rate_limit: { icon: Globe, color: "text-orange-500", bg: "bg-orange-500/10", label: "IP Rate Limit", description: "IP hit login rate limit" },
-  session_revoked: { icon: LogOut, color: "text-rose-500", bg: "bg-rose-500/10", label: "Session Revoked", description: "Session was revoked" },
-  password_change: { icon: Shield, color: "text-indigo-500", bg: "bg-indigo-500/10", label: "Password Change", description: "Password was changed" },
-};
-
-const filterActions = [
-  { value: "", label: "All Actions", icon: Activity },
-  { value: "login", label: "Login", icon: LogIn },
-  { value: "logout", label: "Logout", icon: LogOut },
-  { value: "account_lock", label: "Account Lock", icon: Shield },
-  { value: "ip_rate_limit", label: "IP Rate Limit", icon: Globe },
-  { value: "session_revoked", label: "Session Revoked", icon: LogOut },
-  { value: "password_change", label: "Password Change", icon: Shield },
-  { value: "upload", label: "Upload", icon: Upload },
-  { value: "download", label: "Download", icon: Download },
-  { value: "delete", label: "Delete", icon: Trash2 },
-  { value: "share", label: "Share", icon: Share2 },
-  { value: "edit", label: "Edit", icon: Edit3 },
-  { value: "rename", label: "Rename", icon: Edit3 },
-  { value: "create_folder", label: "Create Folder", icon: FolderPlus },
-  { value: "delete_folder", label: "Delete Folder", icon: FolderMinus },
-  { value: "create_user", label: "Create User", icon: UserPlus },
-  { value: "update_user", label: "Update User", icon: UserMinus },
-  { value: "delete_user", label: "Delete User", icon: UserMinus },
-  { value: "suspend_user", label: "Suspend User", icon: UserMinus },
-  { value: "impersonate", label: "Impersonate", icon: Shield },
-  { value: "favorite", label: "Favorite", icon: Star },
-];
+import {
+  AdminEmpty,
+  AdminHeader,
+  AdminMetric,
+  AdminPanel,
+  Chip,
+  FilterChip,
+  SearchField,
+  Segment,
+  Skeleton,
+  type Tone,
+} from "@/components/admin/admin-ui";
+import {
+  AUDIT_GROUPS,
+  auditAction,
+  actionsInGroup,
+  type AuditActionMeta,
+} from "@/lib/admin/audit-actions";
+import {
+  ScrollText,
+  Search,
+  RefreshCw,
+  Activity,
+  Loader2,
+  FileDown,
+  ChevronDown,
+  Clock,
+  Globe,
+  Users,
+  Layers,
+  Play,
+  Pause,
+  X,
+} from "lucide-react";
+import { cn, formatBytes } from "@/lib/utils";
 
 type LogEntry = {
   id: string;
@@ -76,11 +57,18 @@ type LogEntry = {
   userRole: string;
 };
 
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffSec = Math.floor((now - then) / 1000);
+/** Ticking clock so relative timestamps stay honest without an impure render. */
+function useNow(intervalMs = 30_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
 
+function formatRelativeTime(dateStr: string, now: number): string {
+  const diffSec = Math.floor((now - new Date(dateStr).getTime()) / 1000);
   if (diffSec < 5) return "just now";
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
@@ -89,13 +77,11 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHr < 24) return `${diffHr}h ago`;
   const diffDay = Math.floor(diffHr / 24);
   if (diffDay < 30) return `${diffDay}d ago`;
-  const diffMonth = Math.floor(diffDay / 30);
-  return `${diffMonth}mo ago`;
+  return `${Math.floor(diffDay / 30)}mo ago`;
 }
 
 function formatAbsoluteTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleString("id-ID", {
+  return new Date(dateStr).toLocaleString("id-ID", {
     weekday: "short",
     day: "2-digit",
     month: "short",
@@ -106,161 +92,145 @@ function formatAbsoluteTime(dateStr: string): string {
   });
 }
 
-function DescribeMetadata({ log }: { log: LogEntry }) {
-  const meta = log.metadata as Record<string, unknown> | null;
-  if (!meta || Object.keys(meta).length === 0) return <span className="text-muted-foreground">—</span>;
+/** A value inside a log summary that carries a tone (a role, a status, a mode). */
+function Val({ tone, children }: { tone?: Tone; children: React.ReactNode }) {
+  return (
+    <span
+      className={cn("font-medium", !tone && "text-foreground")}
+      data-tone={tone}
+      style={tone ? { color: "var(--tone)" } : undefined}
+    >
+      {children}
+    </span>
+  );
+}
 
-  const getDetail = () => {
+/**
+ * Turns a metadata blob into a sentence an operator can read at a glance. The raw
+ * JSON is still one click away in the expanded row, so this is allowed to omit
+ * anything that does not help while scanning.
+ */
+function DescribeMetadata({ log }: { log: LogEntry }) {
+  const meta = log.metadata;
+  if (!meta || Object.keys(meta).length === 0) {
+    return <span className="adm-sub">—</span>;
+  }
+
+  const detail = (() => {
     switch (log.action) {
       case "upload":
         return (
           <>
-            <span className="font-medium text-foreground">{String(meta.fileName || "Unknown")}</span>
-            <span className="text-muted-foreground"> · </span>
-            <span className="text-muted-foreground">{String(meta.mimeType || "Unknown")}</span>
-            {meta.size != null && (
-              <>
-                <span className="text-muted-foreground"> · </span>
-                <span className="text-muted-foreground">{formatBytes(Number(meta.size))}</span>
-              </>
-            )}
+            <Val>{String(meta.fileName || "Unknown")}</Val>
+            <span className="adm-sub"> · {String(meta.mimeType || "unknown type")}</span>
+            {meta.size != null && <span className="adm-sub"> · {formatBytes(Number(meta.size))}</span>}
           </>
         );
       case "download":
         return (
           <>
-            <span className="font-medium text-foreground">{String(meta.fileName || "Unknown")}</span>
-            {meta.source && (
-              <>
-                <span className="text-muted-foreground"> · via </span>
-                <span className="text-cyan-500 font-medium">{String(meta.source)}</span>
-              </>
-            )}
+            <Val>{String(meta.fileName || "Unknown")}</Val>
+            {meta.source ? (
+              <span className="adm-sub">
+                {" "}
+                · via <Val tone="info">{String(meta.source)}</Val>
+              </span>
+            ) : null}
           </>
         );
       case "delete":
         return (
           <>
-            <span className="font-medium text-foreground">{String(meta.fileName || "Unknown")}</span>
-            {meta.folder != null && (
-              <>
-                <span className="text-muted-foreground"> in </span>
-                <span className="text-muted-foreground">/{String(meta.folder)}</span>
-              </>
-            )}
+            <Val>{String(meta.fileName || "Unknown")}</Val>
+            {meta.folder != null && <span className="adm-sub"> in /{String(meta.folder)}</span>}
           </>
         );
       case "share":
         return (
           <>
-            <span className="font-medium text-foreground">{String(meta.fileName || "Unknown")}</span>
-            {meta.permission && (
-              <>
-                <span className="text-muted-foreground"> as </span>
-                <span className={cn("font-medium", meta.permission === "edit" ? "text-orange-500" : "text-blue-500")}>
+            <Val>{String(meta.fileName || "Unknown")}</Val>
+            {meta.permission ? (
+              <span className="adm-sub">
+                {" "}
+                as{" "}
+                <Val tone={meta.permission === "edit" ? "warning" : "info"}>
                   {String(meta.permission)}
-                </span>
-              </>
-            )}
-            {meta.phone && (
-              <>
-                <span className="text-muted-foreground"> → </span>
-                <span className="text-muted-foreground">{String(meta.phone)}</span>
-              </>
-            )}
+                </Val>
+              </span>
+            ) : null}
+            {meta.phone ? <span className="adm-sub"> → {String(meta.phone)}</span> : null}
           </>
         );
       case "login":
-        return (
-          <>
-            {meta.userAgent && (
-              <span className="text-muted-foreground line-clamp-1">{String(meta.userAgent)}</span>
-            )}
-          </>
-        );
+        return meta.userAgent ? (
+          <span className="adm-sub line-clamp-1">{String(meta.userAgent)}</span>
+        ) : null;
       case "create_user":
         return (
           <>
-            <span className="font-medium text-foreground">{String(meta.username || "Unknown")}</span>
-            {meta.role && (
-              <>
-                <span className="text-muted-foreground"> as </span>
-                <span className={cn("font-medium", meta.role === "master" ? "text-yellow-500" : "text-emerald-500")}>
-                  {String(meta.role)}
-                </span>
-              </>
-            )}
+            <Val>{String(meta.username || "Unknown")}</Val>
+            {meta.role ? (
+              <span className="adm-sub">
+                {" "}
+                as <Val tone={meta.role === "master" ? "warning" : "success"}>{String(meta.role)}</Val>
+              </span>
+            ) : null}
           </>
         );
       case "update_user":
       case "suspend_user":
         return (
           <>
-            <span className="font-medium text-foreground">{String(meta.username || meta.targetUserId || "Unknown")}</span>
-            {meta.status && (
-              <>
-                <span className="text-muted-foreground"> → </span>
-                <span className={cn("font-medium", meta.status === "active" ? "text-emerald-500" : "text-red-500")}>
-                  {String(meta.status)}
-                </span>
-              </>
-            )}
+            <Val>{String(meta.username || meta.targetUserId || "Unknown")}</Val>
+            {meta.status ? (
+              <span className="adm-sub">
+                {" "}
+                → <Val tone={meta.status === "active" ? "success" : "danger"}>{String(meta.status)}</Val>
+              </span>
+            ) : null}
           </>
         );
       case "create_folder":
       case "delete_folder":
-        return <span className="font-medium text-foreground">{String(meta.folderName || "Unknown")}</span>;
+        return <Val>{String(meta.folderName || "Unknown")}</Val>;
       case "rename":
         return (
-          <>
-            <span className="text-muted-foreground">{String(meta.oldName || "Unknown")}</span>
-            <span className="text-muted-foreground"> → </span>
-            <span className="font-medium text-foreground">{String(meta.newName || "Unknown")}</span>
-          </>
+          <span className="adm-sub">
+            {String(meta.oldName || "Unknown")} → <Val>{String(meta.newName || "Unknown")}</Val>
+          </span>
         );
       case "move":
         return (
           <>
-            <span className="font-medium text-foreground">{String(meta.fileName || "Unknown")}</span>
-            {meta.destination && (
-              <>
-                <span className="text-muted-foreground"> → </span>
-                <span className="text-muted-foreground">/{String(meta.destination)}</span>
-              </>
-            )}
+            <Val>{String(meta.fileName || "Unknown")}</Val>
+            {meta.destination ? (
+              <span className="adm-sub"> → /{String(meta.destination)}</span>
+            ) : null}
           </>
         );
       case "impersonate":
         return (
-          <>
-            <span className="text-muted-foreground">Target: </span>
-            <span className="font-medium text-foreground">{String(meta.targetUserId || "Unknown")}</span>
-          </>
+          <span className="adm-sub">
+            Target: <Val>{String(meta.targetUserId || "Unknown")}</Val>
+          </span>
         );
       default:
-        return <span className="text-muted-foreground font-mono text-xs">{JSON.stringify(meta)}</span>;
+        return <span className="adm-num adm-sub">{JSON.stringify(meta)}</span>;
     }
-  };
+  })();
 
-  return <span className="text-xs leading-relaxed">{getDetail()}</span>;
+  return <span className="text-[0.76rem] leading-relaxed">{detail}</span>;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
+/* ── Page ────────────────────────────────────────────────────────────────── */
 
 export default function AdminLogsPage() {
   return (
     <Suspense
       fallback={
-        <div className="space-y-2">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-16 skeleton rounded-xl" />
-          ))}
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-14 w-full" rows={8} />
         </div>
       }
     >
@@ -269,20 +239,46 @@ export default function AdminLogsPage() {
   );
 }
 
+const GROUP_OPTIONS = [
+  { value: "all" as const, label: "All" },
+  ...AUDIT_GROUPS.map((group) => ({ value: group.id, label: group.label, icon: group.icon })),
+];
+
+type GroupFilter = "all" | AuditActionMeta["group"];
+
 function AdminLogsContent() {
   const searchParams = useSearchParams();
+  const now = useNow();
   const [action, setAction] = useState(searchParams.get("action") ?? "");
-  const [search, setSearch] = useState(searchParams.get("user") ?? searchParams.get("search") ?? "");
+  const [search, setSearch] = useState(
+    searchParams.get("user") ?? searchParams.get("search") ?? ""
+  );
+  const [group, setGroup] = useState<GroupFilter>(() => {
+    const seeded = searchParams.get("action");
+    return seeded ? auditAction(seeded).group : "all";
+  });
   const [exporting, setExporting] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  useEffect(() => {
+  // Other pages deep-link in here ("view all logins", a user's action count), so a
+  // new query string has to win over whatever is currently in the boxes. Adopting
+  // it during render rather than in an effect means the table paints once instead
+  // of painting the old filter and then correcting itself.
+  const paramKey = searchParams.toString();
+  const [seededFrom, setSeededFrom] = useState(paramKey);
+  if (paramKey !== seededFrom) {
+    setSeededFrom(paramKey);
     const a = searchParams.get("action");
     const u = searchParams.get("user") ?? searchParams.get("search");
-    if (a) setAction(a);
+    // Arriving with ?action= should also open the group that owns it, otherwise the
+    // chip that is doing the filtering is hidden behind a segment nobody selected.
+    if (a) {
+      setAction(a);
+      setGroup(auditAction(a).group);
+    }
     if (u) setSearch(u);
-  }, [searchParams]);
+  }
 
   const { data: logs, refetch, isLoading, isFetching } = useQuery({
     queryKey: ["admin-logs", action, search],
@@ -300,352 +296,323 @@ function AdminLogsContent() {
     refetchInterval: autoRefresh ? 10000 : false,
   });
 
-  // Stats
+  const rows = useMemo(() => logs ?? [], [logs]);
+
+  /** Chips are gated behind the group segment — 21 of them at once is a wall. */
+  const chipActions = useMemo(() => (group === "all" ? [] : actionsInGroup(group)), [group]);
+
+  const filtered = useMemo(() => {
+    if (group === "all") return rows;
+    const allowed = new Set(actionsInGroup(group));
+    return rows.filter((log) => allowed.has(log.action));
+  }, [rows, group]);
+
   const stats = useMemo(() => {
-    if (!logs) return { total: 0, actions: {} as Record<string, number>, uniqueUsers: 0, uniqueIPs: 0 };
-    const actions: Record<string, number> = {};
+    const actions = new Set<string>();
     const users = new Set<string>();
     const ips = new Set<string>();
-    for (const log of logs) {
-      actions[log.action] = (actions[log.action] || 0) + 1;
+    for (const log of filtered) {
+      actions.add(log.action);
       users.add(log.userId);
       if (log.ip) ips.add(log.ip);
     }
-    return { total: logs.length, actions, uniqueUsers: users.size, uniqueIPs: ips.size };
-  }, [logs]);
+    return {
+      total: filtered.length,
+      actions: actions.size,
+      uniqueUsers: users.size,
+      uniqueIPs: ips.size,
+    };
+  }, [filtered]);
 
   function exportToCSV() {
-    if (!logs || logs.length === 0) return;
     setExporting(true);
-
-    const headers = ["Timestamp", "Action", "User", "Email", "Role", "IP", "Resource", "Details"];
-    const rows = logs.map((log) => [
-      new Date(log.createdAt).toISOString(),
-      log.action,
-      log.username,
-      log.email ?? "",
-      log.userRole,
-      log.ip ?? "",
-      log.resourceType ? `${log.resourceType}/${log.resourceId}` : "",
-      JSON.stringify(log.metadata ?? {}),
-    ]);
-
-    const csvContent = [
-      headers.join(","),
-      ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")),
-    ].join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `activity-logs-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-
-    setTimeout(() => setExporting(false), 1000);
+    try {
+      const headers = ["Timestamp", "Action", "User", "Email", "Role", "IP", "Resource", "Details"];
+      const body = filtered.map((log) =>
+        [
+          formatAbsoluteTime(log.createdAt),
+          log.action,
+          log.username,
+          log.email ?? "",
+          log.userRole,
+          log.ip ?? "",
+          log.resourceType ? `${log.resourceType}:${log.resourceId ?? ""}` : "",
+          log.metadata ? JSON.stringify(log.metadata) : "",
+        ]
+          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+          .join(",")
+      );
+      const blob = new Blob([[headers.join(","), ...body].join("\n")], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `activity-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
   }
-
   return (
-    <div className="space-y-6">
-      <AdminPageHeader
-        title="Activity Logs"
-        subtitle="Audit trail of every action across the platform"
+    <div className="space-y-5">
+      <AdminHeader
+        icon={ScrollText}
+        kicker="Audit trail"
+        title="Activity logs"
+        lede="Every privileged action, newest first. Pick an area, then narrow to a single kind of event — the raw payload is one click away on any row."
         live={autoRefresh}
+        liveLabel="Polling 10s"
         actions={
           <>
             <Button
-              variant={autoRefresh ? "default" : "secondary"}
+              variant={autoRefresh ? "default" : "outline"}
               size="sm"
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              className="gap-1.5"
+              onClick={() => setAutoRefresh((v) => !v)}
+              aria-pressed={autoRefresh}
             >
-              <Clock className={cn("h-3.5 w-3.5", autoRefresh && "animate-spin")} />
-              Auto
+              {autoRefresh ? (
+                <Pause className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Play className="h-4 w-4" aria-hidden="true" />
+              )}
+              {autoRefresh ? "Pause" : "Auto"}
             </Button>
-            <Button variant="secondary" size="sm" onClick={exportToCSV} className="gap-1.5" disabled={isLoading || !logs?.length}>
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportToCSV}
+              disabled={exporting || filtered.length === 0}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <FileDown className="h-4 w-4" aria-hidden="true" />
+              )}
               Export
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => refetch()} className="gap-1.5" disabled={isLoading}>
-              {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+              <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} aria-hidden="true" />
               Refresh
             </Button>
           </>
         }
       />
-
-      {/* Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Total Logs", value: stats.total, icon: Activity, tone: "text-accent", tile: "bg-accent/10" },
-          { label: "Unique Users", value: stats.uniqueUsers, icon: Users, tone: "text-blue-500", tile: "bg-blue-500/10" },
-          { label: "Unique IPs", value: stats.uniqueIPs, icon: Globe, tone: "text-violet-500", tile: "bg-violet-500/10" },
-          { label: "Action Types", value: Object.keys(stats.actions).length, icon: Layers, tone: "text-emerald-500", tile: "bg-emerald-500/10" },
-        ].map((s) => {
-          const Icon = s.icon;
-          return (
-            <div
-              key={s.label}
-              className="flex items-center gap-3 rounded-xl border border-border/50 bg-surface/50 px-4 py-3"
-            >
-              <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", s.tile, s.tone)}>
-                <Icon className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">{s.label}</p>
-                <p className="text-2xl font-bold tracking-tight text-foreground">{s.value}</p>
-              </div>
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <AdminMetric
+          icon={Activity}
+          label="Events"
+          value={stats.total}
+          tone="accent"
+          hint={group === "all" ? "Latest 200" : "In this area"}
+        />
+        <AdminMetric
+          icon={Users}
+          label="Actors"
+          value={stats.uniqueUsers}
+          tone="info"
+          hint="Distinct accounts"
+        />
+        <AdminMetric
+          icon={Globe}
+          label="Addresses"
+          value={stats.uniqueIPs}
+          tone="success"
+          hint="Distinct IPs"
+        />
+        <AdminMetric
+          icon={Layers}
+          label="Event kinds"
+          value={stats.actions}
+          tone="muted"
+          hint="Different actions seen"
+        />
       </div>
 
-      {/* Action Filter Chips */}
-      <div className="flex flex-wrap gap-1.5">
-        {filterActions.map((f) => {
-          const Icon = f.icon;
-          const isActive = action === f.value;
-          const count = f.value ? stats.actions[f.value] : stats.total;
-          return (
-            <button
-              key={f.value}
-              onClick={() => setAction(isActive ? "" : f.value)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
-                isActive
-                  ? "bg-accent text-accent-foreground shadow-sm"
-                  : "bg-surface border border-border/50 text-muted-foreground hover:bg-accent/10 hover:text-foreground"
-              )}
-            >
-              <Icon className="h-3 w-3" />
-              {f.label}
-              {count != null && count > 0 && (
-                <span className={cn("ml-0.5 text-[10px]", isActive ? "text-accent-foreground/70" : "text-muted-foreground/50")}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <div className="adm-toolbar">
+        <SearchField
+          icon={Search}
+          value={search}
+          onChange={setSearch}
+          label="Search logs"
+          placeholder="User, email, or IP…"
+        />
+        <Segment value={group} onChange={setGroup} options={GROUP_OPTIONS} label="Log area" />
       </div>
-
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
-          <Input
-            placeholder="Search user, IP, action, file..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-10"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+      {/* Second tier of the filter: only the actions that live in the chosen area,
+          plus an escape hatch for an action that arrived by query string. */}
+      {(chipActions.length > 0 || action) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {action && !chipActions.includes(action) && (
+            <FilterChip
+              icon={X}
+              active
+              onClick={() => setAction("")}
+              title="Clear the action filter"
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
+              {auditAction(action).label}
+            </FilterChip>
           )}
-        </div>
-      </div>
-
-      {/* Logs List */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {[...Array(12)].map((_, i) => (
-            <div key={i} className="h-16 skeleton rounded-xl" />
-          ))}
-        </div>
-      ) : (logs ?? []).length === 0 ? (
-        <div className="flex flex-col items-center py-16 text-muted-foreground">
-          <ScrollText className="h-10 w-10 text-muted-foreground/30 mb-3" />
-          <p className="text-sm font-medium">No logs found</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Try adjusting your filters</p>
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-border/50 bg-surface overflow-hidden">
-          {/* Desktop Header */}
-          <div className="hidden lg:grid grid-cols-[140px_1fr_160px_140px_160px_40px] border-b border-border/40 bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">
-            <span>Action</span>
-            <span>User</span>
-            <span>IP Address</span>
-            <span>Details</span>
-            <span>Time</span>
-            <span></span>
-          </div>
-
-          <div className="divide-y divide-border/30">
-            {(logs ?? []).map((log, idx) => {
-              const config = actionConfig[log.action] ?? { icon: Activity, color: "text-gray-400", bg: "bg-gray-400/10", label: log.action, description: log.action };
-              const Icon = config.icon;
-              const isExpanded = expandedId === log.id;
-
-              return (
-                <div key={log.id}>
-                  <motion.div
-                    initial={{ opacity: 0, y: 2 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(idx * 0.02, 0.5) }}
-                    className={cn(
-                      "group cursor-pointer transition-colors",
-                      "hover:bg-accent/5",
-                      isExpanded && "bg-accent/5"
-                    )}
-                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                  >
-                    {/* Mobile Layout */}
-                    <div className="lg:hidden px-4 py-3.5">
-                      <div className="flex items-start gap-3">
-                        <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", config.bg)}>
-                          <Icon className={cn("h-4 w-4", config.color)} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className={cn("text-sm font-semibold", config.color)}>{config.label}</span>
-                            <span className="text-xs text-muted-foreground">·</span>
-                            <span className="text-xs font-medium text-foreground">{log.username}</span>
-                            {log.userRole === "master" && (
-                              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">ADMIN</span>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                            {log.ip && (
-                              <span className="inline-flex items-center gap-1">
-                                <Globe className="h-3 w-3" />
-                                <span className="font-mono">{log.ip}</span>
-                              </span>
-                            )}
-                            <span className="inline-flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {formatRelativeTime(log.createdAt)}
-                            </span>
-                          </div>
-                          <div className="mt-1.5">
-<div className="break-words"><DescribeMetadata log={log} /></div>
-                          </div>
-                        </div>
-                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground/40 shrink-0 transition-transform", isExpanded && "rotate-180")} />
-                      </div>
-                    </div>
-
-                    {/* Desktop Layout */}
-                    <div className="hidden lg:grid grid-cols-[140px_1fr_160px_140px_160px_40px] items-center gap-3 px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", config.bg)}>
-                          <Icon className={cn("h-4 w-4", config.color)} />
-                        </div>
-                        <div>
-                          <span className={cn("text-sm font-semibold", config.color)}>{config.label}</span>
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/admin/users/${log.userId}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-sm font-medium text-foreground truncate hover:underline"
-                          >
-                            {log.username}
-                          </Link>
-                          {log.userRole === "master" && (
-                            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">ADMIN</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate">{log.email}</p>
-                      </div>
-                      <div>
-                        {log.ip ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-surface border border-border/50 px-2.5 py-1 text-xs font-mono text-muted-foreground">
-                            <Globe className="h-3 w-3 text-violet-400" />
-                            {log.ip}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground/50">—</span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <DescribeMetadata log={log} />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-pulse shrink-0" />
-                        <div>
-                          <p className="text-xs text-muted-foreground">{formatRelativeTime(log.createdAt)}</p>
-                          <p className="text-[10px] text-muted-foreground/50">{formatAbsoluteTime(log.createdAt)}</p>
-                        </div>
-                      </div>
-                      <div className="flex justify-center">
-                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground/40 transition-transform", isExpanded && "rotate-180")} />
-                      </div>
-                    </div>
-                  </motion.div>
-
-                  {/* Expanded Detail */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="border-t border-border/30 bg-muted/20 px-4 py-4 lg:pl-[180px]">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                            <div>
-                              <span className="text-muted-foreground/60 uppercase tracking-wider font-semibold">Action</span>
-                              <p className="mt-1 font-medium text-foreground">{config.label} — {config.description}</p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground/60 uppercase tracking-wider font-semibold">User</span>
-                              <p className="mt-1 font-medium text-foreground">
-                                <Link href={`/admin/users/${log.userId}`} className="hover:underline">
-                                  {log.username}
-                                </Link>{" "}
-                                ({log.email})
-                              </p>
-                              <p className="text-muted-foreground">
-                                ID:{" "}
-                                <Link href={`/admin/users/${log.userId}`} className="font-mono hover:underline">
-                                  {log.userId.slice(0, 8)}...
-                                </Link>
-                                {" · "}
-                                <Link
-                                  href={`/admin/logs?user=${encodeURIComponent(log.username)}`}
-                                  className="text-primary hover:underline"
-                                >
-                                  Filter logs
-                                </Link>
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground/60 uppercase tracking-wider font-semibold">Network</span>
-                              <p className="mt-1 font-mono text-muted-foreground">{log.ip ?? "No IP recorded"}</p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground/60 uppercase tracking-wider font-semibold">Timestamp</span>
-                              <p className="mt-1 text-muted-foreground">{formatAbsoluteTime(log.createdAt)}</p>
-                              <p className="text-muted-foreground/60">{formatRelativeTime(log.createdAt)}</p>
-                            </div>
-                          </div>
-                          {log.metadata && Object.keys(log.metadata).length > 0 && (
-                            <div className="mt-3 pt-3 border-t border-border/30">
-                              <span className="text-muted-foreground/60 uppercase tracking-wider font-semibold text-xs">Metadata</span>
-                              <pre className="mt-1.5 rounded-lg bg-background/50 border border-border/30 p-3 text-xs font-mono text-muted-foreground overflow-x-auto">
-                                {JSON.stringify(log.metadata, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </div>
+          {chipActions.map((key) => {
+            const meta = auditAction(key);
+            const active = action === key;
+            return (
+              <FilterChip
+                key={key}
+                icon={meta.icon}
+                tone={meta.tone}
+                active={active}
+                onClick={() => setAction(active ? "" : key)}
+                title={meta.description}
+              >
+                {meta.label}
+              </FilterChip>
+            );
+          })}
         </div>
       )}
+      <AdminPanel
+        icon={ScrollText}
+        title={`${filtered.length} event${filtered.length !== 1 ? "s" : ""}`}
+        sub={
+          action
+            ? `Filtered to ${auditAction(action).label}`
+            : group === "all"
+              ? "All areas"
+              : AUDIT_GROUPS.find((g) => g.id === group)?.label
+        }
+        flush
+      >
+        {isLoading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-14 w-full" rows={7} />
+          </div>
+        ) : filtered.length === 0 ? (
+          <AdminEmpty
+            icon={ScrollText}
+            title={rows.length === 0 ? "Nothing logged yet" : "Nothing in this area"}
+            body={
+              rows.length === 0
+                ? "Sign-ins, uploads, shares and account changes all land here the moment they happen."
+                : "Widen the area segment or clear the action chip to see the rest of the trail."
+            }
+            action={
+              rows.length > 0 ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setGroup("all");
+                    setAction("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <div className="divide-y divide-[var(--adm-hairline)]">
+            {filtered.map((log) => renderRow(log))}
+          </div>
+        )}
+      </AdminPanel>
     </div>
   );
+  function renderRow(log: LogEntry) {
+    const meta = auditAction(log.action);
+    const open = expandedId === log.id;
+    return (
+      <div key={log.id} className="adm-row adm-row--flat" data-open={open || undefined}>
+        <button
+          type="button"
+          className="flex w-full items-start gap-3 text-left"
+          onClick={() => setExpandedId(open ? null : log.id)}
+          aria-expanded={open}
+        >
+          <Chip icon={meta.icon} tone={meta.tone} className="mt-px shrink-0">
+            {meta.label}
+          </Chip>
+
+          <span className="min-w-0 flex-1">
+            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span className="text-[0.82rem] font-medium">{log.username}</span>
+              {log.userRole === "master" && <Chip tone="warning">master</Chip>}
+              {log.ip && (
+                <span className="adm-sub adm-num inline-flex items-center gap-1">
+                  <Globe className="h-3 w-3" aria-hidden="true" />
+                  {log.ip}
+                </span>
+              )}
+            </span>
+            <span className="mt-0.5 block">
+              <DescribeMetadata log={log} />
+            </span>
+          </span>
+
+          <span className="ml-auto flex shrink-0 items-center gap-2">
+            <span
+              className="adm-sub adm-num whitespace-nowrap"
+              title={formatAbsoluteTime(log.createdAt)}
+            >
+              {formatRelativeTime(log.createdAt, now)}
+            </span>
+            <ChevronDown
+              className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+              aria-hidden="true"
+            />
+          </span>
+        </button>
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="overflow-hidden"
+            >
+              <div className="grid gap-3 pt-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+                <dl className="space-y-1.5 text-[0.78rem]">
+                  <div className="flex gap-2">
+                    <dt className="adm-sub inline-flex w-20 shrink-0 items-center gap-1">
+                      <Clock className="h-3 w-3" aria-hidden="true" />
+                      When
+                    </dt>
+                    <dd className="adm-num">{formatAbsoluteTime(log.createdAt)}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="adm-sub w-20 shrink-0">Account</dt>
+                    <dd>
+                      <Link
+                        href={`/admin/users/${log.userId}`}
+                        className="font-medium text-accent hover:underline"
+                      >
+                        {log.username}
+                      </Link>
+                      {log.email && <span className="adm-sub"> · {log.email}</span>}
+                    </dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="adm-sub w-20 shrink-0">Resource</dt>
+                    <dd className="adm-num break-all">
+                      {log.resourceType
+                        ? `${log.resourceType}${log.resourceId ? `:${log.resourceId}` : ""}`
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="adm-sub w-20 shrink-0">Meaning</dt>
+                    <dd className="adm-sub">{meta.description}</dd>
+                  </div>
+                </dl>
+                <pre className="adm-code">{JSON.stringify(log.metadata ?? {}, null, 2)}</pre>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
 }

@@ -8,7 +8,15 @@
  */
 
 const localUploads = new Map<string, number>();
-const TTL_MS = 60_000;
+/**
+ * The mark is written when /init hands back a fileId, and a large multipart
+ * upload can spend many minutes between init and complete. A one-minute window
+ * expired mid-transfer and let the tab toast its own upload again.
+ */
+const TTL_MS = 15 * 60_000;
+
+/** Marked but never consumed — a stuck entry must not pin memory forever. */
+const MAX_TRACKED = 500;
 
 export function clearLocalUploads(): void {
   localUploads.clear();
@@ -18,6 +26,12 @@ function sweep() {
   const now = Date.now();
   for (const [id, ts] of localUploads) {
     if (now - ts > TTL_MS) localUploads.delete(id);
+  }
+  // Map preserves insertion order, so the head of the iterator is the oldest.
+  while (localUploads.size > MAX_TRACKED) {
+    const oldest = localUploads.keys().next();
+    if (oldest.done) break;
+    localUploads.delete(oldest.value);
   }
 }
 

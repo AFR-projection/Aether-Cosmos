@@ -6,6 +6,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, Eye, EyeOff, KeyRound, Loader2, UserRound } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
+import { APP_NAME } from "@/lib/app-version";
 import { useSecurityAlertFromStorage } from "@/components/auth/security-alert";
 import { AuthError, AuthHint, AuthShell } from "@/components/auth/auth-shell";
 
@@ -189,7 +190,7 @@ export default function LoginPage() {
 
           {registrationEnabled ? (
             <p className="auth-form__footer">
-              New to Storage ByAFR?{" "}
+              New to {APP_NAME}?{" "}
               <Link href="/register">Create an account</Link>
             </p>
           ) : (

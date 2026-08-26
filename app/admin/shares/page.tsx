@@ -1,14 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { useConfirm } from "@/components/admin/confirm-dialog";
+import {
+  AdminEmpty,
+  AdminHeader,
+  AdminMetric,
+  AdminPanel,
+  Check as CheckBox,
+  Chip,
+  IconButton,
+  Meter,
+  SearchField,
+  Segment,
+  Skeleton,
+} from "@/components/admin/admin-ui";
 import { notify } from "@/lib/system/notify-store";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
 import {
@@ -18,11 +28,11 @@ import {
   Loader2,
   RefreshCw,
   ExternalLink,
-  Filter,
-  CheckCircle,
-  XCircle,
   Copy,
   Check,
+  Link2,
+  Eye,
+  CircleSlash,
 } from "lucide-react";
 
 type ShareRow = {
@@ -44,6 +54,12 @@ type ShareRow = {
   status: "active" | "expired";
 };
 
+const STATUS_OPTIONS = [
+  { value: "all" as const, label: "All" },
+  { value: "active" as const, label: "Active" },
+  { value: "expired" as const, label: "Expired" },
+];
+
 export default function AdminSharesPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -63,15 +79,34 @@ export default function AdminSharesPage() {
     },
   });
 
-  const filtered = (shares ?? []).filter((s) => {
-    if (!ownerSearch.trim()) return true;
-    const q = ownerSearch.toLowerCase();
-    return (
-      s.ownerUsername.toLowerCase().includes(q) ||
-      s.fileName.toLowerCase().includes(q) ||
-      s.token.toLowerCase().includes(q)
+  // Memoised so the summary below does not recompute on every keystroke of an
+  // unrelated state change.
+  const rows = useMemo(() => shares ?? [], [shares]);
+
+  const filtered = useMemo(() => {
+    const q = ownerSearch.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (s) =>
+        s.ownerUsername.toLowerCase().includes(q) ||
+        s.fileName.toLowerCase().includes(q) ||
+        s.token.toLowerCase().includes(q)
     );
-  });
+  }, [rows, ownerSearch]);
+
+  const summary = useMemo(() => {
+    let active = 0;
+    let expired = 0;
+    let opens = 0;
+    for (const s of rows) {
+      if (s.status === "active") active += 1;
+      else expired += 1;
+      opens += s.accessCount;
+    }
+    return { active, expired, opens };
+  }, [rows]);
+
+  const allSelected = filtered.length > 0 && selected.size === filtered.length;
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -83,11 +118,7 @@ export default function AdminSharesPage() {
   }
 
   function toggleAll() {
-    if (selected.size === filtered.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(filtered.map((s) => s.id)));
-    }
+    setSelected(allSelected ? new Set() : new Set(filtered.map((s) => s.id)));
   }
 
   function revokeSelected() {
@@ -133,181 +164,194 @@ export default function AdminSharesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <AdminPageHeader
-        title="Shares Center"
-        subtitle="Review and revoke share links across all users"
+    <div className="space-y-5">
+      <AdminHeader
+        icon={Share2}
+        kicker="Shares"
+        title="Share links"
+        lede="Every public link across every account, newest first. Select the ones that should stop working and revoke them in one pass."
         actions={
-          <>
-            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-              <RefreshCw className={cn("h-4 w-4 mr-1.5", isFetching && "animate-spin")} />
-              Refresh
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={selected.size === 0 || revoking}
-              onClick={revokeSelected}
-            >
-              {revoking ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
-              Revoke ({selected.size})
-            </Button>
-          </>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} aria-hidden="true" />
+            Refresh
+          </Button>
         }
       />
 
-      <Card className="border-border/40">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Filter className="h-4 w-4" />
-            Filters
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Search owner, file, or token…"
-              value={ownerSearch}
-              onChange={(e) => setOwnerSearch(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-1 rounded-xl bg-muted/40 p-1 border border-border/40">
-            {(["all", "active", "expired"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setStatus(s)}
-                className={cn(
-                  "rounded-lg px-3 py-1.5 text-sm capitalize transition-colors",
-                  status === s ? "bg-surface shadow-sm border border-border/50" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <AdminMetric icon={Link2} label="Links" value={rows.length} tone="accent" hint="In this view" />
+        <AdminMetric icon={Check} label="Active" value={summary.active} tone="success" hint="Reachable right now" />
+        <AdminMetric
+          icon={CircleSlash}
+          label="Expired"
+          value={summary.expired}
+          tone="muted"
+          hint="Already refusing access"
+        />
+        <AdminMetric icon={Eye} label="Opens" value={summary.opens} tone="info" hint="Total across all links" />
+      </div>
 
-      <Card className="border-border/40 overflow-hidden">
-        <CardHeader className="pb-2 flex-row items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Share2 className="h-4 w-4" />
-            {filtered.length} share{filtered.length !== 1 ? "s" : ""}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="flex justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      {/* One bar for both jobs: filtering when nothing is selected, bulk actions
+          when something is. It never changes height, so the table below stays put. */}
+      <div className="adm-toolbar" data-active={selected.size > 0}>
+        {selected.size > 0 ? (
+          <>
+            <CheckBox
+              checked
+              indeterminate={!allSelected}
+              onChange={() => setSelected(new Set())}
+              label="Clear selection"
+            />
+            <span className="text-[0.8rem] font-medium">
+              <span className="adm-num">{selected.size}</span> selected
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                Cancel
+              </Button>
+              <Button variant="destructive" size="sm" disabled={revoking} onClick={revokeSelected}>
+                {revoking ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                )}
+                Revoke {selected.size}
+              </Button>
             </div>
-          ) : filtered.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">No shares found</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border/40 text-left text-muted-foreground">
-                    <th className="px-4 py-3 w-10">
-                      <input
-                        type="checkbox"
-                        checked={selected.size === filtered.length && filtered.length > 0}
-                        onChange={toggleAll}
-                        className="rounded"
-                      />
-                    </th>
-                    <th className="px-4 py-3 font-medium">File</th>
-                    <th className="px-4 py-3 font-medium">Owner</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium">Access</th>
-                    <th className="px-4 py-3 font-medium">Created</th>
-                    <th className="px-4 py-3 font-medium">Link</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((s) => (
-                    <tr key={s.id} className="border-b border-border/30 hover:bg-muted/20">
-                      <td className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(s.id)}
-                          onChange={() => toggle(s.id)}
-                          className="rounded"
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium truncate max-w-[200px]">{s.fileName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatBytes(s.fileSize)} · {s.permission}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Link
-                          href={`/admin/users/${s.ownerId}`}
-                          className="text-primary hover:underline font-medium"
-                        >
-                          {s.ownerUsername}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3">
-                        {s.status === "active" ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-500 text-xs font-medium">
-                            <CheckCircle className="h-3.5 w-3.5" /> Active
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-red-400 text-xs font-medium">
-                            <XCircle className="h-3.5 w-3.5" /> Expired
-                          </span>
-                        )}
-                        {s.expiresAt && (
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            Exp {formatDate(s.expiresAt)}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {s.accessCount}
-                        {s.maxAccessCount != null ? ` / ${s.maxAccessCount}` : ""}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                        {formatDate(s.createdAt)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => copyUrl(s.shareUrl, s.id)}
-                          >
-                            {copied === s.id ? (
-                              <Check className="h-3.5 w-3.5 text-emerald-500" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <a
-                            href={s.shareUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </>
+        ) : (
+          <>
+            <SearchField
+              icon={Search}
+              value={ownerSearch}
+              onChange={setOwnerSearch}
+              label="Search shares"
+              placeholder="Owner, file name, or token…"
+            />
+            <Segment value={status} onChange={setStatus} options={STATUS_OPTIONS} label="Share status" />
+          </>
+        )}
+      </div>
+
+      <AdminPanel
+        icon={Share2}
+        title={`${filtered.length} share${filtered.length !== 1 ? "s" : ""}`}
+        sub={ownerSearch.trim() ? `Matching “${ownerSearch.trim()}”` : undefined}
+        flush
+      >
+        {isLoading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-11 w-full" rows={6} />
+          </div>
+        ) : filtered.length === 0 ? (
+          <AdminEmpty
+            icon={Link2}
+            title={rows.length === 0 ? "No share links" : "Nothing matches that filter"}
+            body={
+              rows.length === 0
+                ? "When a user shares a file by link it appears here, along with how many times it has been opened."
+                : "Try a different owner, file name, or token — or widen the status filter."
+            }
+          />
+        ) : (
+          <div className="adm-table-wrap">
+            <table className="adm-table">
+              <thead>
+                <tr>
+                  <th style={{ width: "2.5rem" }}>
+                    <CheckBox
+                      checked={allSelected}
+                      indeterminate={selected.size > 0}
+                      onChange={toggleAll}
+                      label={allSelected ? "Deselect all shares" : "Select all shares"}
+                    />
+                  </th>
+                  <th>File</th>
+                  <th>Owner</th>
+                  <th>Status</th>
+                  <th>Opens</th>
+                  <th>Created</th>
+                  <th style={{ width: "5.5rem" }}>Link</th>
+                </tr>
+              </thead>
+              <tbody>{filtered.map((s) => renderRow(s))}</tbody>
+            </table>
+          </div>
+        )}
+      </AdminPanel>
 
       {confirm.element}
     </div>
   );
+
+  function renderRow(s: ShareRow) {
+    const capped = s.maxAccessCount != null && s.maxAccessCount > 0;
+    return (
+      <tr key={s.id} data-selected={selected.has(s.id)}>
+        <td>
+          <CheckBox
+            checked={selected.has(s.id)}
+            onChange={() => toggle(s.id)}
+            label={`Select share for ${s.fileName}`}
+          />
+        </td>
+        <td>
+          <div className="max-w-[16rem] truncate font-medium">{s.fileName}</div>
+          <div className="adm-sub">
+            {formatBytes(s.fileSize)} · {s.permission}
+          </div>
+        </td>
+        <td>
+          <Link
+            href={`/admin/users/${s.ownerId}`}
+            className="font-medium text-accent hover:underline"
+          >
+            {s.ownerUsername}
+          </Link>
+        </td>
+        <td>
+          <Chip tone={s.status === "active" ? "success" : "muted"}>
+            {s.status === "active" ? "Active" : "Expired"}
+          </Chip>
+          {s.expiresAt && <div className="adm-sub mt-1">Expires {formatDate(s.expiresAt)}</div>}
+        </td>
+        <td>
+          <span className="adm-num">
+            {s.accessCount}
+            {capped ? ` / ${s.maxAccessCount}` : ""}
+          </span>
+          {capped && (
+            <Meter
+              className="mt-1.5 w-16"
+              value={s.accessCount / (s.maxAccessCount as number)}
+              tone={s.accessCount >= (s.maxAccessCount as number) ? "danger" : "accent"}
+            />
+          )}
+        </td>
+        <td className="whitespace-nowrap">
+          <span className="adm-sub">{formatDate(s.createdAt)}</span>
+        </td>
+        <td>
+          <div className="flex items-center gap-1">
+            <IconButton
+              icon={copied === s.id ? Check : Copy}
+              tone={copied === s.id ? "success" : undefined}
+              label={copied === s.id ? "Link copied" : "Copy share link"}
+              onClick={() => void copyUrl(s.shareUrl, s.id)}
+            />
+            <a
+              href={s.shareUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="adm-iconbtn"
+              aria-label={`Open share link for ${s.fileName} in a new tab`}
+              title="Open link"
+            >
+              <ExternalLink aria-hidden="true" />
+            </a>
+          </div>
+        </td>
+      </tr>
+    );
+  }
 }

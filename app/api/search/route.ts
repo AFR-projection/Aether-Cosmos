@@ -7,20 +7,33 @@ import { requireAuthOrApiKey } from "@/lib/auth/api-key";
 import { getEffectiveUserId } from "@/lib/auth/permissions";
 import { cacheGet, cacheSet } from "@/lib/cache/redis";
 import { apiSuccess, handleApiError } from "@/lib/api/response";
+import { MAX_SEARCH_QUERY_LENGTH, timestampParam } from "@/lib/api/query-params";
 import { hasSearchTerms, ftsMatch, ftsRank } from "@/lib/search/fts";
 
+/**
+ * Every parameter is bounded. `from`/`to`/`cursor` used to be bare strings fed to
+ * `new Date(...)`, so `?cursor=banana` produced an Invalid Date, a broken query
+ * parameter and a 500; `q` and `mimeType` were unbounded and also went into the
+ * Redis cache key; and `page` was unbounded, so `?page=1e9` asked Postgres for a
+ * billion-row OFFSET.
+ */
+const size = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+
+/** Deep enough for any real result set; an OFFSET past this is not a page. */
+const MAX_PAGE = 1000;
+
 const searchSchema = z.object({
-  q: z.string().optional(),
-  mimeType: z.string().optional(),
-  minSize: z.coerce.number().optional(),
-  maxSize: z.coerce.number().optional(),
+  q: z.string().max(MAX_SEARCH_QUERY_LENGTH).optional(),
+  mimeType: z.string().max(255).optional(),
+  minSize: size.optional(),
+  maxSize: size.optional(),
   folderId: z.string().uuid().optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  cursor: z.string().optional(),
+  from: timestampParam.optional(),
+  to: timestampParam.optional(),
+  cursor: timestampParam.optional(),
   // Offset-based page index, used only for full-text (relevance-ranked) results
   // where a createdAt cursor is not meaningful.
-  page: z.coerce.number().int().min(0).default(0),
+  page: z.coerce.number().int().min(0).max(MAX_PAGE).default(0),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
@@ -55,10 +68,10 @@ export async function GET(request: NextRequest) {
       conditions.push(eq(files.folderId, params.folderId));
     }
     if (params.from) {
-      conditions.push(gte(files.createdAt, new Date(params.from)));
+      conditions.push(gte(files.createdAt, params.from));
     }
     if (params.to) {
-      conditions.push(lte(files.createdAt, new Date(params.to)));
+      conditions.push(lte(files.createdAt, params.to));
     }
 
     if (query) {
@@ -86,7 +99,7 @@ export async function GET(request: NextRequest) {
 
     // Filter-only search (no text query): keep the fast createdAt-cursor path.
     if (params.cursor) {
-      conditions.push(lt(files.createdAt, new Date(params.cursor)));
+      conditions.push(lt(files.createdAt, params.cursor));
     }
 
     const result = await db

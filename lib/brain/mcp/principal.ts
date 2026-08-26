@@ -10,6 +10,7 @@ import {
   type BrainApiScope,
 } from "@/lib/brain/constants";
 import { BrainForbiddenError, BrainNotFoundError } from "@/lib/brain/errors";
+import { APP_NAME } from "@/lib/app-version";
 
 /**
  * Who is calling the MCP server, and which brains may they touch.
@@ -67,7 +68,7 @@ export function effectiveGrantScopes(
  */
 export async function resolveMcpPrincipal(token: string): Promise<McpPrincipal> {
   if (!token.startsWith("sk_") && !token.startsWith("skm_")) {
-    throw new AuthError("A Storage ByAFR API key (sk_…) is required", 401);
+    throw new AuthError(`An ${APP_NAME} API key (sk_…) is required`, 401);
   }
 
   const user = await authenticateApiKey(token, []);

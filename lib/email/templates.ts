@@ -4,7 +4,9 @@
  * clients and spam filters penalize HTML-only mail). Keep copy short and clear.
  */
 
-const APP = "Storage ByAFR";
+import { APP_NAME } from "@/lib/app-version";
+
+const APP = APP_NAME;
 const BRAND = "#6366f1";
 
 /** Shared HTML shell: centered card, brand header, muted footer. */

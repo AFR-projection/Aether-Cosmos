@@ -15,13 +15,13 @@ import { readCleanupState } from "@/lib/system/cleanup-state";
 
 export type { AdminSettings };
 
-function parseInactivityMs(): number | null {
-  const raw = process.env.SESSION_INACTIVITY_MS;
-  if (!raw) return null;
-  const parsed = parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
+/*
+ * Every key here is optional and the object is `.strip()`ed, so a client can PATCH
+ * one field without resending the rest and cannot smuggle in an unknown key.
+ * Ranges are deliberately NOT enforced here — `normalizeSettings` in
+ * lib/admin-settings.ts clamps every field on the way in, which is the one place
+ * that also protects writes coming from anywhere else.
+ */
 const patchSchema = z
   .object({
     maintenanceMode: z.boolean().optional(),
@@ -39,6 +39,19 @@ const patchSchema = z
     rateLimitPerMinute: z.number().optional(),
     logRetentionDays: z.number().optional(),
     stepCodeRequired: z.boolean().optional(),
+    sessionIdleTimeoutMinutes: z.number().optional(),
+    sessionIpBinding: z.enum(["auto", "on", "off"]).optional(),
+    loginMaxAttempts: z.number().optional(),
+    loginIpMaxAttempts: z.number().optional(),
+    loginLockoutMinutes: z.number().optional(),
+    uploadUrlExpiryMinutes: z.number().optional(),
+    downloadUrlExpirySeconds: z.number().optional(),
+    defaultBandwidthQuotaGB: z.number().optional(),
+    // Bounded so a paste cannot turn the allowlist into an unbounded blob.
+    allowedEmailDomains: z.array(z.string().max(253)).max(100).optional(),
+    publicSharingEnabled: z.boolean().optional(),
+    shareDefaultExpiryDays: z.number().optional(),
+    shareMaxExpiryDays: z.number().optional(),
     emailDailyLimitPerSender: z.number().optional(),
     emailFailureThreshold: z.number().optional(),
     emailCooldownMinutes: z.number().optional(),
@@ -62,9 +75,9 @@ export async function GET(request: NextRequest) {
         persistence: "database",
         cacheTtlSeconds: 30,
         cleanup,
-        // Idle expiry is opt-in via env; the UI warns when it is shorter than
-        // the configured session duration, since the shorter one wins.
-        sessionInactivityMs: parseInactivityMs(),
+        // Whether "auto" IP binding resolves to on or off here. The panel shows
+        // the resolved answer so "auto" is not a mystery to whoever picked it.
+        productionMode: process.env.NODE_ENV === "production",
       },
     });
   } catch (error) {

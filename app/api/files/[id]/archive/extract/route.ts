@@ -5,6 +5,14 @@ import { downloadFromR2Stream } from "@/lib/storage/r2";
 import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
 import { apiError, handleApiError } from "@/lib/api/response";
 import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
+import {
+  ARCHIVE_ENTRY_MAX_BYTES,
+  ARCHIVE_INSPECT_MAX_BYTES,
+  archiveErrorResponse,
+  archiveTooLargeResponse,
+  readArchiveBuffer,
+  readEntryBounded,
+} from "@/lib/storage/archive-read";
 import JSZip from "jszip";
 
 const TEXT_TYPES = new Set([
@@ -46,30 +54,25 @@ export async function GET(
     }
     const file = accessible.file;
 
+    // Refuse before spending the bandwidth when the recorded size already says no.
+    if (Number(file.sizeBytes) > ARCHIVE_INSPECT_MAX_BYTES) {
+      return archiveTooLargeResponse();
+    }
+
     const r2 = await downloadFromR2Stream(file.r2Key);
     if (!r2.body) {
       return apiError("File is empty", 404);
     }
 
-    const chunks: Uint8Array[] = [];
-    if (r2.body instanceof ReadableStream) {
-      const reader = r2.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-    } else if ("on" in r2.body && typeof (r2.body as NodeJS.ReadableStream).on === "function") {
-      const bufs: Buffer[] = [];
-      for await (const chunk of r2.body as AsyncIterable<Buffer>) {
-        bufs.push(chunk);
-      }
-      chunks.push(Buffer.concat(bufs));
-    } else {
-      return apiError("Unsupported stream type", 500);
+    let buffer: Buffer;
+    try {
+      buffer = await readArchiveBuffer(r2.body, ARCHIVE_INSPECT_MAX_BYTES);
+    } catch (error) {
+      const response = archiveErrorResponse(error);
+      if (response) return response;
+      throw error;
     }
 
-    const buffer = Buffer.concat(chunks);
     const zip = await JSZip.loadAsync(buffer);
 
     const entry = zip.file(filePath);
@@ -77,7 +80,17 @@ export async function GET(
       return apiError(`File "${filePath}" not found in archive`, 404);
     }
 
-    const content = await entry.async("uint8array");
+    // A crafted entry can inflate to far more than the container it arrived in,
+    // so the decompressed bytes get their own ceiling.
+    let content: Uint8Array;
+    try {
+      content = await readEntryBounded(entry, ARCHIVE_ENTRY_MAX_BYTES);
+    } catch (error) {
+      const response = archiveErrorResponse(error);
+      if (response) return response;
+      throw error;
+    }
+
     const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
     const rawMime = getMime(ext);
     const safeMime = getSafeMimeType(rawMime, entry.name);

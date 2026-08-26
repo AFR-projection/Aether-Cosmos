@@ -1,20 +1,34 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { formatDistanceToNow } from "date-fns";
+import { AnimatePresence, motion } from "framer-motion";
 import { apiFetch } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { useConfirm } from "@/components/admin/confirm-dialog";
 import { UserSecurityPanel } from "@/components/admin/user-security-panel";
 import { useAdminEvents } from "@/hooks/use-admin-events";
 import { notify } from "@/lib/system/notify-store";
-import { cn, formatBytes, formatDate } from "@/lib/utils";
+import {
+  AdminEmpty,
+  AdminHeader,
+  AdminMetric,
+  AdminPanel,
+  Avatar,
+  Check as CheckBox,
+  Chip,
+  IconButton,
+  Meter,
+  Note,
+  SearchField,
+  Skeleton,
+  StatusDot,
+  Switch,
+  type Tone,
+} from "@/components/admin/admin-ui";
+import { formatBytes, formatDate } from "@/lib/utils";
 import {
   UserPlus,
   Ban,
@@ -23,9 +37,8 @@ import {
   Loader2,
   Search,
   Shield,
-  User,
   Eye,
-  Edit,
+  Pencil,
   Save,
   X,
   Users,
@@ -34,12 +47,20 @@ import {
   CheckCircle2,
   Send,
   ArrowUpDown,
+  WifiOff,
+  KeyRound,
+  type LucideIcon,
 } from "lucide-react";
 
 /** A user counts as "online" if a live session was active within this window. */
 const ONLINE_WINDOW_MS = 3 * 60 * 1000;
+/** Past this, "recently here" stops being a useful thing to say. */
+const IDLE_WINDOW_MS = 60 * 60 * 1000;
+
+const GB = 1073741824;
 
 type Verification = "active" | "unverified" | "suspended";
+type Presence = "live" | "idle" | "dormant" | "never";
 
 interface AdminUser {
   id: string;
@@ -73,6 +94,45 @@ interface UsersStats {
 
 type Filter = "all" | "online" | "unverified" | "suspended";
 type SortBy = "online" | "recent" | "storage" | "name";
+
+/**
+ * Verification state, said once. The old page carried three different colour maps
+ * for the same three states; this is the only one now, and its tones resolve
+ * through the shared `[data-tone]` contract instead of raw emerald/amber/red.
+ */
+const VERIFICATION: Record<Verification, { label: string; tone: Tone; icon: LucideIcon }> = {
+  active: { label: "Active", tone: "success", icon: CheckCircle2 },
+  unverified: { label: "Unverified", tone: "warning", icon: MailWarning },
+  suspended: { label: "Suspended", tone: "danger", icon: Ban },
+};
+
+const PRESENCE_LABEL: Record<Presence, string> = {
+  live: "Online",
+  idle: "Recently here",
+  dormant: "Away",
+  never: "Never signed in",
+};
+
+const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+  { value: "online", label: "Online first" },
+  { value: "recent", label: "Newest" },
+  { value: "storage", label: "Storage used" },
+  { value: "name", label: "Name (A–Z)" },
+];
+
+/** Pure relative time — the page already ticks `now`, so nothing needs Date.now(). */
+function relTime(dateStr: string, now: number): string {
+  if (now === 0) return "—";
+  const diffSec = Math.max(0, Math.floor((now - new Date(dateStr).getTime()) / 1000));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return `${Math.floor(day / 30)}mo ago`;
+}
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -117,7 +177,6 @@ export default function AdminUsersPage() {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-
   const { data, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["admin-users"],
     queryFn: async () => {
@@ -134,7 +193,7 @@ export default function AdminUsersPage() {
     refetchInterval: 30_000,
   });
 
-  const users = data?.users ?? [];
+  const users = useMemo(() => data?.users ?? [], [data]);
   // Skew between server + this browser, captured at fetch — presence is judged
   // against the server clock so a wrong local clock can't fake online/offline.
   const offset = data ? data.serverTime - data.clientFetchedAt : 0;
@@ -145,6 +204,14 @@ export default function AdminUsersPage() {
     now === 0
       ? u.online
       : !!u.lastActiveAt && now + offset - new Date(u.lastActiveAt).getTime() < ONLINE_WINDOW_MS;
+
+  /** Four buckets so the dot can say something more useful than on/off. */
+  const presenceOf = (u: AdminUser): Presence => {
+    if (isOnline(u)) return "live";
+    if (!u.lastActiveAt) return "never";
+    if (now === 0) return "idle";
+    return now + offset - new Date(u.lastActiveAt).getTime() < IDLE_WINDOW_MS ? "idle" : "dormant";
+  };
 
   let onlineCount = 0;
   let unverifiedCount = 0;
@@ -160,7 +227,6 @@ export default function AdminUsersPage() {
     unverified: unverifiedCount,
     suspended: suspendedCount,
   };
-
   const q = searchTerm.toLowerCase();
   const filtered = users
     .filter(
@@ -188,6 +254,16 @@ export default function AdminUsersPage() {
 
   const selectableIds = filtered.filter((u) => u.role !== "master").map((u) => u.id);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+
+  const storage = useMemo(() => {
+    let used = 0;
+    let quota = 0;
+    for (const u of users) {
+      used += u.usedBytes;
+      quota += u.quotaBytes;
+    }
+    return { used, quota };
+  }, [users]);
 
   function ok(msg: string) {
     notify({ title: msg, tone: "success" });
@@ -221,7 +297,7 @@ export default function AdminUsersPage() {
           username: form.username,
           email: form.email || undefined,
           password: form.password,
-          quotaBytes: form.quotaGB * 1073741824,
+          quotaBytes: form.quotaGB * GB,
         }),
       });
       if (!res.success) {
@@ -262,7 +338,6 @@ export default function AdminUsersPage() {
       setActionLoading(null);
     }
   }
-
   async function deleteUser(id: string) {
     setActionLoading(id);
     try {
@@ -327,7 +402,6 @@ export default function AdminUsersPage() {
       setActionLoading(null);
     }
   }
-
   function runBulk(kind: "activate" | "suspend" | "delete") {
     const ids = [...selected].filter((id) => selectableIds.includes(id));
     if (ids.length === 0) return;
@@ -380,7 +454,6 @@ export default function AdminUsersPage() {
       }
     );
   }
-
   function toggleSuspend(user: AdminUser) {
     if (user.status === "active") {
       confirm.open(
@@ -420,12 +493,11 @@ export default function AdminUsersPage() {
       username: user.username,
       email: user.email ?? "",
       password: "",
-      quotaGB: Math.round(user.quotaBytes / 1073741824),
+      quotaGB: Math.round(user.quotaBytes / GB),
       mustChangePassword: !!user.mustChangePassword,
-      bandwidthQuotaGB: Math.round((user.bandwidthQuotaBytes ?? 0) / 1073741824),
+      bandwidthQuotaGB: Math.round((user.bandwidthQuotaBytes ?? 0) / GB),
     });
   }
-
   async function saveEditUser() {
     if (!editingUser) return;
     setActionLoading(editingUser.id);
@@ -434,9 +506,9 @@ export default function AdminUsersPage() {
         id: editingUser.id,
         username: editForm.username || undefined,
         email: editForm.email.trim() || null,
-        quotaBytes: editForm.quotaGB * 1073741824,
+        quotaBytes: editForm.quotaGB * GB,
         mustChangePassword: editForm.mustChangePassword,
-        bandwidthQuotaBytes: editForm.bandwidthQuotaGB * 1073741824,
+        bandwidthQuotaBytes: editForm.bandwidthQuotaGB * GB,
       };
       if (editForm.password) body.password = editForm.password;
       const res = await apiFetch("/api/admin/users", {
@@ -478,671 +550,580 @@ export default function AdminUsersPage() {
   }
 
   const updatedAgo = dataUpdatedAt ? Math.max(0, Math.round((now - dataUpdatedAt) / 1000)) : 0;
-
+  const linkState =
+    live === "live"
+      ? null
+      : {
+          label: live === "offline" ? "Realtime offline" : live === "connecting" ? "Connecting…" : "Reconnecting…",
+          tone: (live === "offline" ? "muted" : "warning") as Tone,
+        };
   return (
-    <div className="space-y-6">
-      <AdminPageHeader
-        title="User Management"
-        subtitle="Create, edit, suspend, and impersonate platform users"
+    <div className="space-y-5">
+      <AdminHeader
+        icon={Users}
+        kicker="Accounts"
+        title="Users"
+        lede="Everyone with a login, online first. The tiles below are the filter — tap one to narrow the table, tap it again to clear it."
+        live={live === "live"}
+        liveLabel="Live"
         actions={
-          <div className="flex items-center gap-3">
-            <LiveIndicator status={live} updatedAgo={updatedAgo} />
+          <>
+            {linkState && (
+              <Chip icon={WifiOff} tone={linkState.tone}>
+                {linkState.label}
+              </Chip>
+            )}
             <Button
+              size="sm"
               onClick={() => {
-                setShowCreate(!showCreate);
+                setShowCreate((v) => !v);
                 setFormError("");
               }}
-              className="gap-1.5"
+              aria-expanded={showCreate}
             >
-              <UserPlus className="h-4 w-4" /> Add User
+              {showCreate ? (
+                <X className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+              )}
+              {showCreate ? "Close" : "Add user"}
             </Button>
-          </div>
+          </>
         }
       />
 
-      {/* Stat tiles — clickable filters */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile
-          icon={<Users className="h-4 w-4" />}
-          label="Total users"
+        <AdminMetric
+          icon={Users}
+          label="Total"
           value={counts.total}
-          tone="neutral"
-          active={filter === "all"}
+          tone="accent"
+          hint={`${formatBytes(storage.used)} of ${formatBytes(storage.quota)} allocated`}
+          pressed={filter === "all"}
           onClick={() => setFilter("all")}
         />
-        <StatTile
-          icon={<Radio className="h-4 w-4" />}
+        <AdminMetric
+          icon={Radio}
           label="Online now"
           value={counts.online}
-          tone="emerald"
-          active={filter === "online"}
-          onClick={() => setFilter("online")}
+          tone="success"
+          hint="Seen in the last 3 minutes"
+          pressed={filter === "online"}
+          onClick={() => setFilter(filter === "online" ? "all" : "online")}
         />
-        <StatTile
-          icon={<MailWarning className="h-4 w-4" />}
+        <AdminMetric
+          icon={MailWarning}
           label="Unverified"
           value={counts.unverified}
-          tone="amber"
-          active={filter === "unverified"}
-          onClick={() => setFilter("unverified")}
+          tone="warning"
+          hint="Waiting on an email code"
+          pressed={filter === "unverified"}
+          onClick={() => setFilter(filter === "unverified" ? "all" : "unverified")}
         />
-        <StatTile
-          icon={<Ban className="h-4 w-4" />}
+        <AdminMetric
+          icon={Ban}
           label="Suspended"
           value={counts.suspended}
-          tone="red"
-          active={filter === "suspended"}
-          onClick={() => setFilter("suspended")}
+          tone="danger"
+          hint="Blocked from signing in"
+          pressed={filter === "suspended"}
+          onClick={() => setFilter(filter === "suspended" ? "all" : "suspended")}
         />
       </div>
-
-      {/* Toolbar: search + sort */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[200px] flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
-          <Input
-            placeholder="Search users..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 h-10"
-          />
-        </div>
-        <div className="relative">
-          <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortBy)}
-            className="h-10 rounded-xl border border-border/60 bg-surface pl-9 pr-8 text-sm text-foreground focus-visible:outline-none focus-visible:border-accent/40 focus-visible:ring-2 focus-visible:ring-accent/15"
-          >
-            <option value="online">Online first</option>
-            <option value="recent">Newest</option>
-            <option value="storage">Storage used</option>
-            <option value="name">Name (A–Z)</option>
-          </select>
-        </div>
-        {filter !== "all" && (
-          <button
-            type="button"
-            onClick={() => setFilter("all")}
-            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-          >
-            Clear filter
-          </button>
-        )}
-      </div>
-
-      {/* Create User Form */}
-      {showCreate && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-          <Card className="border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UserPlus className="h-4 w-4 text-accent" />
-                Create New User
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Input
-                  placeholder="Username"
-                  value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
-                />
-                <Input
-                  placeholder="Email (optional)"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                />
-                <Input
-                  type="password"
-                  placeholder="Password"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  placeholder="Quota (GB)"
-                  value={form.quotaGB}
-                  onChange={(e) => setForm({ ...form, quotaGB: parseInt(e.target.value) || 10 })}
-                />
-              </div>
-              {formError && <p className="mt-3 text-sm text-red-500">{formError}</p>}
-              <Button onClick={createUser} disabled={formLoading} className="mt-4">
-                {formLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-                ) : (
-                  <Shield className="h-4 w-4 mr-1.5" />
-                )}
-                Create User
-              </Button>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3"
-        >
-          <span className="text-sm font-medium">
-            {selected.size} selected
-          </span>
-          <div className="flex-1" />
-          <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => runBulk("activate")}>
-            {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
-            Activate
-          </Button>
-          <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => runBulk("suspend")}>
-            <Ban className="h-3.5 w-3.5 mr-1" /> Suspend
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={bulkBusy}
-            onClick={() => runBulk("delete")}
-            className="text-danger hover:text-danger"
-          >
-            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-            Clear
-          </Button>
-        </motion.div>
-      )}
-
-      {/* Users Table */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-16 skeleton rounded-xl" />
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-border/50 bg-surface overflow-hidden">
-          {/* Table Header */}
-          <div className="hidden md:grid grid-cols-[36px_1fr_130px_180px_110px_150px] items-center border-b border-border/40 bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">
-            <input
-              type="checkbox"
-              className="rounded"
-              checked={allSelected}
-              onChange={toggleSelectAll}
-              aria-label="Select all"
-            />
-            <span>User</span>
-            <span>Status</span>
-            <span>Presence</span>
-            <span>Storage</span>
-            <span className="text-right">Actions</span>
-          </div>
-
-          {filtered.map((user, idx) => {
-            const isBusy = actionLoading === user.id;
-            const online = isOnline(user);
-            const selectable = user.role !== "master";
-            return (
-              <motion.div
-                key={user.id}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(idx * 0.02, 0.3) }}
-                className={cn(
-                  "md:grid md:grid-cols-[36px_1fr_130px_180px_110px_150px] items-center gap-3 px-4 py-4 border-b border-border/30 last:border-0 hover:bg-accent/5 transition-colors",
-                  selected.has(user.id) && "bg-accent/5"
-                )}
-              >
-                {/* Select checkbox (desktop) */}
-                <div className="hidden md:block">
-                  {selectable && (
-                    <input
-                      type="checkbox"
-                      className="rounded"
-                      checked={selected.has(user.id)}
-                      onChange={() => toggleSelect(user.id)}
-                      aria-label={`Select ${user.username}`}
-                    />
-                  )}
-                </div>
-
-                {/* Mobile card layout */}
-                <div className="md:hidden space-y-2 mb-3">
-                  <div className="flex items-center gap-3">
-                    {selectable && (
-                      <input
-                        type="checkbox"
-                        className="rounded"
-                        checked={selected.has(user.id)}
-                        onChange={() => toggleSelect(user.id)}
-                        aria-label={`Select ${user.username}`}
-                      />
-                    )}
-                    <Avatar online={online} />
-                    <div className="min-w-0">
-                      <p className="font-semibold text-sm truncate">{user.username}</p>
-                      <p className="text-xs text-muted-foreground truncate">{user.email ?? "—"}</p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="rounded bg-muted px-2 py-0.5 font-medium uppercase">{user.role}</span>
-                    <VerificationBadge verification={user.verification} />
-                    <PresenceText online={online} lastActiveAt={user.lastActiveAt} sessions={user.activeSessions} />
-                    <span>
-                      {formatBytes(user.usedBytes)} / {formatBytes(user.quotaBytes)}
-                    </span>
-                    <span>{formatDate(user.createdAt, "short")}</span>
-                  </div>
-                </div>
-
-                {/* Desktop: User */}
-                <div className="hidden md:flex items-center gap-3 min-w-0">
-                  <Avatar online={online} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate flex items-center gap-1.5">
-                      {user.username}
-                      {user.totpEnabled && (
-                        <span className="rounded bg-accent/10 px-1 py-0.5 text-[9px] font-bold uppercase text-accent">
-                          2FA
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">{user.email ?? "—"}</p>
-                  </div>
-                </div>
-
-                {/* Desktop: Status */}
-                <div className="hidden md:block">
-                  <VerificationBadge verification={user.verification} />
-                </div>
-
-                {/* Desktop: Presence */}
-                <div className="hidden md:block">
-                  <PresenceCell online={online} lastActiveAt={user.lastActiveAt} sessions={user.activeSessions} />
-                </div>
-
-                {/* Desktop: Storage */}
-                <span className="hidden md:inline font-mono text-xs text-muted-foreground">
-                  {formatBytes(user.usedBytes)}
-                </span>
-
-                {/* Actions */}
-                <div className="flex justify-end gap-1">
-                  {user.verification === "unverified" && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg text-muted-foreground/60 hover:text-emerald-500 hover:bg-emerald-500/10"
-                        title="Verify & activate now"
-                        disabled={isBusy}
-                        onClick={() => verifyNow(user)}
-                      >
-                        {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                      </Button>
-                      {user.email && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg text-muted-foreground/60 hover:text-info hover:bg-info/10"
-                          title="Resend verification code"
-                          disabled={isBusy}
-                          onClick={() => resendCode(user)}
-                        >
-                          <Send className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-lg text-muted-foreground/60 hover:text-info hover:bg-info/10"
-                    title="View Details"
-                    onClick={() => router.push(`/admin/users/${user.id}`)}
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-lg text-muted-foreground/60 hover:text-accent hover:bg-accent/10"
-                    title="Edit User"
-                    onClick={() => startEdit(user)}
-                  >
-                    <Edit className="h-3.5 w-3.5" />
-                  </Button>
-                  {user.role !== "master" && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg text-muted-foreground/60 hover:text-accent hover:bg-accent/10"
-                        title="Impersonate"
-                        disabled={isBusy}
-                        onClick={() => impersonate(user.id)}
-                      >
-                        {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg text-muted-foreground/60 hover:text-warning hover:bg-warning/10"
-                        title="Suspend/Activate"
-                        disabled={isBusy}
-                        onClick={() => toggleSuspend(user)}
-                      >
-                        <Ban className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg text-muted-foreground/60 hover:text-danger hover:bg-danger/10"
-                        title="Delete"
-                        disabled={isBusy}
-                        onClick={() => confirmDelete(user)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </motion.div>
-            );
-          })}
-
-          {filtered.length === 0 && (
-            <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-              {searchTerm || filter !== "all" ? "No users match your filter" : "No users found"}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Edit User Modal */}
-      {editingUser && (
-        <div className="scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+      <AnimatePresence initial={false}>
+        {showCreate && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-lg rounded-2xl border border-border/50 bg-surface shadow-2xl"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="overflow-hidden"
           >
-            <div className="flex items-center justify-between border-b border-border/40 px-6 py-4">
-              <h2 className="text-lg font-semibold">Edit User: {editingUser.username}</h2>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingUser(null)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="space-y-4 p-6">
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground/80">Username</label>
-                <Input
-                  value={editForm.username}
-                  onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
-                  placeholder="Username"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground/80">Email</label>
-                <Input
-                  value={editForm.email}
-                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                  placeholder="Email (optional)"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground/80">
-                  New Password (leave blank to keep current)
+            <AdminPanel icon={UserPlus} title="New account" sub="The user signs in immediately; no email is sent.">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="grid gap-1.5">
+                  <span className="adm-field__label">Username</span>
+                  <Input
+                    value={form.username}
+                    onChange={(e) => setForm({ ...form, username: e.target.value })}
+                    placeholder="jane.doe"
+                    autoComplete="off"
+                  />
                 </label>
-                <Input
-                  type="password"
-                  value={editForm.password}
-                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                  placeholder="New password"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground/80">Quota (GB)</label>
-                <Input
-                  type="number"
-                  value={editForm.quotaGB}
-                  onChange={(e) => setEditForm({ ...editForm, quotaGB: parseInt(e.target.value) || 10 })}
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground/80">
-                  Bandwidth quota / month (GB, 0 = unlimited)
+                <label className="grid gap-1.5">
+                  <span className="adm-field__label">Email</span>
+                  <Input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    placeholder="jane@example.com"
+                    autoComplete="off"
+                  />
+                  <span className="adm-field__hint">Optional — needed for password resets.</span>
                 </label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={editForm.bandwidthQuotaGB}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, bandwidthQuotaGB: parseInt(e.target.value) || 0 })
-                  }
-                />
+                <label className="grid gap-1.5">
+                  <span className="adm-field__label">Password</span>
+                  <Input
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                  />
+                </label>
+                <label className="grid gap-1.5">
+                  <span className="adm-field__label">Storage quota</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={form.quotaGB}
+                    onChange={(e) => setForm({ ...form, quotaGB: parseInt(e.target.value) || 10 })}
+                  />
+                  <span className="adm-field__hint">Gigabytes.</span>
+                </label>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={editForm.mustChangePassword}
-                  onChange={(e) => setEditForm({ ...editForm, mustChangePassword: e.target.checked })}
-                  className="rounded"
-                />
-                Force password reset on next login
-              </label>
+              {formError && (
+                <Note icon={Ban} tone="danger" className="mt-3">
+                  {formError}
+                </Note>
+              )}
 
-              <div className="border-t border-border/40 pt-4">
-                <p className="mb-3 text-sm font-semibold">Login security</p>
-                <UserSecurityPanel userId={editingUser.id} />
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setEditingUser(null)}>
+              <div className="mt-4 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={createUser}
+                  disabled={formLoading || !form.username || !form.password}
+                >
+                  {formLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Shield className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  Create user
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>
                   Cancel
                 </Button>
-                <Button onClick={saveEditUser} disabled={actionLoading === editingUser.id}>
+              </div>
+            </AdminPanel>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* One bar doing two jobs: filtering when nothing is selected, bulk actions
+          when something is. Same height either way, so the table never jumps. */}
+      <div className="adm-toolbar" data-active={selected.size > 0}>
+        {selected.size > 0 ? (
+          <>
+            <CheckBox
+              checked
+              indeterminate={!allSelected}
+              onChange={() => setSelected(new Set())}
+              label="Clear selection"
+            />
+            <span className="text-[0.8rem] font-medium">
+              <span className="adm-num">{selected.size}</span> selected
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => runBulk("activate")}>
+                {bulkBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                )}
+                Activate
+              </Button>
+              <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => runBulk("suspend")}>
+                <Ban className="h-4 w-4" aria-hidden="true" />
+                Suspend
+              </Button>
+              <Button variant="destructive" size="sm" disabled={bulkBusy} onClick={() => runBulk("delete")}>
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                Delete
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <SearchField
+              icon={Search}
+              value={searchTerm}
+              onChange={setSearchTerm}
+              label="Search users"
+              placeholder="Username or email…"
+            />
+            <label className="ml-auto inline-flex items-center gap-1.5">
+              <ArrowUpDown className="h-3.5 w-3.5 text-[var(--adm-muted)]" aria-hidden="true" />
+              <select
+                className="adm-select adm-select--sm"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                aria-label="Sort users"
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
+      </div>
+      <AdminPanel
+        icon={Users}
+        title={`${filtered.length} user${filtered.length !== 1 ? "s" : ""}`}
+        sub={
+          searchTerm.trim()
+            ? `Matching “${searchTerm.trim()}”`
+            : dataUpdatedAt
+              ? `Updated ${updatedAgo}s ago`
+              : undefined
+        }
+        flush
+      >
+        {isLoading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-12 w-full" rows={6} />
+          </div>
+        ) : filtered.length === 0 ? (
+          <AdminEmpty
+            icon={Users}
+            title={users.length === 0 ? "No accounts yet" : "Nothing matches that filter"}
+            body={
+              users.length === 0
+                ? "Create the first account and it will appear here with its quota, presence and session count."
+                : "Try a different name or email, or clear the tile filter above."
+            }
+            action={
+              users.length > 0 ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFilter("all");
+                    setSearchTerm("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <div className="adm-table-wrap">
+            <table className="adm-table">
+              <thead>
+                <tr>
+                  <th style={{ width: "2.5rem" }}>
+                    <CheckBox
+                      checked={allSelected}
+                      indeterminate={selected.size > 0}
+                      onChange={toggleSelectAll}
+                      label={allSelected ? "Deselect all users" : "Select all users"}
+                      disabled={selectableIds.length === 0}
+                    />
+                  </th>
+                  <th>User</th>
+                  <th>Status</th>
+                  <th>Presence</th>
+                  <th>Storage</th>
+                  <th style={{ width: "15rem" }} className="text-right">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>{filtered.map((user) => renderRow(user))}</tbody>
+            </table>
+          </div>
+        )}
+      </AdminPanel>
+      <AnimatePresence>
+        {editingUser && (
+          <div
+            className="scrim fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center"
+            role="presentation"
+            onClick={() => setEditingUser(null)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-user-title"
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="adm-sheet my-auto max-w-lg"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="adm-sheet__head">
+                <Avatar
+                  name={editingUser.username}
+                  presence={presenceOf(editingUser)}
+                  master={editingUser.role === "master"}
+                />
+                <div className="min-w-0 flex-1">
+                  <h2 id="edit-user-title" className="adm-panel__title">
+                    {editingUser.username}
+                  </h2>
+                  <p className="adm-panel__sub">
+                    Joined {formatDate(editingUser.createdAt, "short")} ·{" "}
+                    {editingUser.email ?? "no email on file"}
+                  </p>
+                </div>
+                <IconButton icon={X} label="Close editor" onClick={() => setEditingUser(null)} />
+              </div>
+
+              <div className="adm-sheet__body">
+                <label className="adm-field">
+                  <span className="adm-field__label">Username</span>
+                  <Input
+                    value={editForm.username}
+                    onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
+                    placeholder="Username"
+                  />
+                </label>
+                <label className="adm-field">
+                  <span className="adm-field__label">Email</span>
+                  <Input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    placeholder="Email (optional)"
+                  />
+                  <span className="adm-field__hint">
+                    Clearing this removes the account&apos;s only password-reset route.
+                  </span>
+                </label>
+
+                <label className="adm-field">
+                  <span className="adm-field__label">New password</span>
+                  <Input
+                    type="password"
+                    value={editForm.password}
+                    onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                    placeholder="Leave blank to keep the current one"
+                    autoComplete="new-password"
+                  />
+                </label>
+
+                <div className="adm-field">
+                  <span className="adm-field__label">Quotas</span>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="grid gap-1">
+                      <span className="adm-field__hint">Storage (GB)</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={editForm.quotaGB}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, quotaGB: parseInt(e.target.value) || 10 })
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="adm-field__hint">Bandwidth / month (0 = unlimited)</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={editForm.bandwidthQuotaGB}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, bandwidthQuotaGB: parseInt(e.target.value) || 0 })
+                        }
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="adm-field">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="adm-field__label block">Force password reset</span>
+                      <span className="adm-field__hint">
+                        The next sign-in stops at a change-password screen.
+                      </span>
+                    </span>
+                    <Switch
+                      checked={editForm.mustChangePassword}
+                      onChange={(checked) =>
+                        setEditForm({ ...editForm, mustChangePassword: checked })
+                      }
+                      label="Force password reset on next login"
+                    />
+                  </div>
+                </div>
+
+                <div className="adm-field">
+                  <span className="adm-field__label">
+                    <KeyRound className="mr-1 inline h-3.5 w-3.5 align-[-0.15em]" aria-hidden="true" />
+                    Login security
+                  </span>
+                  <UserSecurityPanel userId={editingUser.id} />
+                </div>
+              </div>
+
+              <div className="adm-sheet__foot">
+                <Button variant="ghost" size="sm" onClick={() => setEditingUser(null)}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={saveEditUser} disabled={actionLoading === editingUser.id}>
                   {actionLoading === editingUser.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   ) : (
-                    <Save className="h-4 w-4 mr-1.5" />
+                    <Save className="h-4 w-4" aria-hidden="true" />
                   )}
-                  Save Changes
+                  Save changes
                 </Button>
               </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {confirm.element}
     </div>
   );
-}
+  function renderRow(user: AdminUser) {
+    const isBusy = actionLoading === user.id;
+    const presence = presenceOf(user);
+    const online = presence === "live";
+    const selectable = user.role !== "master";
+    const verification = VERIFICATION[user.verification];
+    const ratio = user.quotaBytes > 0 ? user.usedBytes / user.quotaBytes : 0;
+    // Presence maths runs on the server clock; a wrong local clock must not
+    // rewrite "last seen".
+    const clock = now === 0 ? 0 : now + offset;
 
-function Avatar({ online }: { online: boolean }) {
-  return (
-    <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/10">
-      <User className="h-4 w-4 text-accent" />
-      <span
-        className={cn(
-          "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface",
-          online ? "bg-emerald-500" : "bg-muted-foreground/40"
-        )}
-      />
-    </div>
-  );
-}
-
-function PresenceCell({
-  online,
-  lastActiveAt,
-  sessions,
-}: {
-  online: boolean;
-  lastActiveAt: string | null;
-  sessions: number;
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="flex items-center gap-1.5 text-xs font-medium">
-        {online ? (
-          <>
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-            </span>
-            <span className="text-emerald-600 dark:text-emerald-400">Online</span>
-          </>
-        ) : (
-          <>
-            <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
-            <span className="text-muted-foreground">
-              {lastActiveAt
-                ? `${formatDistanceToNow(new Date(lastActiveAt), { addSuffix: true })}`
-                : "Never signed in"}
-            </span>
-          </>
-        )}
-      </span>
-      {sessions > 0 && (
-        <span className="text-[11px] text-muted-foreground/70">
-          {sessions} device{sessions > 1 ? "s" : ""}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Compact inline presence for the mobile card. */
-function PresenceText({
-  online,
-  lastActiveAt,
-  sessions,
-}: {
-  online: boolean;
-  lastActiveAt: string | null;
-  sessions: number;
-}) {
-  if (online) {
     return (
-      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        Online{sessions > 0 ? ` · ${sessions}d` : ""}
-      </span>
+      <tr key={user.id} data-selected={selected.has(user.id)}>
+        <td>
+          {selectable ? (
+            <CheckBox
+              checked={selected.has(user.id)}
+              onChange={() => toggleSelect(user.id)}
+              label={`Select ${user.username}`}
+            />
+          ) : (
+            <span className="adm-sub" title="Master accounts are excluded from bulk actions">
+              —
+            </span>
+          )}
+        </td>
+
+        <td>
+          <div className="flex items-center gap-2.5">
+            <Avatar name={user.username} presence={presence} master={user.role === "master"} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="max-w-[11rem] truncate font-medium">{user.username}</span>
+                {user.role === "master" && <Chip tone="warning">master</Chip>}
+                {user.totpEnabled && (
+                  <Chip tone="info" mono>
+                    2FA
+                  </Chip>
+                )}
+              </div>
+              <div className="adm-sub max-w-[14rem] truncate">{user.email ?? "—"}</div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <Chip icon={verification.icon} tone={verification.tone}>
+            {verification.label}
+          </Chip>
+          {user.verification === "suspended" && user.suspendReason && (
+            <div className="adm-sub mt-1 max-w-[11rem] truncate" title={user.suspendReason}>
+              {user.suspendReason}
+            </div>
+          )}
+          {user.mustChangePassword && <div className="adm-sub mt-1">Must reset password</div>}
+        </td>
+
+        <td>
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[0.78rem] font-medium">
+            <StatusDot presence={presence} ring={online} />
+            {PRESENCE_LABEL[presence]}
+          </span>
+          <div className="adm-sub">
+            {online
+              ? `${Math.max(1, user.activeSessions)} device${Math.max(1, user.activeSessions) > 1 ? "s" : ""}`
+              : user.lastActiveAt
+                ? relTime(user.lastActiveAt, clock)
+                : `Joined ${formatDate(user.createdAt, "short")}`}
+          </div>
+        </td>
+
+        <td>
+          <div className="whitespace-nowrap">
+            <span className="adm-num text-[0.78rem]">{formatBytes(user.usedBytes)}</span>
+            <span className="adm-sub"> / {formatBytes(user.quotaBytes)}</span>
+          </div>
+          <Meter className="mt-1.5 w-20" value={ratio} tone={ratio >= 0.9 ? "danger" : "accent"} />
+        </td>
+        <td>
+          <div className="flex items-center justify-end gap-1">
+            {user.verification === "unverified" && (
+              <>
+                <IconButton
+                  icon={isBusy ? Loader2 : CheckCircle2}
+                  tone="success"
+                  label={`Verify and activate ${user.username}`}
+                  disabled={isBusy}
+                  onClick={() => verifyNow(user)}
+                  className={isBusy ? "[&>svg]:animate-spin" : undefined}
+                />
+                {user.email && (
+                  <IconButton
+                    icon={Send}
+                    tone="info"
+                    label={`Resend the verification code to ${user.username}`}
+                    disabled={isBusy}
+                    onClick={() => resendCode(user)}
+                  />
+                )}
+              </>
+            )}
+            <IconButton
+              icon={Eye}
+              label={`Open ${user.username}'s detail page`}
+              onClick={() => router.push(`/admin/users/${user.id}`)}
+            />
+            <IconButton
+              icon={Pencil}
+              tone="accent"
+              label={`Edit ${user.username}`}
+              onClick={() => startEdit(user)}
+            />
+            {selectable && (
+              <>
+                <IconButton
+                  icon={LogIn}
+                  tone="accent"
+                  label={`Sign in as ${user.username}`}
+                  disabled={isBusy}
+                  onClick={() => impersonate(user.id)}
+                />
+                <IconButton
+                  icon={Ban}
+                  tone="warning"
+                  label={user.status === "active" ? `Suspend ${user.username}` : `Reactivate ${user.username}`}
+                  disabled={isBusy}
+                  onClick={() => toggleSuspend(user)}
+                />
+                <IconButton
+                  icon={Trash2}
+                  tone="danger"
+                  label={`Delete ${user.username}`}
+                  disabled={isBusy}
+                  onClick={() => confirmDelete(user)}
+                />
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
     );
   }
-  return (
-    <span>{lastActiveAt ? formatDistanceToNow(new Date(lastActiveAt), { addSuffix: true }) : "Never"}</span>
-  );
-}
-
-function VerificationBadge({ verification }: { verification: Verification }) {
-  const map = {
-    active: {
-      label: "Active",
-      cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-      dot: "bg-emerald-500",
-    },
-    unverified: {
-      label: "Unverified",
-      cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-      dot: "bg-amber-500",
-    },
-    suspended: {
-      label: "Suspended",
-      cls: "bg-red-500/10 text-red-600 dark:text-red-400",
-      dot: "bg-red-500",
-    },
-  }[verification];
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold",
-        map.cls
-      )}
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full", map.dot)} />
-      {map.label}
-    </span>
-  );
-}
-
-function StatTile({
-  icon,
-  label,
-  value,
-  tone,
-  active,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: number;
-  tone: "neutral" | "emerald" | "amber" | "red";
-  active: boolean;
-  onClick: () => void;
-}) {
-  const toneCls = {
-    neutral: "text-foreground",
-    emerald: "text-emerald-600 dark:text-emerald-400",
-    amber: "text-amber-600 dark:text-amber-400",
-    red: "text-red-600 dark:text-red-400",
-  }[tone];
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-3 rounded-2xl border bg-surface px-4 py-3 text-left transition-all hover:border-accent/40",
-        active ? "border-accent/60 ring-2 ring-accent/15" : "border-border/50"
-      )}
-    >
-      <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/50", toneCls)}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className={cn("text-xl font-bold leading-none", toneCls)}>{value}</p>
-        <p className="mt-1 text-xs text-muted-foreground truncate">{label}</p>
-      </div>
-    </button>
-  );
-}
-
-function LiveIndicator({
-  status,
-  updatedAgo,
-}: {
-  status: "connecting" | "live" | "reconnecting" | "offline";
-  updatedAgo: number;
-}) {
-  const live = status === "live";
-  const label =
-    status === "live"
-      ? "Live"
-      : status === "connecting"
-        ? "Connecting…"
-        : status === "reconnecting"
-          ? "Reconnecting…"
-          : "Offline";
-  return (
-    <span
-      className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-surface px-2.5 py-1 text-xs text-muted-foreground"
-      title={`Realtime ${label}${live ? ` · updated ${updatedAgo}s ago` : ""}`}
-    >
-      <span className="relative flex h-2 w-2">
-        {live && (
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-        )}
-        <span
-          className={cn(
-            "relative inline-flex h-2 w-2 rounded-full",
-            live ? "bg-emerald-500" : status === "offline" ? "bg-muted-foreground/40" : "bg-amber-500"
-          )}
-        />
-      </span>
-      <span className="font-medium">{label}</span>
-      {live && <span className="text-muted-foreground/60">· {updatedAgo}s</span>}
-    </span>
-  );
 }

@@ -36,6 +36,19 @@ export async function createAuthorizationCode(input: {
   return rawCode;
 }
 
+/**
+ * Redeem an authorization code. Exactly once, even under concurrency.
+ *
+ * The claim is a single conditional UPDATE: `usedAt IS NULL` is part of the
+ * write, so Postgres row-locks the candidate and the loser of a race gets zero
+ * rows back. A SELECT-then-UPDATE here let two simultaneous token requests both
+ * observe an unused code and both mint an access token from it — an intercepted
+ * code could be replayed alongside the legitimate exchange.
+ *
+ * The code is burned BEFORE PKCE is checked, deliberately: a failed verifier
+ * means the redeemer could not prove it started the flow, and per RFC 6819 §4.4.1
+ * the safe response is to invalidate the code rather than leave it usable.
+ */
 export async function consumeAuthorizationCode(input: {
   code: string;
   clientId: string;
@@ -44,8 +57,8 @@ export async function consumeAuthorizationCode(input: {
 }) {
   const codeHash = hashSecret(input.code);
   const [row] = await db
-    .select()
-    .from(oauthAuthorizationCodes)
+    .update(oauthAuthorizationCodes)
+    .set({ usedAt: new Date() })
     .where(
       and(
         eq(oauthAuthorizationCodes.codeHash, codeHash),
@@ -55,18 +68,13 @@ export async function consumeAuthorizationCode(input: {
         gt(oauthAuthorizationCodes.expiresAt, new Date())
       )
     )
-    .limit(1);
+    .returning();
 
   if (!row) return null;
 
   if (!verifyPkce(input.codeVerifier, row.codeChallenge, row.codeChallengeMethod)) {
     return null;
   }
-
-  await db
-    .update(oauthAuthorizationCodes)
-    .set({ usedAt: new Date() })
-    .where(eq(oauthAuthorizationCodes.id, row.id));
 
   return row;
 }

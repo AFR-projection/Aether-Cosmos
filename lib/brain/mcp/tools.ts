@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logBrainAudit } from "@/lib/brain/audit";
+import { APP_NAME } from "@/lib/app-version";
 import { publishToUser } from "@/lib/realtime/events";
 import { BRAIN_ENTITY_TYPES, MEMORY_SOURCE_TYPES, MEMORY_TYPES } from "@/lib/brain/constants";
 import { BrainError } from "@/lib/brain/errors";
@@ -728,7 +729,7 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
     "brain_link",
     {
       description:
-        "Record that two things are related, creating the nodes by name if they do not exist yet. Example: 'Storage ByAFR' --uses--> 'Cloudflare R2'. Re-linking the same pair and type updates it rather than duplicating.",
+        `Record that two things are related, creating the nodes by name if they do not exist yet. Example: '${APP_NAME}' --uses--> 'Cloudflare R2'. Re-linking the same pair and type updates it rather than duplicating.`,
       inputSchema: z.object({
         ...brainIdArg,
         source: z.string().trim().min(1).max(200).describe("Name of the source entity."),

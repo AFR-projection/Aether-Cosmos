@@ -26,32 +26,29 @@ export function PageProgressBar() {
     finishTimer.current = setTimeout(() => setNavigationBusy(false), 420);
     return () => {
       if (finishTimer.current) clearTimeout(finishTimer.current);
+      // Busy is global state, so dropping the timer is not enough: unmounting
+      // mid-navigation would otherwise leave the app "loading" for good.
+      setNavigationBusy(false);
     };
   }, [pathname]);
 
   return (
+    // 130 sits above the toast tier on purpose — see the LAYER scale in
+    // components/ui/modal.tsx. Only the offline overlay (200) covers it.
     <div
       className="pointer-events-none fixed inset-x-0 top-0 z-[130] h-[2px] overflow-hidden"
       aria-hidden
     >
       <div
         className={cn(
-          "h-full origin-left bg-gradient-to-r from-accent via-sky-400 to-emerald-400",
+          "h-full origin-left bg-gradient-to-r from-accent via-info to-success",
           "transition-[transform,opacity] duration-300 ease-out",
           busy ? "page-progress-active opacity-100" : "scale-x-0 opacity-0"
         )}
       />
-      {/* Glowing comet head that streaks ahead of the bar while busy. */}
-      {busy && (
-        <span
-          className="page-progress-comet absolute top-0 h-full w-24"
-          style={{
-            background:
-              "linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 70%, white) 70%, #fff)",
-            boxShadow: "0 0 12px 2px color-mix(in srgb, var(--accent) 80%, transparent)",
-          }}
-        />
-      )}
+      {/* Glowing comet head that streaks ahead of the bar while busy. Its paint
+          lives in globals.css so the highlight can follow the theme. */}
+      {busy && <span className="page-progress-comet absolute top-0 h-full w-24" />}
     </div>
   );
 }

@@ -94,7 +94,7 @@ export async function uploadFile(
   });
 
   if (!presign.success || !presign.data) {
-    throw new Error(presign.error ?? "Gagal mempersiapkan upload");
+    throw new Error(presign.error ?? "Couldn't prepare the upload");
   }
 
   const { fileId, uploadUrl } = presign.data;
@@ -111,17 +111,17 @@ export async function uploadFile(
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(new Error(`Upload ke storage gagal (HTTP ${xhr.status})`));
+          reject(new Error(`Upload to storage failed (HTTP ${xhr.status})`));
         }
       });
       xhr.addEventListener("error", () => {
         reject(
           new Error(
-            "Upload ke R2 gagal. Pastikan CORS bucket R2 sudah dikonfigurasi (lihat docker/r2-cors.json)."
+            "Upload to R2 failed. Check that the R2 bucket's CORS rules are configured (see docker/r2-cors.json)."
           )
         );
       });
-      xhr.addEventListener("abort", () => reject(new Error("Upload dibatalkan")));
+      xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
       xhr.open("PUT", uploadUrl);
       xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
       xhr.send(file);
@@ -138,7 +138,7 @@ export async function uploadFile(
 
   if (!complete.success || !complete.data) {
     await cancelPendingUpload(fileId);
-    throw new Error(complete.error ?? "Upload tidak dapat diselesaikan");
+    throw new Error(complete.error ?? "The upload couldn't be completed");
   }
 
   return complete.data;

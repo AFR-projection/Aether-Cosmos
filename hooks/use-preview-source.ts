@@ -40,7 +40,16 @@ export function usePreviewSource(src: string | null): PreviewSourceState {
       try {
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) {
-          throw new Error(`Gagal memuat file (${res.status})`);
+          /* The status is worth keeping — 403 and 404 mean different things to whoever
+             has to explain the blank viewer — but it goes after the sentence rather
+             than being the whole message. */
+          throw new Error(
+            res.status === 404
+              ? "This file is no longer in storage."
+              : res.status === 403
+                ? "You don't have access to this file."
+                : `Couldn't load this file (HTTP ${res.status}).`
+          );
         }
         const buf = await res.arrayBuffer();
         if (cancelled) return;
@@ -51,7 +60,7 @@ export function usePreviewSource(src: string | null): PreviewSourceState {
         setLoading(false);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Gagal memuat preview");
+          setError(err instanceof Error ? err.message : "Couldn't load the preview.");
           setLoading(false);
         }
       }

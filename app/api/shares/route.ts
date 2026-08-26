@@ -5,11 +5,12 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { files, shares } from "@/lib/db/schema";
 import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { getAccessibleFile } from "@/lib/auth/permissions";
+import { resolveFileAccess, fileRefusal } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
 import { validateCsrf } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
+import { getAdminSettings, shareExpiryPolicy } from "@/lib/admin-settings";
 
 const createSchema = z.object({
   fileId: z.string().uuid(),
@@ -26,16 +27,40 @@ export async function POST(request: NextRequest) {
     const body = createSchema.parse(await request.json());
     const ip = getClientIp(request);
 
-    const accessible = await getAccessibleFile(sessionUser, body.fileId);
+    const accessible = await resolveFileAccess(sessionUser, body.fileId);
     if (!accessible?.canView) {
       return apiError("File not found", 404);
     }
+    // A public link takes the file out of the sharing model entirely — anyone with the URL
+    // can read it, and the OWNER carries that exposure. `canView` was not enough: a member
+    // invited as "view" could publish someone else's file to the whole internet.
+    if (!accessible.canOwnerOnlyFlags) {
+      return apiError(fileRefusal(accessible, "publish"), 403);
+    }
     const file = accessible.file;
 
+    // Public links can be switched off entirely from Admin → Settings. Existing
+    // links keep working; this only stops new ones being minted.
+    const settings = await getAdminSettings();
+    if (!settings.publicSharingEnabled) {
+      return apiError("Public share links are disabled by the administrator.", 403);
+    }
+
+    /*
+     * Expiry policy. Two things used to be missing: a link with no
+     * `expiresInMinutes` lived forever, and a requested expiry had no ceiling at
+     * all — `z.number().positive()` accepts a century. The default now fills in
+     * the blank and the ceiling caps what anyone can ask for, both from settings.
+     */
+    const { defaultDays, maxDays } = shareExpiryPolicy(settings);
+    const maxMinutes = maxDays > 0 ? maxDays * 24 * 60 : null;
+    let expiryMinutes = body.expiresInMinutes ?? (defaultDays > 0 ? defaultDays * 24 * 60 : null);
+    if (maxMinutes !== null && (expiryMinutes === null || expiryMinutes > maxMinutes)) {
+      expiryMinutes = maxMinutes;
+    }
+
     const token = nanoid(32);
-    const expiresAt = body.expiresInMinutes
-      ? new Date(Date.now() + body.expiresInMinutes * 60000)
-      : null;
+    const expiresAt = expiryMinutes ? new Date(Date.now() + expiryMinutes * 60000) : null;
 
     const [share] = await db
       .insert(shares)

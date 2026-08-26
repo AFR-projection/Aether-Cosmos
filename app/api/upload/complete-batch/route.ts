@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getClientIp } from "@/lib/auth/session";
 import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId, canAccessUserResource } from "@/lib/auth/permissions";
+import { getEffectiveUserId } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
 import {
   objectExists,
@@ -99,7 +99,8 @@ export async function POST(request: NextRequest) {
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const id of ids) {
       const file = byId.get(id);
-      if (!file || !canAccessUserResource(sessionUser, file.userId)) {
+      // Same as /upload/complete: only the uploader may finalise their own pending row.
+      if (!file || file.userId !== userId) {
         return apiError("File not found", 404);
       }
     }

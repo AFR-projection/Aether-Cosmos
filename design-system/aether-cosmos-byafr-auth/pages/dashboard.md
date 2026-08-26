@@ -1,4 +1,4 @@
-# Dashboard Override — Storage ByAFR
+# Dashboard Override — Aether Cosmos ByAFR
 
 Use the global vault palette, but increase information density to a practical workspace rhythm: 8px for compact metadata, 12–16px for row interactions, 20–24px for panels, and 28–32px only around the primary storage summary. Preserve a single visual focal point—the capacity view—then let inventory, recent files, and activity support it rather than compete with it.
 

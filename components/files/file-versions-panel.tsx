@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { History, RotateCcw, Loader2 } from "lucide-react";
+import { History, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/system/spinner";
 import { apiFetch } from "@/lib/api/client";
 import { formatBytes, formatDate, cn } from "@/lib/utils";
 import { useDialogs } from "@/components/ui/dialog-prompts";
@@ -36,7 +37,9 @@ export function FileVersionsPanel({
   const { askConfirm, dialogs } = useDialogs();
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // No setLoading(true) here: the panel starts in its loading state, and a
+    // reload after a restore is already reported by the row's own spinner — so
+    // the version list never blanks out under the user.
     setError(null);
     const res = await apiFetch<{
       currentVersion: number;
@@ -44,7 +47,7 @@ export function FileVersionsPanel({
       canRestore: boolean;
     }>(`/api/files/${fileId}/versions`);
     if (!res.success || !res.data) {
-      setError(res.error ?? "Failed to load versions");
+      setError(res.error ?? "The version history could not be loaded.");
       setLoading(false);
       return;
     }
@@ -71,7 +74,7 @@ export function FileVersionsPanel({
     });
     setRestoring(null);
     if (!res.success) {
-      setError(res.error ?? "Restore failed");
+      setError(res.error ?? "That version could not be restored.");
       return;
     }
     await load();
@@ -81,58 +84,67 @@ export function FileVersionsPanel({
   return (
     <div className={cn("space-y-3", className)}>
       <div className="flex items-center gap-2">
-        <History className="h-4 w-4 text-muted-foreground" />
+        <History className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Versions
         </h4>
         {currentVersion != null && (
-          <span className="text-xs text-muted-foreground/70">v{currentVersion} current</span>
+          <span className="text-xs text-muted-foreground">v{currentVersion} current</span>
         )}
       </div>
 
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-        </div>
+        <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Spinner size="sm" /> Loading version history…
+        </p>
       )}
 
-      {error && <p className="text-xs text-danger">{error}</p>}
-
-      {!loading && versions.length === 0 && (
-        <p className="text-xs text-muted-foreground/70">No previous versions yet.</p>
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
       )}
 
-      <ul className="max-h-48 space-y-1.5 overflow-y-auto">
-        {versions.map((v) => (
-          <li
-            key={v.id}
-            className="flex items-center justify-between gap-2 rounded-lg bg-surface-hover/40 px-3 py-2"
-          >
-            <div className="min-w-0">
-              <p className="text-sm font-medium">v{v.version}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {formatBytes(v.sizeBytes)} · {formatDate(v.createdAt)}
-                {v.createdByUsername ? ` · ${v.createdByUsername}` : ""}
-              </p>
-            </div>
-            {canRestore && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 shrink-0"
-                disabled={restoring === v.version}
-                onClick={() => void handleRestore(v.version)}
-              >
-                {restoring === v.version ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
+      {!loading && versions.length === 0 && !error && (
+        <p className="text-xs text-muted-foreground">
+          No previous versions yet — they appear once this file is replaced.
+        </p>
+      )}
+
+      {versions.length > 0 && (
+        <ul className="max-h-48 space-y-1.5 overflow-y-auto">
+          {versions.map((v) => (
+            <li
+              key={v.id}
+              className="flex items-center justify-between gap-2 rounded-lg bg-surface-hover/40 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">v{v.version}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {formatBytes(v.sizeBytes)} · {formatDate(v.createdAt)}
+                  {v.createdByUsername ? ` · ${v.createdByUsername}` : ""}
+                </p>
+              </div>
+              {canRestore && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0"
+                  aria-label={`Restore version ${v.version}`}
+                  disabled={restoring === v.version}
+                  onClick={() => void handleRestore(v.version)}
+                >
+                  {restoring === v.version ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       {dialogs}
     </div>
   );

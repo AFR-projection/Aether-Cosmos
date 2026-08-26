@@ -1,9 +1,20 @@
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import { eq, desc, count, sum, and, isNull, gt } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users, files, folders, activityLogs, sessions } from "@/lib/db/schema";
 import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp, deviceLabelFromUa, deviceKindFromUa } from "@/lib/auth/session";
+import {
+  getClientIp,
+  deviceLabelFromUa,
+  deviceKindFromUa,
+  destroyAllUserSessions,
+} from "@/lib/auth/session";
+import {
+  adminUserUpdateSchema,
+  normalizeAdminEmail,
+  sessionRevocationReason,
+} from "@/lib/admin/user-update";
 import { logActivity } from "@/lib/auth/audit";
 import { validateCsrf } from "@/lib/security";
 import { validatePasswordStrength } from "@/lib/security/password-policy";
@@ -96,7 +107,10 @@ export async function PATCH(
 
     const master = await requireMasterOrApiKey(request, "users");
     const { id } = await params;
-    const body = await request.json();
+    // Every field is bounded and enum-checked here. Copying `await request.json()`
+    // straight onto the update let `role: "root"` reach a pgEnum column and a
+    // negative or 1e30 quota reach a bigint one.
+    const body = adminUserUpdateSchema.parse(await request.json());
     const ip = getClientIp(request);
 
     const [existing] = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -121,11 +135,11 @@ export async function PATCH(
     const updates: Partial<typeof existing> = { updatedAt: new Date() };
     if (body.username) updates.username = body.username;
     if (body.email !== undefined) {
-      const raw = body.email == null ? "" : String(body.email).trim().toLowerCase();
-      if (raw && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)) {
+      const normalized = normalizeAdminEmail(body.email);
+      if (!normalized.ok) {
         return apiError("Please enter a valid email address.", 400);
       }
-      updates.email = raw || null;
+      updates.email = normalized.email;
     }
     if (body.status) {
       updates.status = body.status;
@@ -148,7 +162,7 @@ export async function PATCH(
     if (body.bandwidthQuotaBytes !== undefined) {
       updates.bandwidthQuotaBytes = body.bandwidthQuotaBytes;
     }
-    if (body.quotaBytes) updates.quotaBytes = body.quotaBytes;
+    if (body.quotaBytes !== undefined) updates.quotaBytes = body.quotaBytes;
     if (body.role) updates.role = body.role;
     if (body.password) {
       const passwordCheck = validatePasswordStrength(body.password);
@@ -162,6 +176,11 @@ export async function PATCH(
     await db.update(users).set(updates).where(eq(users.id, id));
     await cacheDelPattern("user:*");
 
+    // A reset password the attacker's session survives is not a reset. Sessions are
+    // opaque rows with no link to the credential, so they have to be deleted here.
+    const revocation = sessionRevocationReason(body);
+    if (revocation) await destroyAllUserSessions(id);
+
     const action =
       body.status === "suspended" && existing.status !== "suspended"
         ? ("suspend_user" as const)
@@ -174,11 +193,12 @@ export async function PATCH(
         username: existing.username,
         status: body.status,
         suspendReason: body.suspendReason,
+        ...(revocation ? { sessionsRevoked: revocation } : {}),
       },
       ip,
     });
 
-    return apiSuccess({ updated: true });
+    return apiSuccess({ updated: true, sessionsRevoked: revocation !== null });
   } catch (error) {
     return handleApiError(error);
   }
@@ -193,7 +213,11 @@ export async function DELETE(
 
     const master = await requireMasterOrApiKey(request, "users");
     const { id } = await params;
-    const { deleteData } = await request.json();
+    // The flag is optional: a DELETE with no body at all is a delete without data
+    // removal, not a 500 from destructuring `undefined`.
+    const { deleteData } = z
+      .object({ deleteData: z.boolean().default(false) })
+      .parse(await request.json().catch(() => ({})));
     const ip = getClientIp(request);
 
     const [existing] = await db.select().from(users).where(eq(users.id, id)).limit(1);

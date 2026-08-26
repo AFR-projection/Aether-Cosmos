@@ -44,9 +44,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
         // A generic mcpServers block: the shape most MCP clients accept today.
         // Clients that differ still have url + header above to work from.
+        // Keyed off the constant, not a literal — the two drifted apart once
+        // already, and a wrong key here is a config the user cannot connect with.
         exampleClientConfig: {
           mcpServers: {
-            "storage-byafr-brain": {
+            [BRAIN_MCP_SERVER_NAME]: {
               type: "http",
               url: mcpUrl,
               headers: { Authorization: "Bearer sk_YOUR_AGENT_KEY" },

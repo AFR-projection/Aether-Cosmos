@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -10,18 +10,38 @@ import {
   Loader2,
   X,
   ShieldCheck,
+  ShieldAlert,
   AlertTriangle,
   Send,
   RefreshCw,
   Eye,
   EyeOff,
   ScrollText,
+  CircleCheck,
+  CircleX,
+  CircleDashed,
+  Gauge,
+  Inbox,
+  Info,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
+import { useConfirm } from "@/components/admin/confirm-dialog";
+import {
+  AdminEmpty,
+  AdminHeader,
+  AdminMetric,
+  AdminPanel,
+  Chip,
+  IconButton,
+  Meter,
+  Note,
+  Skeleton,
+  StatusDot,
+  type Tone,
+} from "@/components/admin/admin-ui";
 import { apiFetch } from "@/lib/api/client";
+import { APP_NAME } from "@/lib/app-version";
 import { cn } from "@/lib/utils";
 
 type MailStatus = "unverified" | "ok" | "error";
@@ -45,6 +65,17 @@ type MailSenderRow = {
 
 type VerifyResult = { ok: boolean; error?: string };
 
+type MailHealth = {
+  healthy: boolean;
+  totalSenders: number;
+  activeSenders: number;
+  readySenders: number;
+  eligibleSenders: number;
+  coolingSenders: number;
+  defaultDailyLimit: number;
+  problems: string[];
+};
+
 /** A "now" timestamp that ticks on an interval, so time-based UI stays live
  *  without calling Date.now() during render (which must stay pure). */
 function useNow(intervalMs = 30_000): number {
@@ -56,13 +87,26 @@ function useNow(intervalMs = 30_000): number {
   return now;
 }
 
+/**
+ * Sender status in words, with an icon that carries the same meaning. The
+ * previous version used 🟢/🔴/⚫ emoji, which render differently on every
+ * platform, are announced as "large green circle" by screen readers, and are an
+ * explicit anti-pattern in this project's design system.
+ */
+const SENDER_STATUS: Record<MailStatus, { label: string; tone: Tone; icon: typeof CircleCheck }> = {
+  ok: { label: "Verified & ready", tone: "success", icon: CircleCheck },
+  error: { label: "Login failed", tone: "danger", icon: CircleX },
+  unverified: { label: "Not verified yet", tone: "muted", icon: CircleDashed },
+};
+
 export default function EmailSettings() {
   const now = useNow();
+  const confirm = useConfirm();
   const [showAddModal, setShowAddModal] = useState(false);
   const [email, setEmail] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [fromName, setFromName] = useState("Storage ByAFR");
+  const [fromName, setFromName] = useState(APP_NAME);
   const [showPw, setShowPw] = useState(false);
   const [formError, setFormError] = useState("");
   const queryClient = useQueryClient();
@@ -76,8 +120,9 @@ export default function EmailSettings() {
     refetchInterval: 10000,
   });
 
-  // Global default daily limit, so a sender with dailyLimit=0 shows the right cap.
-  const { data: health } = useQuery({
+  // One ["mail-health"] query for the whole page: the metric row, the gateway
+  // panel, and the per-sender default limit all read from it.
+  const { data: health, isLoading: healthLoading } = useQuery({
     queryKey: ["mail-health"],
     queryFn: async () => {
       const res = await apiFetch<MailHealth>("/api/admin/email/health");
@@ -88,11 +133,28 @@ export default function EmailSettings() {
   });
   const defaultDailyLimit = health?.defaultDailyLimit ?? 400;
 
+  // Today's headroom across every eligible sender, so the operator can see at a
+  // glance whether the gateway can still deliver an OTP burst.
+  const capacity = useMemo(() => {
+    let used = 0;
+    let total = 0;
+    for (const sender of senders) {
+      if (!sender.isActive) continue;
+      const limit = sender.dailyLimit > 0 ? sender.dailyLimit : defaultDailyLimit;
+      const windowActive =
+        sender.sentCountResetAt &&
+        now - new Date(sender.sentCountResetAt).getTime() < 24 * 60 * 60 * 1000;
+      total += limit;
+      used += windowActive ? sender.dailySentCount : 0;
+    }
+    return { used, total };
+  }, [senders, defaultDailyLimit, now]);
+
   const resetForm = () => {
     setEmail("");
     setAppPassword("");
     setDisplayName("");
-    setFromName("Storage ByAFR");
+    setFromName(APP_NAME);
     setShowPw(false);
     setFormError("");
   };
@@ -148,215 +210,187 @@ export default function EmailSettings() {
     },
   });
 
+  /**
+   * Removing a sender can silently stop OTP delivery, so it now asks first —
+   * every other destructive action in the console already did, and this one being
+   * a bare one-click button was an inconsistency waiting to bite.
+   */
+  function askDelete(sender: MailSenderRow) {
+    confirm.open(
+      {
+        title: `Remove ${sender.displayName}?`,
+        message:
+          senders.filter((s) => s.isActive && s.status === "ok").length <= 1
+            ? "This is the last verified sender. Removing it will stop OTP and security emails from going out until another one is added."
+            : "Its stored app password is deleted with it. Mail already sent is unaffected.",
+        confirmLabel: "Remove sender",
+        danger: true,
+      },
+      async () => {
+        await deleteSender.mutateAsync(sender.id);
+      }
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <AdminPageHeader
-        title="Email Gateway"
-        subtitle="Manage Gmail senders for delivering OTP & security notifications"
+    <div className="space-y-5">
+      <AdminHeader
+        icon={Mail}
+        kicker="Email gateway"
+        title="Outbound mail"
+        lede="Gmail senders that deliver one-time codes and security notices. The router picks whichever verified sender still has headroom today."
+        live
+        liveLabel="Polling every 10s"
         actions={
-          <Button onClick={() => { resetForm(); setShowAddModal(true); }} className="gap-2">
-            <Plus className="w-4 h-4" />
-            Add Gmail Sender
+          <Button
+            size="sm"
+            onClick={() => {
+              resetForm();
+              setShowAddModal(true);
+            }}
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add sender
           </Button>
         }
       />
 
-      <MailHealthPanel />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <AdminMetric
+          icon={ShieldCheck}
+          label="Ready now"
+          value={health ? health.eligibleSenders : "—"}
+          tone={health && health.eligibleSenders > 0 ? "success" : "danger"}
+          hint={health ? `of ${health.totalSenders} configured` : "Checking…"}
+        />
+        <AdminMetric
+          icon={CircleCheck}
+          label="Verified"
+          value={health ? health.readySenders : "—"}
+          tone="accent"
+          hint="Gmail accepted the login"
+        />
+        <AdminMetric
+          icon={AlertTriangle}
+          label="Resting"
+          value={health ? health.coolingSenders : "—"}
+          tone={health && health.coolingSenders > 0 ? "warning" : "muted"}
+          hint="In cooldown after failures"
+        />
+        <AdminMetric
+          icon={Gauge}
+          label="Sent today"
+          value={capacity.used}
+          unit={capacity.total > 0 ? `/ ${capacity.total}` : undefined}
+          tone={capacity.total > 0 && capacity.used / capacity.total >= 0.8 ? "warning" : "info"}
+          hint={
+            capacity.total > 0 ? (
+              <Meter
+                value={capacity.used / capacity.total}
+                tone={capacity.used / capacity.total >= 0.8 ? "warning" : "accent"}
+              />
+            ) : (
+              "No active sender"
+            )
+          }
+        />
+      </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin" />
-        </div>
-      ) : senders.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Mail className="w-12 h-12 mx-auto text-muted-foreground/40 mb-4" />
-            <p className="text-muted-foreground">No Gmail sender yet</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          {senders.map((sender) => (
-            <motion.div key={sender.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2 flex-wrap">
-                        <StatusDot status={sender.status} />
-                        <h3 className="font-semibold text-lg">{sender.displayName}</h3>
-                        <span className="text-sm px-2 py-1 bg-muted rounded font-mono">
-                          {sender.email}
-                        </span>
-                        {!sender.isActive && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                            inactive
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm font-medium">{statusText(sender.status)}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        From name: {sender.fromName}
-                      </p>
-                      {sender.status === "error" && sender.lastError && (
-                        <p className="text-xs text-red-600 mt-1 max-w-xl">{sender.lastError}</p>
-                      )}
-                      <SenderUsage sender={sender} defaultLimit={defaultDailyLimit} now={now} />
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => verifySender.mutate(sender.id)}
-                        disabled={verifySender.isPending}
-                        title="Re-test this sender"
-                      >
-                        {verifySender.isPending && verifySender.variables === sender.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-4 h-4" />
-                        )}
-                        Test
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-500 hover:text-red-600"
-                        onClick={() => deleteSender.mutate(sender.id)}
-                        disabled={deleteSender.isPending}
-                        title="Delete"
-                      >
-                        {deleteSender.isPending ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="w-4 h-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-      )}
+      <GatewayStatus data={health} loading={healthLoading} />
+
+      <AdminPanel
+        icon={Inbox}
+        title={`Senders (${senders.length})`}
+        sub="Ordered by priority — the router walks this list top-down."
+        flush
+      >
+        {isLoading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-20 w-full" rows={2} />
+          </div>
+        ) : senders.length === 0 ? (
+          <AdminEmpty
+            icon={Mail}
+            title="No sender configured"
+            body="Without a verified Gmail sender the app cannot deliver one-time codes, so sign-in and 2FA will fail. Add one to bring the gateway up."
+            action={
+              <Button
+                size="sm"
+                className="mt-1"
+                onClick={() => {
+                  resetForm();
+                  setShowAddModal(true);
+                }}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Add the first sender
+              </Button>
+            }
+          />
+        ) : (
+          <ul>
+            {senders.map((sender) => (
+              <li key={sender.id} className="adm-row adm-row--flat p-4">
+                <SenderCard
+                  sender={sender}
+                  defaultLimit={defaultDailyLimit}
+                  now={now}
+                  testing={verifySender.isPending && verifySender.variables === sender.id}
+                  onTest={() => verifySender.mutate(sender.id)}
+                  onDelete={() => askDelete(sender)}
+                  deleting={deleteSender.isPending && deleteSender.variables === sender.id}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </AdminPanel>
 
       <EmailActivityLog />
 
-      {/* Add Sender Modal */}
       <AnimatePresence>
         {showAddModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
-          >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              className="bg-background rounded-lg p-6 w-full max-w-md border"
-            >
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold">Add Gmail Sender</h2>
-                <button onClick={() => setShowAddModal(false)}>
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-4 mb-5">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Display Name</label>
-                  <Input
-                    placeholder="e.g. Main Sender"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2">Gmail Address</label>
-                  <Input
-                    type="email"
-                    placeholder="you@gmail.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2">App Password</label>
-                  <div className="relative">
-                    <Input
-                      type={showPw ? "text" : "password"}
-                      placeholder="16-character app password"
-                      value={appPassword}
-                      onChange={(e) => setAppPassword(e.target.value)}
-                      className="pr-10 font-mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPw((v) => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    >
-                      {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2">From Name</label>
-                  <Input
-                    placeholder="Storage ByAFR"
-                    value={fromName}
-                    onChange={(e) => setFromName(e.target.value)}
-                  />
-                </div>
-
-                <div className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-950 p-3 rounded space-y-1">
-                  <p className="font-semibold">How to get a Gmail App Password:</p>
-                  <p>1. Enable 2-Step Verification on the Google account.</p>
-                  <p>
-                    2. Go to Google Account → Security → App passwords, create one for
-                    &quot;Mail&quot;, and paste the 16-character code here.
-                  </p>
-                </div>
-              </div>
-
-              {formError && <p className="text-sm text-red-500 mb-4">{formError}</p>}
-
-              <div className="flex gap-3">
-                <Button variant="outline" onClick={() => setShowAddModal(false)} className="flex-1">
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => { setFormError(""); addSender.mutate(); }}
-                  disabled={!email || !appPassword || !displayName || addSender.isPending}
-                  className="flex-1 gap-2"
-                >
-                  {addSender.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  Verify &amp; Save
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <AddSenderSheet
+            values={{ email, appPassword, displayName, fromName }}
+            showPw={showPw}
+            error={formError}
+            pending={addSender.isPending}
+            onChange={{ setEmail, setAppPassword, setDisplayName, setFromName }}
+            onTogglePw={() => setShowPw((v) => !v)}
+            onClose={() => setShowAddModal(false)}
+            onSubmit={() => {
+              setFormError("");
+              addSender.mutate();
+            }}
+          />
         )}
       </AnimatePresence>
+
+      {confirm.element}
     </div>
   );
 }
 
-function StatusDot({ status }: { status: MailStatus }) {
-  const color =
-    status === "ok" ? "bg-green-500" : status === "error" ? "bg-red-500" : "bg-gray-400";
-  return <span className={cn("w-3 h-3 rounded-full", color)} />;
-}
+/* ── Sender ──────────────────────────────────────────────────────────────── */
 
-/** Daily-usage bar + live router state (cooldown / failure streak) for one sender. */
-function SenderUsage({ sender, defaultLimit, now }: { sender: MailSenderRow; defaultLimit: number; now: number }) {
+function SenderCard({
+  sender,
+  defaultLimit,
+  now,
+  testing,
+  deleting,
+  onTest,
+  onDelete,
+}: {
+  sender: MailSenderRow;
+  defaultLimit: number;
+  now: number;
+  testing: boolean;
+  deleting: boolean;
+  onTest: () => void;
+  onDelete: () => void;
+}) {
+  const status = SENDER_STATUS[sender.status];
   const limit = sender.dailyLimit > 0 ? sender.dailyLimit : defaultLimit;
 
   // The stored count only counts within the current 24h window; treat an expired
@@ -365,7 +399,7 @@ function SenderUsage({ sender, defaultLimit, now }: { sender: MailSenderRow; def
     sender.sentCountResetAt &&
     now - new Date(sender.sentCountResetAt).getTime() < 24 * 60 * 60 * 1000;
   const used = windowActive ? sender.dailySentCount : 0;
-  const pct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+  const ratio = used / Math.max(1, limit);
 
   const cooling =
     sender.cooldownUntil && new Date(sender.cooldownUntil).getTime() > now
@@ -375,136 +409,298 @@ function SenderUsage({ sender, defaultLimit, now }: { sender: MailSenderRow; def
     ? Math.max(1, Math.ceil((new Date(cooling).getTime() - now) / 60000))
     : 0;
 
-  const barColor = pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500";
+  const barTone: Tone = ratio >= 1 ? "danger" : ratio >= 0.8 ? "warning" : "success";
 
   return (
-    <div className="mt-2.5 max-w-md space-y-1.5">
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>Daily usage</span>
-        <span className="font-mono">
-          {used} / {limit}
-        </span>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusDot tone={status.tone} ring={sender.status === "ok"} />
+          <h3 className="text-sm font-semibold">{sender.displayName}</h3>
+          <Chip mono>{sender.email}</Chip>
+          {!sender.isActive && <Chip tone="muted">Inactive</Chip>}
+        </div>
+
+        <p className="flex items-center gap-1.5 text-[0.78rem] font-medium" data-tone={status.tone}>
+          <status.icon className="h-3.5 w-3.5" style={{ color: "var(--tone)" }} aria-hidden="true" />
+          <span style={{ color: "var(--tone)" }}>{status.label}</span>
+          <span className="adm-sub">· sends as “{sender.fromName}”</span>
+        </p>
+
+        {sender.status === "error" && sender.lastError && (
+          <Note icon={CircleX} tone="danger">
+            {sender.lastError}
+          </Note>
+        )}
+
+        <div className="max-w-sm space-y-1.5 pt-0.5">
+          <div className="flex items-center justify-between text-[0.7rem]">
+            <span className="adm-sub">Daily usage</span>
+            <span className="adm-num">
+              {used} / {limit}
+            </span>
+          </div>
+          <Meter value={ratio} tone={barTone} />
+          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+            {cooling && (
+              <Chip tone="warning" icon={AlertTriangle}>
+                Resting ~{cooldownMins}m
+              </Chip>
+            )}
+            {!cooling && ratio >= 1 && <Chip tone="danger">Daily limit reached</Chip>}
+            {sender.consecutiveFailures > 0 && !cooling && (
+              <Chip tone="muted">
+                {sender.consecutiveFailures} recent failure
+                {sender.consecutiveFailures > 1 ? "s" : ""}
+              </Chip>
+            )}
+            {sender.lastUsedAt && (
+              <span className="adm-sub">
+                last used {new Date(sender.lastUsedAt).toLocaleString("en-GB")}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${pct}%` }} />
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-        {cooling && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-            <AlertTriangle className="h-3 w-3" /> Resting ~{cooldownMins}m
-          </span>
-        )}
-        {!cooling && pct >= 100 && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-red-500/15 px-2 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400">
-            Daily limit reached
-          </span>
-        )}
-        {sender.consecutiveFailures > 0 && !cooling && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {sender.consecutiveFailures} recent failure{sender.consecutiveFailures > 1 ? "s" : ""}
-          </span>
-        )}
-        {sender.lastUsedAt && (
-          <span className="text-[10px] text-muted-foreground/60">
-            last used {new Date(sender.lastUsedAt).toLocaleString("en-GB")}
-          </span>
-        )}
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        <Button variant="outline" size="sm" onClick={onTest} disabled={testing} title="Re-test this sender">
+          {testing ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          )}
+          Test
+        </Button>
+        <IconButton
+          icon={deleting ? Loader2 : Trash2}
+          tone="danger"
+          label={`Remove ${sender.displayName}`}
+          disabled={deleting}
+          onClick={onDelete}
+          className={deleting ? "[&_svg]:animate-spin" : undefined}
+        />
       </div>
     </div>
   );
 }
 
-function statusText(status: MailStatus): string {
-  return status === "ok"
-    ? "🟢 Verified & ready"
-    : status === "error"
-      ? "🔴 Login failed"
-      : "⚫ Not verified yet";
-}
+/* ── Gateway status ──────────────────────────────────────────────────────── */
 
-// ─── Email health panel ───────────────────────────────────────────────────────
 
-type MailHealth = {
-  healthy: boolean;
-  totalSenders: number;
-  activeSenders: number;
-  readySenders: number;
-  eligibleSenders: number;
-  coolingSenders: number;
-  defaultDailyLimit: number;
-  problems: string[];
-};
-
-function MailHealthPanel() {
-  const { data, isLoading } = useQuery({
-    queryKey: ["mail-health"],
-    queryFn: async () => {
-      const res = await apiFetch<MailHealth>("/api/admin/email/health");
-      if (!res.success || !res.data) throw new Error(res.error ?? "unavailable");
-      return res.data;
-    },
-    refetchInterval: 15000,
-  });
-
-  if (isLoading || !data) {
+/** The one-line answer to "can this app send mail right now", plus why not. */
+function GatewayStatus({ data, loading }: { data?: MailHealth; loading: boolean }) {
+  if (loading || !data) {
     return (
-      <Card>
-        <CardContent className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Checking email health…
-        </CardContent>
-      </Card>
+      <AdminPanel icon={ShieldCheck} title="Gateway status">
+        <Skeleton className="h-4 w-52" />
+      </AdminPanel>
     );
   }
 
   const ok = data.healthy;
 
   return (
-    <Card
-      className={cn(
-        "border",
-        ok ? "border-emerald-500/30 bg-emerald-500/[0.04]" : "border-amber-500/30 bg-amber-500/[0.05]"
-      )}
+    <AdminPanel
+      icon={ok ? ShieldCheck : ShieldAlert}
+      tone={ok ? "success" : "warning"}
+      title={ok ? "Gateway healthy" : "Gateway needs attention"}
+      sub={
+        ok
+          ? "At least one verified sender has headroom, so outbound mail is going out."
+          : "Mail may be delayed or failing. The reasons are listed below."
+      }
+      variant={ok ? undefined : "warn"}
+      tools={
+        <Chip tone={ok ? "success" : "warning"} mono>
+          {data.eligibleSenders} eligible
+        </Chip>
+      }
     >
-      <CardContent className="space-y-3 py-4">
-        <div className="flex items-center gap-2.5">
-          <div
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl",
-              ok
-                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-            )}
-          >
-            {ok ? <ShieldCheck className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">
-              {ok ? "Email gateway healthy" : "Email gateway needs attention"}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {data.eligibleSenders} ready now · {data.readySenders} verified
-              {data.coolingSenders > 0 ? ` · ${data.coolingSenders} resting` : ""} ·{" "}
-              {data.totalSenders} total
-            </p>
-          </div>
-        </div>
-
-        {data.problems.length > 0 && (
-          <ul className="space-y-1.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3">
-            {data.problems.map((p, i) => (
-              <li key={i} className="flex gap-2 text-[12px] text-amber-800 dark:text-amber-100/90">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
-                {p}
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+      {data.problems.length > 0 ? (
+        <ul className="space-y-2">
+          {data.problems.map((problem, index) => (
+            <li key={index}>
+              <Note icon={AlertTriangle} tone="warning">
+                {problem}
+              </Note>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="adm-sub">
+          <span className="adm-num">{data.activeSenders}</span> active ·{" "}
+          <span className="adm-num">{data.readySenders}</span> verified · daily cap{" "}
+          <span className="adm-num">{data.defaultDailyLimit}</span> per sender by default.
+        </p>
+      )}
+    </AdminPanel>
   );
 }
 
-// ─── Recent email activity ────────────────────────────────────────────────────
+/* ── Add sender ──────────────────────────────────────────────────────────── */
+
+/**
+ * Uses the shared `.scrim` and `.adm-sheet` chrome rather than the ad-hoc
+ * `bg-black/50` overlay it replaced, so every dialog in the app dims the page the
+ * same way and picks up lite mode for free.
+ */
+function AddSenderSheet({
+  values,
+  showPw,
+  error,
+  pending,
+  onChange,
+  onTogglePw,
+  onClose,
+  onSubmit,
+}: {
+  values: { email: string; appPassword: string; displayName: string; fromName: string };
+  showPw: boolean;
+  error: string;
+  pending: boolean;
+  onChange: {
+    setEmail: (v: string) => void;
+    setAppPassword: (v: string) => void;
+    setDisplayName: (v: string) => void;
+    setFromName: (v: string) => void;
+  };
+  onTogglePw: () => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const ready = !!values.email && !!values.appPassword && !!values.displayName;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="scrim fixed inset-0 z-[60] flex items-center justify-center p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.97, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
+        transition={{ type: "spring", stiffness: 320, damping: 26 }}
+        className="adm-sheet max-w-md"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-sender-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="adm-sheet__head">
+          <span className="adm-panel__badge" aria-hidden="true">
+            <Plus />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 id="add-sender-title" className="adm-panel__title">
+              Add a Gmail sender
+            </h2>
+            <p className="adm-panel__sub">Saved only if Gmail accepts the login.</p>
+          </div>
+          <IconButton icon={X} label="Close" onClick={onClose} />
+        </div>
+
+        <div className="adm-sheet__body space-y-3.5">
+          <Field label="Display name" hint="How this sender is labelled in the console.">
+            <Input
+              placeholder="e.g. Main sender"
+              value={values.displayName}
+              onChange={(e) => onChange.setDisplayName(e.target.value)}
+              autoFocus
+            />
+          </Field>
+
+          <Field label="Gmail address">
+            <Input
+              type="email"
+              placeholder="you@gmail.com"
+              value={values.email}
+              onChange={(e) => onChange.setEmail(e.target.value)}
+            />
+          </Field>
+
+          <Field label="App password" hint="Stored encrypted. It is never shown again after saving.">
+            <div className="relative">
+              <Input
+                type={showPw ? "text" : "password"}
+                placeholder="16-character app password"
+                value={values.appPassword}
+                onChange={(e) => onChange.setAppPassword(e.target.value)}
+                className="pr-10 font-mono"
+              />
+              <button
+                type="button"
+                onClick={onTogglePw}
+                aria-label={showPw ? "Hide app password" : "Show app password"}
+                className="adm-iconbtn absolute right-1.5 top-1/2 -translate-y-1/2"
+              >
+                {showPw ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+              </button>
+            </div>
+          </Field>
+
+          <Field label="From name" hint="What recipients see in their inbox.">
+            <Input
+              placeholder={APP_NAME}
+              value={values.fromName}
+              onChange={(e) => onChange.setFromName(e.target.value)}
+            />
+          </Field>
+
+          <Note icon={Info}>
+            <strong>Getting an app password:</strong> turn on 2-Step Verification for the Google
+            account, then open Google Account → Security → App passwords, create one for
+            “Mail”, and paste the 16-character code above.
+          </Note>
+
+          {error && (
+            <Note icon={CircleX} tone="danger">
+              {error}
+            </Note>
+          )}
+        </div>
+
+        <div className="adm-sheet__foot">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={onSubmit} disabled={!ready || pending}>
+            {pending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Send className="h-4 w-4" aria-hidden="true" />
+            )}
+            Verify &amp; save
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="adm-field__label mb-1.5 block">{label}</span>
+      {children}
+      {hint && <span className="adm-field__hint mt-1 block">{hint}</span>}
+    </label>
+  );
+}
+
+/* ── Activity tail ──────────────────────────────────────────────────────── */
 
 type EmailLogEntry = {
   ts: number;
@@ -512,6 +708,12 @@ type EmailLogEntry = {
   type: "verify" | "send" | "deliver" | "otp";
   message: string;
   meta?: Record<string, unknown>;
+};
+
+const LEVEL_TONE: Record<EmailLogEntry["level"], Tone | undefined> = {
+  error: "danger",
+  warn: "warning",
+  info: undefined,
 };
 
 function EmailActivityLog() {
@@ -526,62 +728,34 @@ function EmailActivityLog() {
   });
 
   return (
-    <Card>
-      <CardContent className="py-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ScrollText className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold">Recent email activity</h3>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
-            Refresh
-          </Button>
-        </div>
-
-        {isLoading ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading activity…
-          </div>
-        ) : !data || data.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            No email activity yet. Sends, verifications, and OTP events will appear here.
-          </p>
-        ) : (
-          <div className="max-h-80 space-y-1 overflow-y-auto font-mono text-[11px] leading-relaxed">
-            {data.map((e, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "flex gap-2 rounded px-2 py-1",
-                  e.level === "error"
-                    ? "bg-red-500/[0.06] text-red-600 dark:text-red-400"
-                    : e.level === "warn"
-                      ? "bg-amber-500/[0.06] text-amber-700 dark:text-amber-400"
-                      : "text-muted-foreground"
-                )}
-              >
-                <span className="shrink-0 opacity-60">
-                  {new Date(e.ts).toLocaleTimeString("en-GB")}
-                </span>
-                <span className="shrink-0 font-semibold uppercase opacity-80">{e.type}</span>
-                <span className="min-w-0 break-words">{e.message}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <p className="mt-2 text-[10px] text-muted-foreground/60">
-          Live tail from this server process (last 100 events, resets on restart). Full history is in
-          the server logs.
+    <AdminPanel
+      icon={ScrollText}
+      title="Recent email activity"
+      sub="Live tail from this server process — last 100 events, cleared on restart."
+      tools={
+        <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} aria-hidden="true" />
+          Refresh
+        </Button>
+      }
+    >
+      {isLoading ? (
+        <Skeleton className="h-3 w-full" rows={5} />
+      ) : !data || data.length === 0 ? (
+        <p className="adm-sub py-4 text-center">
+          Nothing yet. Sends, verifications, and OTP events will appear here as they happen.
         </p>
-      </CardContent>
-    </Card>
+      ) : (
+        <div className="adm-log" role="log" aria-label="Recent email activity">
+          {data.map((entry, index) => (
+            <span key={index} className="adm-log__line" data-tone={LEVEL_TONE[entry.level]}>
+              <span className="opacity-60">{new Date(entry.ts).toLocaleTimeString("en-GB")}</span>{" "}
+              <span className="font-semibold uppercase opacity-80">{entry.type}</span>{" "}
+              {entry.message}
+            </span>
+          ))}
+        </div>
+      )}
+    </AdminPanel>
   );
 }

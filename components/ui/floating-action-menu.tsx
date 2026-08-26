@@ -2,7 +2,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type FloatingMenuItem = {
@@ -11,6 +12,14 @@ export type FloatingMenuItem = {
   icon: React.ComponentType<{ className?: string }>;
   danger?: boolean;
   shortcut?: string;
+  /**
+   * Present when the item is one of a set of mutually exclusive choices — e.g. the
+   * sort field. Renders a tick and reports the state as `menuitemradio`, so the
+   * current choice is announced rather than only coloured.
+   */
+  checked?: boolean;
+  /** Starts a new group. Danger items already get one automatically. */
+  separatorBefore?: boolean;
   onClick: () => void;
 };
 
@@ -27,7 +36,9 @@ type FloatingActionMenuProps = {
   header?: { title: string; subtitle?: string };
 };
 
-const MENU_MIN_W = 188;
+/** Matches the panel's own `w-[min(calc(100vw-16px),240px)]` — used only as the
+ *  first estimate on the frame before the menu can be measured. */
+const MENU_MIN_W = 240;
 const ITEM_H = 40;
 const PAD = 8;
 const GAP = 6;
@@ -91,6 +102,7 @@ export function FloatingActionMenu({
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
   const [ready, setReady] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => setMounted(true), []);
 
@@ -114,16 +126,33 @@ export function FloatingActionMenu({
 
   useEffect(() => {
     if (!open || !ready) return;
+    // Remember what opened the menu so focus can go back there on close —
+    // otherwise Tab resumes from the top of the document once the menu unmounts.
+    const opener = document.activeElement as HTMLElement | null;
     const frame = requestAnimationFrame(() => itemRefs.current[0]?.focus());
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      // Only reclaim focus if nothing else has taken it. An item that opened a
+      // dialog has already moved focus somewhere better, and the menu's own
+      // button is gone by now, so `body` is the tell that focus was orphaned.
+      const active = document.activeElement;
+      if (!active || active === document.body) opener?.focus();
+    };
   }, [open, ready]);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // Tab would otherwise leave the menu open behind the focus ring.
+      if (e.key === "Escape" || e.key === "Tab") onClose();
     };
-    const onScroll = () => onClose();
+    // Capture-phase, so a scrolling ancestor closes the menu instead of leaving
+    // it stranded next to nothing — but the menu's own overflow scroll is not
+    // the page moving underneath it.
+    const onScroll = (e: Event) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      onClose();
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onClose);
@@ -138,7 +167,10 @@ export function FloatingActionMenu({
 
   return createPortal(
     <AnimatePresence>
-      {open && (
+      {/* An empty `items` is a real case — a trashed file offers nothing to a
+          viewer who cannot purge — and a 240px panel with no rows in it reads
+          as a broken menu rather than as "no actions here". */}
+      {open && items.length > 0 && (
         <>
           <div
             className="fixed inset-0 z-[90]"
@@ -153,17 +185,21 @@ export function FloatingActionMenu({
             ref={menuRef}
             role="menu"
             aria-label={menuLabel}
-            initial={{ opacity: 0, scale: 0.96, y: 6 }}
-            animate={{ opacity: ready ? 1 : 0, scale: ready ? 1 : 0.96, y: ready ? 0 : 6 }}
-            exit={{ opacity: 0, scale: 0.96, y: 6 }}
-            transition={{ duration: 0.14, ease: "easeOut" }}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 6 }}
+            animate={
+              reduceMotion
+                ? { opacity: ready ? 1 : 0 }
+                : { opacity: ready ? 1 : 0, scale: ready ? 1 : 0.96, y: ready ? 0 : 6 }
+            }
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 6 }}
+            transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
             style={{
               position: "fixed",
               top: coords.top,
               left: coords.left,
               visibility: ready ? "visible" : "hidden",
             }}
-            className="z-[100] max-h-[calc(100dvh-16px)] w-[min(calc(100vw-16px),240px)] overflow-y-auto rounded-xl border border-border/60 bg-surface-elevated/95 py-1 shadow-2xl backdrop-blur-xl overscroll-contain"
+            className="z-[90] max-h-[calc(100dvh-16px)] w-[min(calc(100vw-16px),240px)] overflow-y-auto rounded-xl border border-border/60 bg-surface-elevated/95 py-1 shadow-2xl backdrop-blur-xl overscroll-contain"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
@@ -184,21 +220,25 @@ export function FloatingActionMenu({
             }}
           >
             {header && (
-              <div className="border-b border-border/40 px-3.5 pb-2.5 pt-2">
-                <p className="truncate text-[12px] font-semibold text-foreground">{header.title}</p>
-                {header.subtitle && <p className="mt-0.5 truncate text-[10px] text-muted-foreground/65">{header.subtitle}</p>}
+              /* role="none" keeps the menu's ownership of its items intact — a
+                 plain div between `role="menu"` and its `menuitem`s breaks it. */
+              <div role="none" className="border-b border-border/40 px-3.5 pb-2.5 pt-2">
+                <p className="truncate text-xs font-semibold text-foreground">{header.title}</p>
+                {header.subtitle && <p className="mt-0.5 truncate text-xs text-muted-foreground">{header.subtitle}</p>}
               </div>
             )}
             {items.map((item, i) => {
               const Icon = item.icon;
-              const showDivider = item.danger && i > 0 && !items[i - 1]?.danger;
+              const showDivider =
+                item.separatorBefore || (item.danger && i > 0 && !items[i - 1]?.danger);
 
               return (
-                <div key={item.id}>
-                  {showDivider && <div className="my-1 mx-2 border-t border-border/40" />}
+                <div role="none" key={item.id}>
+                  {showDivider && i > 0 && <div role="separator" className="my-1 mx-2 border-t border-border/40" />}
                   <button
                     ref={(element) => { itemRefs.current[i] = element; }}
-                    role="menuitem"
+                    role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+                    aria-checked={item.checked === undefined ? undefined : item.checked}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -206,15 +246,18 @@ export function FloatingActionMenu({
                       onClose();
                     }}
                     className={cn(
-                      "flex min-h-10 w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] font-medium transition-colors focus-visible:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
+                      "flex min-h-10 w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-sm font-medium transition-colors focus-visible:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
                       item.danger
                         ? "text-danger hover:bg-danger/10"
-                        : "text-foreground hover:bg-accent/10"
+                        : item.checked
+                          ? "text-accent hover:bg-accent/10"
+                          : "text-foreground hover:bg-accent/10"
                     )}
                   >
                     <Icon className={cn("h-4 w-4 shrink-0", item.danger ? "opacity-90" : "opacity-60")} />
                     <span className="flex-1 truncate">{item.label}</span>
-                    {item.shortcut && <kbd className="ml-2 shrink-0 text-[10px] font-medium text-muted-foreground/50">{item.shortcut}</kbd>}
+                    {item.shortcut && <kbd className="ml-2 shrink-0 text-xs font-medium text-muted-foreground">{item.shortcut}</kbd>}
+                    {item.checked && <Check aria-hidden className="ml-1 h-3.5 w-3.5 shrink-0" />}
                   </button>
                 </div>
               );

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { getAccessibleFile, getEffectiveUserId } from "@/lib/auth/permissions";
+import { getAccessibleFile, getEffectiveUserId, fileRefusal } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
 import { validateCsrf } from "@/lib/security";
 import { restoreFileVersion } from "@/lib/files/versions";
@@ -27,7 +27,7 @@ export async function POST(
 
     const accessible = await getAccessibleFile(sessionUser, id);
     if (!accessible) return apiError("File not found", 404);
-    if (!accessible.canEdit) return apiError("Forbidden", 403);
+    if (!accessible.canEdit) return apiError(fileRefusal(accessible, "edit"), 403);
 
     const restored = await restoreFileVersion(
       accessible.file,

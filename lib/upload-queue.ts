@@ -223,11 +223,19 @@ export class UploadQueue {
   private readonly scopeId: string | null;
   private disposed = false;
   private items: UploadItem[] = [];
-  private listeners: Partial<UploadQueueEvents> = {};
-  private processing = false;
+  /**
+   * A Set per event, not one callback per event. The upload panel, the activity
+   * centre and the activity page all listen for "change"; with a single slot the
+   * last one to mount silently replaced the others, and the first one to unmount
+   * tore down the survivor's subscription too.
+   */
+  private readonly listeners = new Map<keyof UploadQueueEvents, Set<(...args: never[]) => void>>();
   private paused = false;
+  private activeWorkers = 0;
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastNotifyAt = 0;
+  /** Last value published to the activity store per item, so unchanged rows are skipped. */
+  private readonly published = new Map<string, string>();
   private speedSamples: number[] = [];
   private encryptEnabled = false;
   private encryptPassphrase: string | null = null;
@@ -251,7 +259,8 @@ export class UploadQueue {
       for (const xhr of signal.xhrs) xhr.abort();
     }
     this.abortSignals.clear();
-    this.listeners = {};
+    this.listeners.clear();
+    this.published.clear();
     this.items = [];
   }
 
@@ -261,16 +270,28 @@ export class UploadQueue {
   }
 
   on<K extends keyof UploadQueueEvents>(event: K, cb: UploadQueueEvents[K]) {
-    this.listeners[event] = cb;
+    const bucket = this.listeners.get(event) ?? new Set<(...args: never[]) => void>();
+    bucket.add(cb as (...args: never[]) => void);
+    this.listeners.set(event, bucket);
   }
 
-  off<K extends keyof UploadQueueEvents>(event: K) {
-    delete this.listeners[event];
+  /** Passing the callback removes just that subscriber; omitting it clears the event. */
+  off<K extends keyof UploadQueueEvents>(event: K, cb?: UploadQueueEvents[K]) {
+    if (!cb) {
+      this.listeners.delete(event);
+      return;
+    }
+    const bucket = this.listeners.get(event);
+    if (!bucket) return;
+    bucket.delete(cb as (...args: never[]) => void);
+    if (bucket.size === 0) this.listeners.delete(event);
   }
 
   private emit(event: keyof UploadQueueEvents, ...args: unknown[]) {
-    const cb = this.listeners[event] as ((...a: unknown[]) => void) | undefined;
-    cb?.(...args);
+    const bucket = this.listeners.get(event);
+    if (!bucket || bucket.size === 0) return;
+    // Copied first: a listener is allowed to unsubscribe while being called.
+    for (const cb of [...bucket]) (cb as (...a: unknown[]) => void)(...args);
   }
 
   private notify(immediate = false) {
@@ -287,6 +308,14 @@ export class UploadQueue {
         // local "resume requires file" snapshot.
         if (item.status === "resume_requires_file") continue;
         const phase: ActivityStatus = item.status === "done" ? "completed" : item.status === "error" ? "failed" : item.status === "cancelled" ? "cancelled" : item.status;
+        // One file's progress tick used to re-publish every other item in the
+        // queue as well — 200 activity-store writes per 100ms for a 200-file
+        // batch, each one an O(n) rebuild plus a BroadcastChannel clone. Rows
+        // that did not actually move are skipped. Speed is left out of the
+        // signature on purpose: it only ever changes alongside the byte count.
+        const signature = `${phase}|${item.uploadedBytes}|${item.totalBytes}|${item.fileId ?? ""}|${item.error ?? ""}`;
+        if (this.published.get(item.id) === signature) continue;
+        this.published.set(item.id, signature);
         syncTransferActivity({ id: item.id, type: "upload", name: item.file?.name ?? item.remotePath, phase, loaded: item.uploadedBytes, total: item.totalBytes, speed: item.speed, error: item.error, fileId: item.fileId });
       }
       this.emit("change", [...this.items], this.getStats());
@@ -294,16 +323,31 @@ export class UploadQueue {
   }
 
   getStats(): UploadStats {
-    const total = this.items.length;
-    const completed = this.items.filter((item) => item.status === "done").length;
-    const failed = this.items.filter((item) => item.status === "error").length;
-    const active = this.items.filter((item) => item.status === "preparing" || item.status === "uploading" || item.status === "verifying").length;
-    const queued = this.items.filter((item) => item.status === "queued").length;
-    const totalBytes = this.items.reduce((sum, item) => sum + item.totalBytes, 0);
-    const loadedBytes = this.items.reduce((sum, item) => sum + Math.min(item.uploadedBytes, item.totalBytes), 0);
+    // One pass. This runs on every throttled notify, and the seven separate
+    // filter/reduce traversals it replaces were the second-biggest cost in a
+    // large batch after the activity-store writes.
+    let completed = 0;
+    let failed = 0;
+    let active = 0;
+    let queued = 0;
+    let totalBytes = 0;
+    let loadedBytes = 0;
+    for (const item of this.items) {
+      switch (item.status) {
+        case "done": completed++; break;
+        case "error": failed++; break;
+        case "preparing":
+        case "uploading":
+        case "verifying": active++; break;
+        case "queued": queued++; break;
+        default: break;
+      }
+      totalBytes += item.totalBytes;
+      loadedBytes += Math.min(item.uploadedBytes, item.totalBytes);
+    }
     const overallProgress = totalBytes > 0 ? (loadedBytes / totalBytes) * 100 : 0;
     const speed = this.currentSpeed();
-    return { total, completed, failed, active, queued, totalBytes, loadedBytes, overallProgress, speed, eta: speed > 0 ? (totalBytes - loadedBytes) / speed : 0 };
+    return { total: this.items.length, completed, failed, active, queued, totalBytes, loadedBytes, overallProgress, speed, eta: speed > 0 ? (totalBytes - loadedBytes) / speed : 0 };
   }
 
   private currentSpeed() {
@@ -353,18 +397,29 @@ export class UploadQueue {
   }
 
   private async processNext() {
-    if (this.disposed || this.scopeId !== getActivityScopeId() || this.processing || this.paused) return;
-    const queued = this.items.filter((item) => item.status === "queued");
-    if (queued.length === 0) {
-      if (this.getStats().active === 0 && this.items.length > 0) this.emit("allComplete");
-      return;
+    if (this.disposed || this.scopeId !== getActivityScopeId() || this.paused) return;
+    // Slot-based, not batch-based. The old version ran a pool over a slice of
+    // three and awaited the whole slice, so two finished slots sat idle behind
+    // one slow file. Each slot now pulls the next queued file immediately.
+    while (this.activeWorkers < MAX_ACTIVE_FILES) {
+      const next = this.items.find((item) => item.status === "queued" && item.file);
+      if (!next) break;
+      // Claimed synchronously so the next turn of this loop cannot pick it again.
+      next.status = "preparing";
+      this.activeWorkers++;
+      void this.runItem(next);
     }
-    this.processing = true;
+    if (this.activeWorkers === 0 && this.items.length > 0 && this.getStats().active === 0) {
+      this.emit("allComplete");
+    }
+  }
+
+  private async runItem(item: UploadItem) {
     try {
-      await mapPool(queued.slice(0, MAX_ACTIVE_FILES), MAX_ACTIVE_FILES, (item) => this.processItem(item));
+      await this.processItem(item);
     } finally {
-      this.processing = false;
-      if (!this.paused) void this.processNext();
+      this.activeWorkers--;
+      if (!this.paused && !this.disposed) void this.processNext();
     }
   }
 
@@ -399,6 +454,11 @@ export class UploadQueue {
       let init = initialized.data;
       item.sessionId = init.sessionId;
       item.fileId = init.fileId;
+      // Registered now rather than after /complete. The complete route publishes
+      // its realtime upload_complete event before returning, so the event can
+      // reach this tab before the POST resolves — registering late let this tab
+      // toast its own upload a second time through the realtime channel.
+      markLocalUpload(init.fileId);
       item.uploadId = init.uploadId ?? undefined;
       item.totalBytes = init.totalSizeBytes;
       item.mimeType = uploadMime;
@@ -564,7 +624,12 @@ export class UploadQueue {
   resume() { if (!this.disposed) { this.paused = false; void this.processNext(); } }
 
   clearCompleted() {
-    this.items = this.items.filter((item) => item.status !== "done" && item.status !== "cancelled");
+    const kept = this.items.filter((item) => item.status !== "done" && item.status !== "cancelled");
+    const keptIds = new Set(kept.map((item) => item.id));
+    for (const item of this.items) {
+      if (!keptIds.has(item.id)) this.published.delete(item.id);
+    }
+    this.items = kept;
     this.notify(true);
   }
 

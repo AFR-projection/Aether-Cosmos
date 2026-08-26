@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { FolderOpen, Star, Share2, Menu, Plus } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -15,8 +15,8 @@ interface BottomNavProps {
 
 const TABS = [
   { href: "/files", label: "Files", icon: FolderOpen },
-  { href: "/favorites", label: "Favorit", icon: Star },
-  { href: "/shares", label: "Dibagikan", icon: Share2 },
+  { href: "/favorites", label: "Favorites", icon: Star },
+  { href: "/shares", label: "Shared", icon: Share2 },
 ] as const;
 
 /**
@@ -37,7 +37,7 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
     <>
       <nav
         className="chrome-surface fixed inset-x-0 bottom-0 z-40 border-t border-border/50 pb-safe lg:hidden"
-        aria-label="Navigasi utama"
+        aria-label="Main navigation"
       >
         <div className="mx-auto flex h-[60px] max-w-md items-stretch justify-around px-2">
           {/* First two tabs */}
@@ -47,12 +47,17 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
 
           {/* Center FAB */}
           <button
+            type="button"
             onClick={() => setSheetOpen(true)}
             className="tap relative flex w-[64px] shrink-0 items-center justify-center"
-            aria-label="Buat baru"
+            aria-label="Create new"
+            // The "+" opens a sheet rather than doing something, so it says so —
+            // and says whether the sheet is currently up.
+            aria-haspopup="dialog"
+            aria-expanded={sheetOpen}
           >
             <span className="flex h-12 w-12 -translate-y-3 items-center justify-center rounded-2xl bg-accent text-white shadow-lg shadow-accent/30">
-              <Plus className="h-6 w-6" />
+              <Plus aria-hidden className="h-6 w-6" />
             </span>
           </button>
 
@@ -61,11 +66,13 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
             <TabButton key={tab.href} {...tab} active={isActive(tab.href)} />
           ))}
           <button
+            type="button"
             onClick={onOpenMenu}
             className="tap flex flex-1 flex-col items-center justify-center gap-0.5 text-muted-foreground"
-            aria-label="Menu lengkap"
+            aria-label="More menu"
+            aria-haspopup="dialog"
           >
-            <Menu className="h-5 w-5" />
+            <Menu aria-hidden className="h-5 w-5" />
             <span className="text-[10px] font-medium">Menu</span>
           </button>
         </div>
@@ -87,9 +94,13 @@ function TabButton({
   icon: typeof FolderOpen;
   active: boolean;
 }) {
+  const reduceMotion = useReducedMotion();
   return (
     <Link
       href={href}
+      // The accent colour and the little bar are the only thing saying "you are here",
+      // and neither reaches a screen reader.
+      aria-current={active ? "page" : undefined}
       className={cn(
         "tap relative flex flex-1 flex-col items-center justify-center gap-0.5",
         active ? "text-accent" : "text-muted-foreground"
@@ -97,12 +108,17 @@ function TabButton({
     >
       {active && (
         <motion.span
+          aria-hidden
           layoutId="bottom-nav-active"
           className="absolute -top-px h-0.5 w-8 rounded-full bg-accent"
-          transition={{ type: "spring", stiffness: 380, damping: 30 }}
+          // The sliding indicator is a framer-motion animation, so the global
+          // prefers-reduced-motion CSS block in globals.css cannot reach it.
+          transition={
+            reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 30 }
+          }
         />
       )}
-      <Icon className={cn("h-5 w-5", active && "fill-accent/15")} />
+      <Icon aria-hidden className={cn("h-5 w-5", active && "fill-accent/15")} />
       <span className="text-[10px] font-medium">{label}</span>
     </Link>
   );

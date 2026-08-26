@@ -2,21 +2,37 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
-import { KeyRound, User, Monitor, Shield, Hash, Info } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { MotionConfig, motion } from "framer-motion";
+import {
+  Hash,
+  Info,
+  KeyRound,
+  Laptop,
+  Monitor,
+  Moon,
+  Palette,
+  Shield,
+  Sun,
+  UserRound,
+} from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { apiFetch } from "@/lib/api/client";
-import { APP_VERSION_LABEL } from "@/lib/app-version";
-import { cn } from "@/lib/utils";
+import { APP_NAME, APP_VERSION_LABEL } from "@/lib/app-version";
+import { formatBytes } from "@/lib/utils";
 import {
-  PasswordSection as SharedPasswordSection,
-  TwoFactorSection as SharedTwoFactorSection,
+  PasswordSection,
   StepCodeSection,
+  TwoFactorSection,
 } from "@/components/account/account-security-sections";
 import { SessionsSection } from "@/components/settings/sessions-section";
 import { rememberCurrentSessionId } from "@/hooks/use-realtime-events";
-import { setLitePreference, useLiteMode, useLitePreference } from "@/lib/system/lite-mode";
+import {
+  setLitePreference,
+  useLiteMode,
+  useLitePreference,
+  type LitePreference,
+} from "@/lib/system/lite-mode";
+
 interface SessionUser {
   id: string;
   username: string;
@@ -28,8 +44,46 @@ interface SessionUser {
   sessionId?: string;
 }
 
+/** Expo.out, the easing the design system uses everywhere on this page. */
+const EASE = [0.16, 1, 0.3, 1] as const;
+
+type SectionId =
+  | "password"
+  | "step-code"
+  | "2fa"
+  | "profile"
+  | "appearance"
+  | "devices"
+  | "about";
+
+const GROUPS = ["Security", "Account", "System"] as const;
+
+type Section = {
+  id: SectionId;
+  group: (typeof GROUPS)[number];
+  title: string;
+  description: string;
+  icon: typeof KeyRound;
+};
+
+/**
+ * Declared once at module scope, not rebuilt per render, and holding no JSX —
+ * the panel is looked up by id and mounted on its own. The old page built an
+ * array of seven live elements every render, so every section (including the
+ * two that fetch) was mounted even while collapsed.
+ */
+const SECTIONS: readonly Section[] = [
+  { id: "password", group: "Security", title: "Password", description: "Change the password you sign in with.", icon: KeyRound },
+  { id: "step-code", group: "Security", title: "2-Step Code", description: "A numeric code asked for after your password.", icon: Hash },
+  { id: "2fa", group: "Security", title: "Two-factor app", description: "Authenticator codes and one-time recovery codes.", icon: Shield },
+  { id: "profile", group: "Account", title: "Profile", description: "Account details and how much storage you have used.", icon: UserRound },
+  { id: "appearance", group: "Account", title: "Appearance", description: "Theme, and how much visual effect to load.", icon: Palette },
+  { id: "devices", group: "Account", title: "Devices", description: "Where this account is signed in, and how to sign it out.", icon: Laptop },
+  { id: "about", group: "System", title: "About", description: `${APP_NAME} ${APP_VERSION_LABEL}`, icon: Info },
+];
+
 export default function SettingsPage() {
-  const { data: sessionData, isLoading: sessionLoading } = useQuery({
+  const { data: user, isLoading } = useQuery({
     queryKey: ["session"],
     queryFn: async () => {
       const res = await apiFetch<SessionUser>("/api/auth/login");
@@ -39,234 +93,223 @@ export default function SettingsPage() {
     },
   });
 
-  const user = sessionData;
-
-  if (sessionLoading) return <SettingsSkeleton />;
+  if (isLoading) return <SettingsSkeleton />;
   if (!user) return null;
 
   return <SettingsContent user={user} />;
 }
 
 function SettingsContent({ user }: { user: SessionUser }) {
-  const [openSection, setOpenSection] = useState<string | null>("password");
-
-  const sections = [
-    {
-      id: "password",
-      title: "Password",
-      description: "Change your account password",
-      icon: KeyRound,
-      gradient: "from-amber-500 to-orange-500",
-      component: <PasswordSection />,
-    },
-    {
-      id: "step-code",
-      title: "2-Step Code",
-      description: "Numpad code entered after your password",
-      icon: Hash,
-      gradient: "from-cyan-500 to-blue-500",
-      component: <StepCodeSection />,
-    },
-    {
-      id: "2fa",
-      title: "Two-factor authentication",
-      description: "Authenticator app (TOTP) + recovery codes",
-      icon: Shield,
-      gradient: "from-rose-500 to-pink-500",
-      component: <TwoFactorSection enabled={!!user.totpEnabled} />,
-    },
-    {
-      id: "profile",
-      title: "Profile",
-      description: "Your account information",
-      icon: User,
-      gradient: "from-blue-500 to-cyan-500",
-      component: <ProfileSection user={user} />,
-    },
-    {
-      id: "appearance",
-      title: "Appearance",
-      description: "Theme preferences",
-      icon: Monitor,
-      gradient: "from-purple-500 to-violet-500",
-      component: <AppearanceSection />,
-    },
-    {
-      id: "sessions",
-      title: "Sessions & devices",
-      description: "See where you're signed in and revoke access",
-      icon: Monitor,
-      gradient: "from-emerald-500 to-teal-500",
-      component: <SessionsSection />,
-    },
-    {
-      id: "about",
-      title: "About",
-      description: `Storage ByAFR ${APP_VERSION_LABEL}`,
-      icon: Info,
-      gradient: "from-slate-500 to-slate-700",
-      component: <AboutSection />,
-    },
-  ];
+  const [active, setActive] = useState<SectionId>("password");
+  const current = SECTIONS.find((section) => section.id === active) ?? SECTIONS[0];
+  const CurrentIcon = current.icon;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 px-4 py-8 sm:px-6">
-      <div>
-        <h1 className="text-2xl font-bold sm:text-3xl">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your account settings and preferences
+    <MotionConfig reducedMotion="user">
+      <div className="set-page">
+        <header className="set-header">
+          <div className="set-header__copy">
+            <p className="set-kicker">
+              <span aria-hidden="true" />
+              Account settings
+            </p>
+            <h1>Settings</h1>
+            <p>
+              Security, appearance and the devices signed in to this account.
+              Choose a section to open it — the others stay out of the way.
+            </p>
+          </div>
+          <IdentityChip user={user} />
+        </header>
+
+        <div className="set-body">
+          <nav className="set-nav" aria-label="Settings sections">
+            {GROUPS.map((group) => (
+              <div key={group} className="set-nav__group">
+                <p className="set-nav__label">{group}</p>
+                {SECTIONS.filter((section) => section.group === group).map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className="set-nav__item"
+                    data-active={section.id === active}
+                    aria-current={section.id === active || undefined}
+                    aria-controls="settings-panel"
+                    onClick={() => setActive(section.id)}
+                  >
+                    <section.icon aria-hidden="true" />
+                    <span className="set-nav__text">{section.title}</span>
+                    {section.id === "2fa" && (
+                      <span className="set-flag" data-tone={user.totpEnabled ? "on" : "off"}>
+                        {user.totpEnabled ? "On" : "Off"}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+
+          <section id="settings-panel" className="set-panel" aria-labelledby="settings-panel-title">
+            <div className="set-panel__head">
+              <span className="set-panel__icon" aria-hidden="true">
+                <CurrentIcon />
+              </span>
+              <div className="min-w-0">
+                <h2 id="settings-panel-title" className="set-panel__title">{current.title}</h2>
+                <p className="set-panel__sub">{current.description}</p>
+              </div>
+            </div>
+            <div className="set-panel__body">
+              {/* Swapped, not expanded: one section is mounted at a time, so no
+                  height is animated and nothing below shifts. Keyed on the id so
+                  changing section remounts and replays the entrance — there is no
+                  AnimatePresence because an exit would leave the panel empty for
+                  the length of the transition and collapse it. */}
+              <motion.div
+                key={active}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: EASE }}
+              >
+                <SectionBody id={active} user={user} />
+              </motion.div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </MotionConfig>
+  );
+}
+
+function IdentityChip({ user }: { user: SessionUser }) {
+  return (
+    <div className="set-id">
+      <span className="set-id__mark" aria-hidden="true">
+        {user.username.slice(0, 1) || "?"}
+      </span>
+      <div className="set-id__main">
+        <p className="set-id__name">{user.username}</p>
+        <p className="set-id__meta">
+          <span className="set-id__role">{user.role}</span>
+          <span className="truncate">{user.email ?? "No email on file"}</span>
         </p>
       </div>
-
-      <div className="space-y-3">
-        {sections.map((section) => {
-          const isOpen = openSection === section.id;
-          const Icon = section.icon;
-          return (
-            <Card
-              key={section.id}
-              className={cn(
-                "overflow-hidden transition-all duration-200",
-                isOpen && "shadow-lg"
-              )}
-            >
-              <button
-                onClick={() => setOpenSection(isOpen ? null : section.id)}
-                className="flex w-full items-center gap-3 p-4 text-left sm:p-5"
-                aria-expanded={isOpen}
-              >
-                <div className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm",
-                  section.gradient
-                )}>
-                  <Icon className="h-5 w-5 text-white" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{section.title}</p>
-                  <p className="text-xs text-muted-foreground/70">{section.description}</p>
-                </div>
-                <motion.div
-                  animate={{ rotate: isOpen ? 180 : 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="text-muted-foreground/50"
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </motion.div>
-              </button>
-              {isOpen && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <div className="border-t border-border/50 px-4 pb-4 pt-3 sm:px-5 sm:pb-5">
-                    {section.component}
-                  </div>
-                </motion.div>
-              )}
-            </Card>
-          );
-        })}
-      </div>
     </div>
   );
 }
 
-// ─── Password Section ─────────────────────────────────────────────────────────
-
-function PasswordSection() {
-  return <SharedPasswordSection />;
+function SectionBody({ id, user }: { id: SectionId; user: SessionUser }) {
+  switch (id) {
+    case "password":
+      return <PasswordSection />;
+    case "step-code":
+      return <StepCodeSection />;
+    case "2fa":
+      return <TwoFactorSection enabled={!!user.totpEnabled} />;
+    case "profile":
+      return <ProfileSection user={user} />;
+    case "appearance":
+      return <AppearanceSection />;
+    case "devices":
+      return <SessionsSection />;
+    case "about":
+      return <AboutSection />;
+  }
 }
 
-function TwoFactorSection({ enabled }: { enabled: boolean }) {
-  return <SharedTwoFactorSection enabled={enabled} />;
-}
-
-// ─── Profile Section ──────────────────────────────────────────────────────────
+// ─── Profile ──────────────────────────────────────────────────────────────────
 
 function ProfileSection({ user }: { user: SessionUser }) {
+  const used = user.usedBytes ?? 0;
+  const quota = user.quotaBytes ?? 0;
+  const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0;
+  const tone = percent >= 95 ? "full" : percent >= 80 ? "warn" : "ok";
+
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg bg-surface-hover/50 p-4">
-        <label className="text-xs font-medium text-muted-foreground/70">Username</label>
-        <p className="mt-0.5 text-sm font-medium">{user.username}</p>
+    <>
+      <div className="set-group">
+        <dl className="set-facts">
+          <div className="set-fact">
+            <dt>Username</dt>
+            <dd>{user.username}</dd>
+          </div>
+          <div className="set-fact">
+            <dt>Email</dt>
+            <dd>{user.email ?? "Not set"}</dd>
+          </div>
+          <div className="set-fact">
+            <dt>Role</dt>
+            <dd className="capitalize">{user.role}</dd>
+          </div>
+        </dl>
       </div>
-      <div className="rounded-lg bg-surface-hover/50 p-4">
-        <label className="text-xs font-medium text-muted-foreground/70">Email</label>
-        <p className="mt-0.5 text-sm font-medium">{user.email ?? "Not set"}</p>
+      <div className="set-group">
+        <p className="set-group__title">Storage</p>
+        <div className="set-meter">
+          <div
+            className="set-meter__track"
+            role="progressbar"
+            aria-label="Storage used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(percent)}
+          >
+            <div className="set-meter__fill" data-tone={tone} style={{ width: `${percent}%` }} />
+          </div>
+          <p className="set-meter__row">
+            <span>{formatBytes(used)} used</span>
+            <span>{quota > 0 ? `${formatBytes(quota)} total` : "No quota set"}</span>
+          </p>
+        </div>
       </div>
-      <div className="rounded-lg bg-surface-hover/50 p-4">
-        <label className="text-xs font-medium text-muted-foreground/70">Role</label>
-        <p className="mt-0.5 text-sm font-medium capitalize">{user.role}</p>
-      </div>
-    </div>
+    </>
   );
 }
 
-// ─── About Section ────────────────────────────────────────────────────────────
+// ─── Appearance ───────────────────────────────────────────────────────────────
 
-/**
- * Read-only. `APP_VERSION` is pinned to `package.json` by a test, so what this
- * row shows is the version that was actually built and deployed.
- */
-function AboutSection() {
-  return (
-    <div className="space-y-3">
-      <div className="rounded-lg bg-surface-hover/50 p-4">
-        <label className="text-xs font-medium text-muted-foreground/70">App version</label>
-        <p className="mt-0.5 text-sm font-medium">{APP_VERSION_LABEL}</p>
-      </div>
-      <div className="rounded-lg bg-surface-hover/50 p-4">
-        <label className="text-xs font-medium text-muted-foreground/70">Release</label>
-        <p className="mt-0.5 text-sm font-medium">Second Brain 2.0</p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Appearance Section ───────────────────────────────────────────────────────
+const THEME_OPTIONS = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
+] as const;
 
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
 
-  const options = [
-    { value: "light", label: "Light", icon: SunIcon },
-    { value: "dark", label: "Dark", icon: MoonIcon },
-    { value: "system", label: "System", icon: Monitor },
-  ] as const;
-
   return (
-    <div className="space-y-3">
-      <label className="text-sm font-medium">Theme</label>
-      <div className="grid grid-cols-3 gap-2">
-        {options.map(({ value, label, icon: Icon }) => (
-          <button
-            key={value}
-            onClick={() => setTheme(value)}
-            className={cn(
-              "flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all",
-              theme === value
-                ? "border-accent bg-accent/10"
-                : "border-border/50 hover:border-border/80 bg-transparent"
-            )}
-          >
-            <Icon className={cn("h-5 w-5", theme === value ? "text-accent" : "text-muted-foreground")} />
-            <span className={cn("text-xs font-medium", theme === value ? "text-accent" : "text-muted-foreground")}>
-              {label}
-            </span>
-          </button>
-        ))}
+    <>
+      <div className="set-group">
+        <p className="set-group__title" id="set-theme-label">Theme</p>
+        {/* Buttons with aria-pressed rather than role="radio": a real radiogroup
+            owes the user arrow-key traversal, and these stay plain tab stops. */}
+        <div className="set-choice" role="group" aria-labelledby="set-theme-label">
+          {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              className="set-choice__item"
+              data-active={theme === value}
+              aria-pressed={theme === value}
+              onClick={() => setTheme(value)}
+            >
+              <Icon aria-hidden="true" />
+              <span className="set-choice__label">{label}</span>
+            </button>
+          ))}
+        </div>
       </div>
-
       <LiteModeSetting />
-    </div>
+    </>
   );
 }
 
-// ─── Lite mode ────────────────────────────────────────────────────────────────
+const LITE_OPTIONS: readonly { value: LitePreference; label: string; hint: string }[] = [
+  { value: "auto", label: "Auto", hint: "Follow device & network" },
+  { value: "on", label: "On", hint: "Always lightweight" },
+  { value: "off", label: "Off", hint: "Always full effects" },
+];
 
 /**
  * Auto is the right default for almost everyone — the override exists for the
@@ -278,82 +321,66 @@ function LiteModeSetting() {
   const preference = useLitePreference();
   const active = useLiteMode();
 
-  const options = [
-    { value: "auto", label: "Auto", hint: "Follow device & network" },
-    { value: "on", label: "On", hint: "Always lightweight" },
-    { value: "off", label: "Off", hint: "Always full effects" },
-  ] as const;
-
   return (
-    <div className="space-y-3 border-t border-border/50 pt-4">
-      <div>
-        <label className="text-sm font-medium">Lite mode</label>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Drops heavy visual effects and loads smaller thumbnails to keep things
-          smooth on slower devices and connections.
-        </p>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {options.map(({ value, label, hint }) => (
+    <div className="set-group">
+      <p className="set-group__title" id="set-lite-label">Lite mode</p>
+      <p className="set-group__note">
+        Drops heavy visual effects and loads smaller thumbnails to keep things
+        smooth on slower devices and connections.
+      </p>
+      <div className="set-choice" role="group" aria-labelledby="set-lite-label">
+        {LITE_OPTIONS.map(({ value, label, hint }) => (
           <button
             key={value}
+            type="button"
+            className="set-choice__item"
+            data-active={preference === value}
+            aria-pressed={preference === value}
             onClick={() => setLitePreference(value)}
-            className={cn(
-              "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-center transition-all",
-              preference === value
-                ? "border-accent bg-accent/10"
-                : "border-border/50 bg-transparent hover:border-border/80"
-            )}
           >
-            <span
-              className={cn(
-                "text-xs font-medium",
-                preference === value ? "text-accent" : "text-muted-foreground"
-              )}
-            >
-              {label}
-            </span>
-            <span className="text-[10px] leading-tight text-muted-foreground/70">{hint}</span>
+            <span className="set-choice__label">{label}</span>
+            <span className="set-choice__hint">{hint}</span>
           </button>
         ))}
       </div>
       {preference === "auto" && (
-        <p className="text-xs text-muted-foreground/70">
-          Currently {active ? "on" : "off"} for this device.
-        </p>
+        <p className="set-group__note">Currently {active ? "on" : "off"} for this device.</p>
       )}
     </div>
   );
 }
 
-function SunIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5" />
-      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-    </svg>
-  );
-}
+// ─── About ────────────────────────────────────────────────────────────────────
 
-function MoonIcon(props: React.SVGProps<SVGSVGElement>) {
+/**
+ * Read-only. `APP_VERSION` is pinned to `package.json` by a test, so what this
+ * row shows is the version that was actually built and deployed.
+ */
+function AboutSection() {
   return (
-    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-    </svg>
+    <dl className="set-facts">
+      <div className="set-fact">
+        <dt>App version</dt>
+        <dd>{APP_VERSION_LABEL}</dd>
+      </div>
+      <div className="set-fact">
+        <dt>Release</dt>
+        <dd>Second Brain 2.0</dd>
+      </div>
+    </dl>
   );
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
+/** Mirrors the real split, so the rail and the panel do not jump into place. */
 function SettingsSkeleton() {
   return (
-    <div className="mx-auto max-w-2xl space-y-6 px-4 py-8 sm:px-6">
-      <div className="h-8 w-32 animate-pulse rounded-lg bg-surface-hover" />
-      <div className="h-4 w-64 animate-pulse rounded-lg bg-surface-hover" />
-      <div className="space-y-3">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-16 animate-pulse rounded-2xl bg-surface-hover" />
-        ))}
+    <div className="set-page">
+      <div className="set-skel set-skel--head skeleton" />
+      <div className="set-body">
+        <div className="set-skel set-skel--nav skeleton" />
+        <div className="set-skel set-skel--panel skeleton" />
       </div>
     </div>
   );

@@ -32,10 +32,44 @@ export async function GET(
       .innerJoin(users, eq(folderMembers.userId, users.id))
       .where(eq(folderMembers.folderId, id));
 
+    // Pending invitations are part of the sharing state the owner manages; a plain member
+    // has no business seeing who else was asked.
+    const invitations = access.canManageMembers
+      ? await db
+          .select({
+            id: folderInvitations.id,
+            invitedUserId: folderInvitations.invitedUserId,
+            role: folderInvitations.role,
+            status: folderInvitations.status,
+            createdAt: folderInvitations.createdAt,
+            username: users.username,
+          })
+          .from(folderInvitations)
+          .innerJoin(users, eq(folderInvitations.invitedUserId, users.id))
+          .where(
+            and(eq(folderInvitations.folderId, id), eq(folderInvitations.status, "pending"))
+          )
+      : [];
+
     return apiSuccess({
       members,
+      invitations,
       ownerId: access.folder.userId,
       canManage: access.canManageMembers,
+      // The client needs the caller's own standing to hide actions it must not offer.
+      viewer: {
+        userId: getEffectiveUserId(sessionUser),
+        role: access.role,
+        isOwner: access.isOwner,
+        isShareRoot: access.isShareRoot,
+        shareRootId: access.shareRootId,
+        canEdit: access.canEdit,
+        canManageMembers: access.canManageMembers,
+        canTrashFolder: access.canTrashFolder,
+        canPurge: access.canPurge,
+        canOwnerOnlyFlags: access.canOwnerOnlyFlags,
+        canLeave: access.viaMembership,
+      },
     });
   } catch (error) {
     return handleApiError(error);
@@ -85,32 +119,43 @@ export async function POST(
       .limit(1);
 
     if (existingMember) {
-      return apiError("User is already a member of this folder", 400);
+      // Re-inviting someone who is already in is how the UI used to try to change a role,
+      // and it dead-ended in a 400. Point at the action that actually does it.
+      return apiError(
+        "This user is already a member. Change their role from the member list (PATCH) instead of inviting them again.",
+        400
+      );
     }
 
-    // Check if invitation already exists
+    // One invitation row per (folder, user) — the unique index says so. A `rejected` or
+    // `accepted` leftover used to make the INSERT below explode with a 500 and permanently
+    // block re-inviting that person, so any existing row is reset to a fresh pending invite.
     const [existingInvitation] = await db
       .select()
       .from(folderInvitations)
       .where(
         and(
           eq(folderInvitations.folderId, id),
-          eq(folderInvitations.invitedUserId, invitee.id),
-          eq(folderInvitations.status, "pending")
+          eq(folderInvitations.invitedUserId, invitee.id)
         )
       )
       .limit(1);
 
     if (existingInvitation) {
-      // Update existing pending invitation with new role
       const [updated] = await db
         .update(folderInvitations)
-        .set({ role: body.role })
+        .set({
+          role: body.role,
+          status: "pending",
+          invitedBy: getEffectiveUserId(sessionUser),
+          respondedAt: null,
+          createdAt: new Date(),
+        })
         .where(eq(folderInvitations.id, existingInvitation.id))
         .returning();
       return apiSuccess({
         invitation: { ...updated, username: invitee.username },
-        message: "Invitation updated"
+        message: existingInvitation.status === "pending" ? "Invitation updated" : "Invitation sent",
       });
     }
 
@@ -134,6 +179,57 @@ export async function POST(
   }
 }
 
+const roleSchema = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(["view", "edit"]),
+});
+
+/**
+ * Change an existing member's role. There was no way to do this before: the only path was
+ * "invite again", which answered 400 "already a member" — so a mistaken `edit` grant could
+ * only be fixed by removing the person and re-inviting them.
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
+
+    const sessionUser = await requireAuth();
+    const { id } = await params;
+    const body = roleSchema.parse(await request.json());
+
+    const access = await resolveFolderAccess(sessionUser, id);
+    if (!access) return apiError("Folder not found", 404);
+    if (!access.canManageMembers) return apiError("Only the owner can manage members", 403);
+    if (body.userId === access.folder.userId) {
+      return apiError("The owner's role can't be changed", 400);
+    }
+
+    const [updated] = await db
+      .update(folderMembers)
+      .set({ role: body.role })
+      .where(and(eq(folderMembers.folderId, id), eq(folderMembers.userId, body.userId)))
+      .returning({ id: folderMembers.id, userId: folderMembers.userId, role: folderMembers.role });
+
+    if (!updated) return apiError("Member not found", 404);
+
+    // Keep the invitation row in step, so the members list and the invite history do not
+    // disagree about what this person was granted.
+    await db
+      .update(folderInvitations)
+      .set({ role: body.role })
+      .where(
+        and(eq(folderInvitations.folderId, id), eq(folderInvitations.invitedUserId, body.userId))
+      );
+
+    return apiSuccess({ member: updated });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
 const removeSchema = z.object({
   userId: z.string().uuid(),
 });
@@ -151,7 +247,14 @@ export async function DELETE(
 
     const access = await resolveFolderAccess(sessionUser, id);
     if (!access) return apiError("Folder not found", 404);
-    if (!access.canManageMembers) return apiError("Only the owner can manage members", 403);
+
+    // Leaving a share is the member's own equivalent of "delete this folder": it removes it
+    // from THEIR list without touching the owner's data. Managing other people still needs
+    // canManageMembers.
+    const isSelf = body.userId === getEffectiveUserId(sessionUser);
+    if (!isSelf && !access.canManageMembers) {
+      return apiError("Only the owner can manage members", 403);
+    }
 
     if (body.userId === access.folder.userId) {
       return apiError("Cannot remove the owner", 400);
@@ -163,7 +266,16 @@ export async function DELETE(
       .returning({ id: folderMembers.id });
 
     if (deleted.length === 0) return apiError("Member not found", 404);
-    return apiSuccess({ deleted: true });
+
+    // Drop the invitation too: an `accepted` leftover would otherwise sit on the unique
+    // index and make a later re-invite fail.
+    await db
+      .delete(folderInvitations)
+      .where(
+        and(eq(folderInvitations.folderId, id), eq(folderInvitations.invitedUserId, body.userId))
+      );
+
+    return apiSuccess({ deleted: true, left: isSelf });
   } catch (error) {
     return handleApiError(error);
   }

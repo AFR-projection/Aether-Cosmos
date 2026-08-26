@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { requireMaster, createSession, destroySession, getClientIp } from "@/lib/auth/session";
 import { logActivity } from "@/lib/auth/audit";
+import { validateCsrf } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 
 const schema = z.object({
@@ -13,6 +14,7 @@ const schema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     const master = await requireMaster();
     const { userId } = schema.parse(await request.json());
 
@@ -44,6 +46,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     const master = await requireMaster();
     const ip = getClientIp(request);
 

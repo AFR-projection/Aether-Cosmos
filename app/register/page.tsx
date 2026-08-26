@@ -8,6 +8,7 @@ import { Cloud, Loader2, Eye, EyeOff, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api/client";
+import { APP_NAME } from "@/lib/app-version";
 import { getPasswordPolicyRules } from "@/lib/security/password-policy";
 
 export default function RegisterPage() {
@@ -100,7 +101,7 @@ export default function RegisterPage() {
               <Cloud className="h-8 w-8 text-white" />
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-gradient">Create account</h1>
-            <p className="mt-2 text-sm text-muted-foreground/80">Join Storage ByAFR</p>
+            <p className="mt-2 text-sm text-muted-foreground/80">Join {APP_NAME}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">

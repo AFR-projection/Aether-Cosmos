@@ -6,7 +6,7 @@ import { users } from "@/lib/db/schema";
 import { hashPassword } from "@/lib/auth/password";
 import { validateCsrf, checkRateLimit } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getAdminSettings, defaultQuotaBytes } from "@/lib/admin-settings";
+import { getAdminSettings, defaultQuotaBytes, defaultBandwidthQuotaBytes, isEmailDomainAllowed } from "@/lib/admin-settings";
 import { validatePasswordStrength } from "@/lib/security/password-policy";
 import { sendOTP, normalizeEmail } from "@/lib/email/email-service";
 import { getClientIp } from "@/lib/auth/session";
@@ -47,6 +47,12 @@ export async function POST(request: NextRequest) {
     const body = registerSchema.parse(await request.json());
     const email = normalizeEmail(body.email);
 
+    // Optional domain allowlist from Admin → Settings. Checked before the
+    // existence lookup so a blocked domain never learns whether a name is taken.
+    if (!isEmailDomainAllowed(email, settings)) {
+      return apiError("Registration is not open to that email domain.", 403);
+    }
+
     const passwordCheck = validatePasswordStrength(body.password);
     if (!passwordCheck.valid) {
       return apiError(`Password too weak: ${passwordCheck.errors.join(", ")}`, 400);
@@ -64,6 +70,7 @@ export async function POST(request: NextRequest) {
 
     const passwordHash = await hashPassword(body.password);
     const quotaBytes = defaultQuotaBytes(settings);
+    const bandwidthQuotaBytes = defaultBandwidthQuotaBytes(settings);
 
     const [user] = await db
       .insert(users)
@@ -73,6 +80,7 @@ export async function POST(request: NextRequest) {
         passwordHash,
         role: "user",
         quotaBytes,
+        bandwidthQuotaBytes,
         status: "suspended",
       })
       .returning();

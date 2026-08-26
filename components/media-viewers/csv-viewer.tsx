@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Spinner } from "@/components/system/spinner";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Check, Copy, Table2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, AlertTriangle, Table2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { ViewerBar, ViewerLoading, ViewerMessage } from "./viewer-chrome";
 
 interface CsvViewerProps {
   src: string;
@@ -67,6 +68,7 @@ export function CsvViewer({ src, fileName }: CsvViewerProps) {
   const [copied, setCopied] = useState(false);
   const [truncated, setTruncated] = useState(false);
   const [totalRows, setTotalRows] = useState(0);
+  const [attempt, setAttempt] = useState(0);
 
   const delimiter = fileName.endsWith(".tsv") ? "\t" : ",";
 
@@ -84,87 +86,133 @@ export function CsvViewer({ src, fileName }: CsvViewerProps) {
         setTotalRows(parsed.length);
         setTruncated(text.length > MAX_BYTES || parsed.length > MAX_ROWS);
         setRows(parsed.slice(0, MAX_ROWS));
+        setError(null);
         setLoading(false);
       })
       .catch(() => {
-        if (!cancelled) {
-          setError("Gagal memuat spreadsheet");
-          setLoading(false);
-        }
+        if (cancelled) return;
+        setError("This spreadsheet could not be loaded.");
+        setLoading(false);
       });
-    return () => { cancelled = true; };
-  }, [src, delimiter]);
+    return () => {
+      cancelled = true;
+    };
+  }, [src, delimiter, attempt]);
 
   const colCount = useMemo(() => Math.max(...rows.map((r) => r.length), 0), [rows]);
   const headers = rows[0] ?? [];
 
-  async function handleCopy() {
-    const tsv = rows.map((r) => r.join("\t")).join("\n");
-    await navigator.clipboard.writeText(tsv);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(rows.map((r) => r.join("\t")).join("\n"));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked — the table stays selectable */
+    }
+  }, [rows]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full bg-card">
-        <div className="flex flex-col items-center gap-3">
-          <Spinner size="md" />
-          <p className="text-xs text-muted-foreground">Memuat tabel...</p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <ViewerLoading label="Loading table…" />;
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
-        <p className="text-sm">{error}</p>
-      </div>
+      <ViewerMessage
+        icon={Table2}
+        tone="danger"
+        title="Preview unavailable"
+        hint={error}
+        onRetry={() => {
+          setLoading(true);
+          setAttempt((n) => n + 1);
+        }}
+      />
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <ViewerMessage
+        icon={Table2}
+        title="No rows to show"
+        hint="Every row in this file is empty."
+      />
     );
   }
 
   return (
-    <div className="flex flex-col h-full bg-card">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/30 bg-muted/20 shrink-0">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Table2 className="h-3.5 w-3.5 text-emerald-500" />
-          <span>{totalRows} baris · {colCount} kolom</span>
-          {truncated && (
-            <span className="flex items-center gap-1 text-amber-500">
-              <AlertTriangle className="h-3 w-3" />
-              dipotong
-            </span>
+    <div className="flex h-full flex-col bg-surface">
+      <ViewerBar
+        icon={Table2}
+        fileName={fileName}
+        tone="success"
+        meta={
+          <span className="flex shrink-0 items-center gap-1.5">
+            <Badge tone="neutral">
+              {totalRows.toLocaleString()} rows · {colCount} cols
+            </Badge>
+            {truncated && (
+              <Badge tone="warning">
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                First {MAX_ROWS} rows
+              </Badge>
+            )}
+          </span>
+        }
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={copied ? "Copied to clipboard" : "Copy table as tab-separated text"}
+          onClick={() => void handleCopy()}
+        >
+          {copied ? (
+            <Check className="h-4 w-4 text-success" aria-hidden="true" />
+          ) : (
+            <Copy className="h-4 w-4" aria-hidden="true" />
           )}
-        </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy}>
-          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
         </Button>
-      </div>
+      </ViewerBar>
 
-      <div className="flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+          <caption className="sr-only">
+            {fileName} — {totalRows} rows, {colCount} columns
+          </caption>
+          <thead className="sticky top-0 z-10 bg-surface-elevated/95 backdrop-blur-sm">
             <tr>
-              <th className="w-10 px-2 py-2 text-left text-muted-foreground/50 font-normal border-b border-border/30">#</th>
+              <th
+                scope="col"
+                className="w-10 border-b border-border/40 px-2 py-2 text-left font-normal text-muted-foreground"
+              >
+                #
+              </th>
               {Array.from({ length: colCount }).map((_, i) => (
                 <th
                   key={i}
-                  className="px-3 py-2 text-left font-medium text-foreground/80 border-b border-border/30 whitespace-nowrap max-w-[200px] truncate"
+                  scope="col"
+                  className="max-w-[200px] truncate border-b border-border/40 px-3 py-2 text-left font-medium text-foreground"
                 >
-                  {headers[i] || `Col ${i + 1}`}
+                  {headers[i] || `Column ${i + 1}`}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.slice(1).map((row, ri) => (
-              <tr key={ri} className={cn("hover:bg-accent/5 transition-colors", ri % 2 === 0 && "bg-muted/10")}>
-                <td className="px-2 py-1.5 text-muted-foreground/40 font-mono border-b border-border/10">{ri + 1}</td>
+              <tr
+                key={ri}
+                className={cn("transition-colors hover:bg-accent/5", ri % 2 === 1 && "bg-muted/20")}
+              >
+                <th
+                  scope="row"
+                  className="border-b border-border/20 px-2 py-1.5 text-left font-mono font-normal text-muted-foreground"
+                >
+                  {ri + 1}
+                </th>
                 {Array.from({ length: colCount }).map((_, ci) => (
                   <td
                     key={ci}
-                    className="px-3 py-1.5 border-b border-border/10 whitespace-nowrap max-w-[240px] truncate"
+                    className="max-w-[240px] truncate whitespace-nowrap border-b border-border/20 px-3 py-1.5 text-foreground"
                     title={row[ci] ?? ""}
                   >
                     {row[ci] ?? ""}

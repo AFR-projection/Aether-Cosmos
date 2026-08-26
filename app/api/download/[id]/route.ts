@@ -63,12 +63,12 @@ export async function GET(
     if (file.isNote || file.r2Key.startsWith("notes/")) {
       // Notes aren't stored as R2 objects — they're exported from the editor
       // (Markdown / TXT / PDF). Open the note to download it.
-      return apiError("Buka note untuk export (Markdown/TXT/PDF) — note tidak disimpan sebagai file", 400);
+      return apiError("Open the note to export it (Markdown/TXT/PDF) — notes aren't stored as files", 400);
     }
 
     const exists = await objectExists(file.r2Key);
     if (!exists) {
-      return apiError("File belum ter-upload ke storage atau sudah hilang", 404);
+      return apiError("This file was never uploaded to storage, or it's gone", 404);
     }
 
     try {

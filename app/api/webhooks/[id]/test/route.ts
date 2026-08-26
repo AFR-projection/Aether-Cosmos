@@ -8,6 +8,9 @@ import { getEffectiveUserId } from "@/lib/auth/permissions";
 import { validateCsrf } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { getOwnedWebhook } from "@/lib/webhooks/manage";
+import { fetchWebhook } from "@/lib/webhooks/ssrf";
+import { WEBHOOK_USER_AGENT } from "@/lib/webhooks/constants";
+import { APP_NAME } from "@/lib/app-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +36,7 @@ export async function POST(
     const body = JSON.stringify({
       event: "ping",
       timestamp: new Date().toISOString(),
-      data: { message: "Test event from Storage ByAFR", webhookId: hook.id },
+      data: { message: `Test event from ${APP_NAME}`, webhookId: hook.id },
     });
     const signature = createHmac("sha256", hook.secret).update(body).digest("hex");
 
@@ -42,13 +45,15 @@ export async function POST(
     let errorMessage: string | null = null;
 
     try {
-      const res = await fetch(hook.url, {
+      // Stored URLs are re-validated at send time: the row may predate the
+      // current policy, and DNS can have moved under it since creation.
+      const res = await fetchWebhook(hook.url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Webhook-Signature": `sha256=${signature}`,
           "X-Webhook-Event": "ping",
-          "User-Agent": "StrogeByAFR-Webhook/1.0",
+          "User-Agent": WEBHOOK_USER_AGENT,
         },
         body,
         signal: AbortSignal.timeout(15_000),

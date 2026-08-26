@@ -3,6 +3,7 @@ import { extractBearerToken } from "@/lib/auth/api-key";
 import { AuthError } from "@/lib/auth/session";
 import { checkRateLimit, peekRateLimit } from "@/lib/security";
 import { BrainError } from "@/lib/brain/errors";
+import { APP_NAME } from "@/lib/app-version";
 import { createBrainMcpServer } from "./server";
 import { resolveMcpPrincipal } from "./principal";
 
@@ -66,7 +67,7 @@ export async function handleBrainMcpRequest(request: Request): Promise<Response>
   const token = extractBearerToken(request);
   if (!token) {
     return jsonResponse({ error: "Authorization required" }, 401, origin, {
-      "WWW-Authenticate": `Bearer realm="Storage ByAFR Brain"`,
+      "WWW-Authenticate": `Bearer realm="${APP_NAME} Brain"`,
     });
   }
 
@@ -88,7 +89,7 @@ export async function handleBrainMcpRequest(request: Request): Promise<Response>
     }
     if (error instanceof AuthError) {
       return jsonResponse({ error: error.message }, error.status, origin, {
-        "WWW-Authenticate": `Bearer realm="Storage ByAFR Brain"`,
+        "WWW-Authenticate": `Bearer realm="${APP_NAME} Brain"`,
       });
     }
     console.error("brain mcp auth failed", error);

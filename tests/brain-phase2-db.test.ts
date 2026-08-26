@@ -75,8 +75,8 @@ const principalOf = (userId: string) => ({ userId, agentId: null });
 /** The corpus, by role. Titles are what a real brain would hold, not lorem. */
 const CORPUS = {
   identity: {
-    title: "Ari owns and operates Storage ByAFR",
-    content: "Ari is the owner and sole operator of the Storage ByAFR platform.",
+    title: "Ari owns and operates Aether Cosmos ByAFR",
+    content: "Ari is the owner and sole operator of the Aether Cosmos ByAFR platform.",
     type: "fact" as const,
     tags: ["identity"],
   },
@@ -116,16 +116,16 @@ const CORPUS = {
     tags: ["billing"],
   },
   projectDecision: {
-    title: "Chose R2 for object storage in Storage ByAFR",
+    title: "Chose R2 for object storage in Aether Cosmos ByAFR",
     content:
-      "Storage ByAFR keeps uploaded objects in cloudflare r2 because egress is free at our volume.",
+      "Aether Cosmos ByAFR keeps uploaded objects in cloudflare r2 because egress is free at our volume.",
     type: "decision" as const,
     tags: ["storage", "r2"],
   },
   projectNote: {
-    title: "R2 lifecycle rules for Storage ByAFR uploads",
+    title: "R2 lifecycle rules for Aether Cosmos ByAFR uploads",
     content:
-      "Cloudflare r2 lifecycle rules expire abandoned multipart uploads in Storage ByAFR after seven days.",
+      "Cloudflare r2 lifecycle rules expire abandoned multipart uploads in Aether Cosmos ByAFR after seven days.",
     type: "knowledge" as const,
     tags: ["storage", "r2"],
   },
@@ -180,7 +180,7 @@ async function buildFixture(): Promise<Fixture> {
 
   const [project] = await db
     .insert(brainProjects)
-    .values({ brainId: brain.id, name: "Storage ByAFR" })
+    .values({ brainId: brain.id, name: "Aether Cosmos ByAFR" })
     .returning();
 
   const ids = {} as Record<CorpusKey, string>;

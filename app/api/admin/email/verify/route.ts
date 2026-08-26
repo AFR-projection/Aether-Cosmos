@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { mailSenders } from "@/lib/db/schema";
 import { requireMasterOrApiKey } from "@/lib/auth/api-key";
+import { validateCsrf } from "@/lib/security";
 import { apiError, apiSuccess, handleApiError } from "@/lib/api/response";
 import { decryptSecret } from "@/lib/email/crypto";
 import { verifyCredentials, evictTransport } from "@/lib/email/mailer";
@@ -18,6 +19,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     await requireMasterOrApiKey(request, "email");
     const { id } = z.object({ id: z.string().uuid() }).parse(await request.json());
 

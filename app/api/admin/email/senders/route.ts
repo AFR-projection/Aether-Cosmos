@@ -4,10 +4,12 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { mailSenders } from "@/lib/db/schema";
 import { requireMasterOrApiKey } from "@/lib/auth/api-key";
+import { validateCsrf } from "@/lib/security";
 import { apiError, apiSuccess, handleApiError } from "@/lib/api/response";
 import { encryptSecret } from "@/lib/email/crypto";
 import { verifyCredentials, evictTransport } from "@/lib/email/mailer";
 import { normalizeEmail } from "@/lib/email/email-service";
+import { APP_NAME } from "@/lib/app-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +51,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     await requireMasterOrApiKey(request, "email");
     const body = createSchema.parse(await request.json());
     const email = normalizeEmail(body.email);
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
         email,
         appPasswordEncrypted: encryptSecret(appPassword),
         displayName: body.displayName,
-        fromName: body.fromName ?? "Storage ByAFR",
+        fromName: body.fromName ?? APP_NAME,
         status: verify.ok ? "ok" : "error",
         lastError: verify.ok ? null : verify.error,
         lastVerifiedAt: verify.ok ? new Date() : null,
@@ -80,6 +83,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     await requireMasterOrApiKey(request, "email");
     const body = updateSchema.parse(await request.json());
     const { id, appPassword, ...rest } = body;
@@ -118,6 +122,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
     await requireMasterOrApiKey(request, "email");
     const { id } = z.object({ id: z.string().uuid() }).parse(await request.json());
     evictTransport(id);

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
+import { APP_NAME, APP_SHORT_NAME } from "@/lib/app-version";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,13 +15,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Storage ByAFR",
+  title: APP_NAME,
   description: "Premium cloud storage — fast, secure, and elegant",
-  applicationName: "Storage ByAFR",
+  applicationName: APP_NAME,
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "Storage",
+    title: APP_SHORT_NAME,
     statusBarStyle: "black-translucent",
   },
   // Notes/pages sometimes contain numbers that iOS would auto-link as phone

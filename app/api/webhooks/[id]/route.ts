@@ -8,9 +8,9 @@ import {
   WEBHOOK_EVENTS,
   deleteWebhook,
   updateWebhook,
-  validateWebhookUrl,
   type WebhookEventName,
 } from "@/lib/webhooks/manage";
+import { assertSafeWebhookTarget, WebhookTargetError } from "@/lib/webhooks/ssrf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,9 +34,12 @@ export async function PATCH(
 
     let url: string | undefined;
     if (body.url !== undefined) {
-      const check = validateWebhookUrl(body.url);
-      if (!check.ok) return apiError(check.error, 400);
-      url = check.url;
+      try {
+        url = (await assertSafeWebhookTarget(body.url)).url;
+      } catch (e) {
+        if (e instanceof WebhookTargetError) return apiError(e.message, 400);
+        throw e;
+      }
     }
 
     const updated = await updateWebhook(userId, id, {

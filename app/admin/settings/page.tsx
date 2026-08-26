@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useId, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -23,14 +23,33 @@ import {
   Search,
   Clock,
   Info,
+  Plus,
+  Share2,
+  Gauge,
+  type LucideIcon,
 } from "lucide-react";
 import type { AdminSettings } from "@/app/api/admin/settings/route";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AdminEmpty,
+  AdminHeader,
+  AdminPanel,
+  Chip,
+  FilterChip,
+  IconButton,
+  Note,
+  SearchField,
+  Skeleton,
+  Switch,
+} from "@/components/admin/admin-ui";
 import { apiFetch } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
-// ─── Section Definition ──────────────────────────────────────────────────────
+/* ── Section definition ──────────────────────────────────────────────────────
+   Sections are told apart by icon and title, not by colour: the previous version
+   gave each one its own two-stop gradient (slate, emerald, violet, amber, blue,
+   rose), which spent six hues on a distinction the reader already had. */
 
 interface SettingField {
   key: keyof AdminSettings;
@@ -50,8 +69,7 @@ interface Section {
   id: string;
   title: string;
   description: string;
-  icon: typeof Shield;
-  gradient: string;
+  icon: LucideIcon;
   fields: SettingField[];
   /** Extra panel rendered under the fields — status the admin needs to trust the settings. */
   footer?: "cleanup";
@@ -72,7 +90,19 @@ interface CleanupState {
 interface SettingsMeta {
   totalUsers?: number;
   cleanup?: CleanupState | null;
-  sessionInactivityMs?: number | null;
+  /**
+   * Whether this deployment counts as production. Only used to resolve the "auto"
+   * choice for IP binding into the answer that actually applies here, so "auto"
+   * is not a mystery to whoever picked it.
+   */
+  productionMode?: boolean;
+}
+
+/** Drops the server-only `_meta` block so the editable draft holds settings alone. */
+function stripMeta(payload: AdminSettings & { _meta?: unknown }): AdminSettings {
+  const clone: AdminSettings & { _meta?: unknown } = { ...payload };
+  delete clone._meta;
+  return clone as AdminSettings;
 }
 
 const SETTING_SECTIONS: Section[] = [
@@ -81,9 +111,9 @@ const SETTING_SECTIONS: Section[] = [
     title: "General",
     description: "Core platform settings and maintenance controls",
     icon: Settings2,
-    gradient: "from-slate-500 to-zinc-500",
     fields: [
       { key: "registrationEnabled", label: "Allow Registration", description: "Show public Sign up page and allow self-service accounts", type: "toggle" },
+      { key: "allowedEmailDomains", label: "Allowed Email Domains", description: "Restrict sign-ups to these domains and their subdomains. Empty means any address is accepted. Existing accounts are never affected.", type: "tags", placeholder: "example.com" },
       { key: "maintenanceMode", label: "Maintenance Mode", description: "Block all user access except admins", type: "toggle" },
       { key: "maintenanceMessage", label: "Maintenance Message", description: "Message shown to users during maintenance", type: "text", placeholder: "System is under maintenance..." },
     ],
@@ -91,26 +121,61 @@ const SETTING_SECTIONS: Section[] = [
   {
     id: "storage",
     title: "Storage",
-    description: "Quota limits and file size restrictions",
+    description: "Quotas, upload ceilings and signed-URL lifetimes",
     icon: HardDrive,
-    gradient: "from-emerald-500 to-teal-500",
     fields: [
       { key: "defaultQuotaGB", label: "Default Quota", description: "Storage quota for new users", type: "number", unit: "GB", min: 1, max: 10000 },
-      { key: "maxUploadSizeMB", label: "Max Upload Size", description: "Maximum file size per upload", type: "number", unit: "MB", min: 1, max: 5120 },
+      { key: "maxUploadSizeMB", label: "Max Upload Size", description: "Maximum file size per upload. This is the only ceiling — there is no env override.", type: "number", unit: "MB", min: 1, max: 5120 },
       { key: "storageWarningThreshold", label: "Warning Threshold", description: "Notify users when storage exceeds this percentage", type: "number", unit: "%", min: 50, max: 100 },
+      { key: "defaultBandwidthQuotaGB", label: "Default Bandwidth Quota", description: "Download allowance for new accounts on a rolling 30-day window. 0 means unmetered, which is what every account got before this was configurable.", type: "number", unit: "GB", min: 0, max: 1000000 },
+      { key: "uploadUrlExpiryMinutes", label: "Upload URL Lifetime", description: "How long a signed upload URL stays valid. Long enough for a slow connection to finish a large part, short enough that a leaked URL goes stale.", type: "number", unit: "minutes", min: 1, max: 720 },
+      { key: "downloadUrlExpirySeconds", label: "Download URL Lifetime", description: "How long a signed download URL stays valid. Anyone holding the URL can fetch the file until it expires, so keep it short.", type: "number", unit: "seconds", min: 15, max: 3600 },
     ],
   },
   {
     id: "security",
     title: "Security",
-    description: "Session, access and rate limiting controls",
+    description: "Session lifetime, binding and the second factor",
     icon: Shield,
-    gradient: "from-violet-500 to-fuchsia-500",
     fields: [
       { key: "sessionDurationHours", label: "Session Duration", description: "How long a session stays valid before the user must sign in again", type: "number", unit: "hours", min: 1, max: 8760 },
+      { key: "sessionIdleTimeoutMinutes", label: "Idle Timeout", description: "Sign a user out after this long with no activity. 0 disables it, which is the default — whichever of this and Session Duration is shorter is the one that ends the session.", type: "number", unit: "minutes", min: 0, max: 10080 },
+      {
+        key: "sessionIpBinding",
+        label: "IP Binding",
+        description: "Revoke a session when the client IP changes. Stops a stolen cookie being replayed elsewhere, but signs out anyone on a shifting mobile or VPN address.",
+        type: "select",
+        options: [
+          { label: "Auto (production only)", value: "auto" },
+          { label: "Always on", value: "on" },
+          { label: "Always off", value: "off" },
+        ],
+      },
       { key: "maxSessionsPerUser", label: "Max Sessions", description: "Concurrent sessions per user — the oldest is signed out when exceeded", type: "number", unit: "sessions", min: 1, max: 100 },
-      { key: "rateLimitPerMinute", label: "Rate Limit", description: "API requests per minute per user. Upload endpoints get 5× this value.", type: "number", unit: "req/min", min: 10, max: 1000 },
       { key: "stepCodeRequired", label: "Require 2-Step Code", description: "Every user must set a numpad code entered after their password. Users without one are prompted to create it at next sign-in and cannot remove it.", type: "toggle" },
+    ],
+  },
+  {
+    id: "limits",
+    title: "Access Limits",
+    description: "Request throttling and failed-login lockout",
+    icon: Gauge,
+    fields: [
+      { key: "rateLimitPerMinute", label: "Rate Limit", description: "API requests per minute per user. Upload endpoints get 5× this value.", type: "number", unit: "req/min", min: 10, max: 1000 },
+      { key: "loginMaxAttempts", label: "Failed Logins per Account", description: "Wrong passwords before the account itself is locked for the window below. The floor is 3: a lower value locks an account on the first typo, which turns the lockout into a denial-of-service anyone can trigger with just a username.", type: "number", unit: "attempts", min: 3, max: 50 },
+      { key: "loginIpMaxAttempts", label: "Failed Logins per IP", description: "Failed attempts from one IP address before it is throttled. Keep this well above the per-account number so a shared office address is not locked out by one forgetful person.", type: "number", unit: "attempts", min: 5, max: 500 },
+      { key: "loginLockoutMinutes", label: "Lockout Window", description: "How long a locked account or throttled IP has to wait. This is also the window the failed attempts are counted over, and the number quoted to the user in the message they see.", type: "number", unit: "minutes", min: 1, max: 1440 },
+    ],
+  },
+  {
+    id: "sharing",
+    title: "Sharing",
+    description: "Public link policy and expiry ceilings",
+    icon: Share2,
+    fields: [
+      { key: "publicSharingEnabled", label: "Allow Public Links", description: "Let owners mint links that anyone with the URL can open. Turning this off stops new links being created; links that already exist keep working.", type: "toggle" },
+      { key: "shareDefaultExpiryDays", label: "Default Link Expiry", description: "Expiry applied when the person sharing does not pick one. 0 means such a link never expires.", type: "number", unit: "days", min: 0, max: 3650 },
+      { key: "shareMaxExpiryDays", label: "Maximum Link Expiry", description: "Longest expiry anyone may ask for — a longer request is capped to this. 0 removes the ceiling entirely.", type: "number", unit: "days", min: 0, max: 3650 },
     ],
   },
   {
@@ -118,7 +183,6 @@ const SETTING_SECTIONS: Section[] = [
     title: "Files",
     description: "File policies, expiration and cleanup rules",
     icon: FileWarning,
-    gradient: "from-amber-500 to-orange-500",
     footer: "cleanup",
     fields: [
       { key: "maxFileLifetimeDays", label: "Max File Lifetime", description: "Auto-delete files after this many days (0 = unlimited)", type: "number", unit: "days", min: 0, max: 3650 },
@@ -132,7 +196,6 @@ const SETTING_SECTIONS: Section[] = [
     title: "Retention",
     description: "Activity log retention",
     icon: Database,
-    gradient: "from-blue-500 to-cyan-500",
     footer: "cleanup",
     fields: [
       { key: "logRetentionDays", label: "Log Retention", description: "How long to keep activity logs", type: "number", unit: "days", min: 7, max: 730 },
@@ -143,7 +206,6 @@ const SETTING_SECTIONS: Section[] = [
     title: "Email Delivery",
     description: "Smart Gmail sender router — limits, failover and cooldown",
     icon: Mail,
-    gradient: "from-rose-500 to-pink-500",
     fields: [
       { key: "emailDailyLimitPerSender", label: "Daily Limit per Sender", description: "Default max emails a Gmail sender may send per day before the router rotates to another. Gmail's own cap is ~500/day.", type: "number", unit: "emails/day", min: 1, max: 2000 },
       { key: "emailFailureThreshold", label: "Failure Threshold", description: "Consecutive send failures before a sender is rested (put on cooldown)", type: "number", unit: "failures", min: 1, max: 20 },
@@ -152,7 +214,12 @@ const SETTING_SECTIONS: Section[] = [
   },
 ];
 
-// ─── Session Duration Picker ──────────────────────────────────────────────────
+const sections = SETTING_SECTIONS;
+
+/* ── Session duration ────────────────────────────────────────────────────────
+   Session length is the one setting on this page that is genuinely hard to type
+   correctly (it is stored in hours, and "8760" means a year), so it gets presets
+   plus a plain-language readout instead of a bare number box. */
 
 interface SessionPreset {
   label: string;
@@ -192,63 +259,56 @@ function formatSessionDuration(hours: number): string {
 function SessionDurationPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [customMode, setCustomMode] = useState(false);
   const activePreset = SESSION_PRESETS.find((p) => p.hours === value);
+  const customId = useId();
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">Session Duration</label>
-        <div className="flex items-center gap-1.5 rounded-lg bg-muted/40 p-0.5">
+    <div className="grid gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="adm-field__label">Session Duration</span>
+        <div className="adm-seg" role="group" aria-label="Session duration input mode">
           <button
             type="button"
+            className="adm-seg__btn"
+            aria-pressed={!customMode}
             onClick={() => setCustomMode(false)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-              !customMode ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-            )}
           >
             Presets
           </button>
           <button
             type="button"
+            className="adm-seg__btn"
+            aria-pressed={customMode}
             onClick={() => setCustomMode(true)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-              customMode ? "bg-surface shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-            )}
           >
             Custom
           </button>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground/60">How long a session stays valid before the user must sign in again</p>
+      <span className="adm-field__hint">
+        How long a session stays valid before the user must sign in again
+      </span>
 
       {!customMode ? (
         <div className="flex flex-wrap gap-1.5">
-          {SESSION_PRESETS.map((preset) => {
-            const active = preset.hours === value;
-            return (
-              <button
-                key={preset.hours}
-                type="button"
-                onClick={() => onChange(preset.hours)}
-                className={cn(
-                  "flex flex-col items-center rounded-xl border px-3 py-2 text-xs font-medium transition-all",
-                  active
-                    ? "border-accent bg-accent/10 text-accent shadow-sm"
-                    : "border-border/40 text-muted-foreground hover:border-accent/30 hover:bg-accent/5 hover:text-foreground"
-                )}
-              >
-                <span>{preset.label}</span>
-                {preset.sublabel && (
-                  <span className={cn("text-[9px] font-normal mt-0.5 opacity-60")}>{preset.sublabel}</span>
-                )}
-              </button>
-            );
-          })}
+          {SESSION_PRESETS.map((preset) => (
+            <FilterChip
+              key={preset.hours}
+              active={preset.hours === value}
+              onClick={() => onChange(preset.hours)}
+              title={preset.sublabel ? `${preset.label} — ${preset.sublabel}` : preset.label}
+            >
+              {preset.label}
+              {preset.sublabel && <span className="adm-sub ml-1">{preset.sublabel}</span>}
+            </FilterChip>
+          ))}
         </div>
       ) : (
-        <div className="relative max-w-[220px]">
+        <div className="relative max-w-[13rem]">
+          <label className="sr-only" htmlFor={customId}>
+            Session duration in hours
+          </label>
           <Input
+            id={customId}
             type="number"
             value={value}
             min={0.5}
@@ -257,32 +317,40 @@ function SessionDurationPicker({ value, onChange }: { value: number; onChange: (
             onChange={(e) => onChange(Math.max(0.5, Math.min(8760, Number(e.target.value) || 0.5)))}
             className="h-9 pr-14 text-sm"
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/50 font-medium">hours</span>
+          <span className="adm-sub absolute right-3 top-1/2 -translate-y-1/2">hours</span>
         </div>
       )}
 
-      {/* Live readable display */}
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground/70">
-        <Clock className="h-3.5 w-3.5 shrink-0 text-accent/60" />
+      <p className="adm-field__hint inline-flex items-start gap-1.5">
+        <Clock className="mt-px h-3.5 w-3.5 shrink-0 text-accent" aria-hidden="true" />
         <span>
-          Users will be signed out after{" "}
-          <span className="font-semibold text-foreground/80">{formatSessionDuration(value)}</span>
+          Users are signed out{" "}
+          <span className="font-semibold text-foreground">{formatSessionDuration(value)}</span>
           {!activePreset && value >= 1 && (
-            <span className="ml-1 text-muted-foreground/50">
-              ({value} {value === 1 ? "hour" : "hours"})
-            </span>
-          )}
-          {" "}of inactivity or session age.
+            <span className="adm-num"> ({value}h)</span>
+          )}{" "}
+          after signing in, however active they have been.
         </span>
-      </div>
+      </p>
     </div>
   );
 }
 
-// ─── Tags Input ───────────────────────────────────────────────────────────────
+/* ── Tags input ──────────────────────────────────────────────────────────────── */
 
-function TagsInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
+function TagsInput({
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+  label: string;
+}) {
   const [input, setInput] = useState("");
+  const inputId = useId();
 
   function addTag() {
     const trimmed = input.trim();
@@ -293,137 +361,178 @@ function TagsInput({ value, onChange, placeholder }: { value: string[]; onChange
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap gap-1.5 mb-2">
-        {value.map((tag) => (
-          <span key={tag} className="inline-flex items-center gap-1 rounded-lg bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
-            {tag}
-            <button onClick={() => onChange(value.filter((t) => t !== tag))} className="hover:text-accent/60" aria-label={`Remove ${tag}`}>
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-1">
+    <div className="grid gap-2">
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {value.map((tag) => (
+            <span key={tag} className="adm-chip adm-chip--mono" data-tone="accent">
+              {tag}
+              <button
+                type="button"
+                onClick={() => onChange(value.filter((t) => t !== tag))}
+                className="-mr-0.5 ml-0.5 opacity-60 transition-opacity hover:opacity-100"
+                aria-label={`Remove ${tag}`}
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex max-w-sm gap-1.5">
+        <label className="sr-only" htmlFor={inputId}>
+          {label}
+        </label>
         <Input
+          id={inputId}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
-          placeholder={placeholder ? `Add ${placeholder}...` : "Add value..."}
-          className="h-8 text-xs"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addTag();
+            }
+          }}
+          placeholder={placeholder ? `Add ${placeholder}…` : "Add value…"}
+          className="h-9 text-sm"
         />
-        <Button variant="secondary" size="sm" className="h-8 shrink-0" onClick={addTag} type="button">Add</Button>
+        <Button variant="outline" size="sm" className="h-9 shrink-0" onClick={addTag} type="button">
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          Add
+        </Button>
       </div>
     </div>
   );
 }
+/* ── One setting ─────────────────────────────────────────────────────────────
+   The `.adm-field` wrapper (and its unsaved-change dot) belongs to the caller, so
+   this only renders the label, the hint and the control. */
 
-// ─── Settings Field ───────────────────────────────────────────────────────────
-
-function SettingsField({ field, value, onChange }: {
+function SettingsField({
+  field,
+  value,
+  onChange,
+}: {
   field: SettingField;
   value: unknown;
   onChange: (v: unknown) => void;
 }) {
   const [showSensitive, setShowSensitive] = useState(false);
+  const id = useId();
 
-  switch (field.type) {
-    case "toggle":
-      return (
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium">{field.label}</p>
-            <p className="text-xs text-muted-foreground/60">{field.description}</p>
-          </div>
-          <ToggleSwitch value={!!value} onChange={(v) => onChange(v)} />
-        </div>
-      );
+  if (field.type === "toggle") {
+    return (
+      <div className="flex items-start justify-between gap-3">
+        <span className="min-w-0">
+          <span className="adm-field__label block">{field.label}</span>
+          <span className="adm-field__hint">{field.description}</span>
+        </span>
+        <Switch
+          checked={!!value}
+          onChange={(checked) => onChange(checked)}
+          label={field.label}
+          id={id}
+        />
+      </div>
+    );
+  }
 
-    case "number":
-      return (
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">{field.label}</label>
-          <p className="text-xs text-muted-foreground/60 mb-2">{field.description}</p>
-          <div className="relative max-w-[200px]">
+  const control = (() => {
+    switch (field.type) {
+      case "number":
+        return (
+          <div className="relative max-w-[12rem]">
             <Input
+              id={id}
               type="number"
               value={Number(value) || 0}
               min={field.min}
               max={field.max}
               step={field.step}
               onChange={(e) => onChange(Number(e.target.value))}
-              className="h-9 pr-10 text-sm"
+              className={cn("h-9 text-sm", field.unit && "pr-16")}
             />
             {field.unit && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/50 font-medium">{field.unit}</span>
+              <span className="adm-sub absolute right-3 top-1/2 -translate-y-1/2">{field.unit}</span>
             )}
           </div>
-        </div>
-      );
-
-    case "select":
-      return (
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">{field.label}</label>
-          <p className="text-xs text-muted-foreground/60 mb-2">{field.description}</p>
+        );
+      case "select":
+        return (
           <select
+            id={id}
+            className="adm-select w-full max-w-[12rem]"
             value={String(value)}
             onChange={(e) => onChange(e.target.value)}
-            className="flex h-9 w-full max-w-[200px] rounded-xl border border-border/50 bg-surface px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
           >
-            {field.options?.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+            {field.options?.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
             ))}
           </select>
-        </div>
-      );
-
-    case "tags":
-      return (
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">{field.label}</label>
-          <p className="text-xs text-muted-foreground/60 mb-2">{field.description}</p>
+        );
+      case "tags":
+        return (
           <TagsInput
+            label={field.label}
             value={(value as string[]) ?? []}
             onChange={(v) => onChange(v)}
             placeholder={typeof field.placeholder === "string" ? field.placeholder : undefined}
           />
-        </div>
-      );
-
-    default:
-      return (
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">{field.label}</label>
-          <p className="text-xs text-muted-foreground/60 mb-2">{field.description}</p>
+        );
+      default:
+        return (
           <div className="relative max-w-sm">
             <Input
+              id={id}
               type={field.sensitive && !showSensitive ? "password" : "text"}
               value={String(value ?? "")}
               onChange={(e) => onChange(e.target.value)}
               placeholder={field.placeholder}
-              className="h-9 text-sm pr-9"
+              className={cn("h-9 text-sm", field.sensitive && "pr-10")}
             />
             {field.sensitive && (
               <button
                 type="button"
-                onClick={() => setShowSensitive(!showSensitive)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground"
-                aria-label={showSensitive ? "Hide" : "Show"}
+                onClick={() => setShowSensitive((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--adm-muted)] transition-colors hover:text-foreground"
+                aria-label={showSensitive ? `Hide ${field.label}` : `Show ${field.label}`}
               >
-                {showSensitive ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showSensitive ? (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                )}
               </button>
             )}
           </div>
-        </div>
-      );
-  }
+        );
+    }
+  })();
+
+  return (
+    <>
+      {field.type === "tags" ? (
+        // The tag editor owns several controls, so the section title is a plain
+        // label-less heading and each control carries its own accessible name.
+        <span className="adm-field__label">{field.label}</span>
+      ) : (
+        <label className="adm-field__label" htmlFor={id}>
+          {field.label}
+        </label>
+      )}
+      <span className="adm-field__hint">{field.description}</span>
+      {control}
+    </>
+  );
 }
+/* ── Cleanup status ──────────────────────────────────────────────────────────── */
 
-// ─── Cleanup status ───────────────────────────────────────────────────────────
-
-function formatAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+/** Pure: the page ticks `now` so this never reads the clock during render. */
+function formatAgo(iso: string, now: number): string {
+  if (now === 0) return "recently";
+  const diff = now - new Date(iso).getTime();
   if (!Number.isFinite(diff) || diff < 0) return "just now";
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
@@ -438,148 +547,168 @@ function formatAgo(iso: string): string {
  * admin sees when it last ran and which scheduler did it — the web app's own
  * interval, or the BullMQ worker when Redis is up.
  */
-function CleanupStatus({ cleanup }: { cleanup?: CleanupState | null }) {
+function CleanupStatus({ cleanup, now }: { cleanup?: CleanupState | null; now: number }) {
   if (!cleanup) return null;
 
   const { lastRunAt, lastSource, lastResult, lastError } = cleanup;
 
+  if (!lastRunAt) {
+    return (
+      <Note icon={AlertCircle} tone="warning" className="mt-4">
+        No cleanup has run yet — the first sweep happens within ~20 minutes of server start.
+      </Note>
+    );
+  }
+
   return (
-    <div className="border-t border-border/30 px-6 py-4 text-xs">
-      {lastRunAt ? (
-        <div className="space-y-1.5">
-          <p className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
-            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-            <span className="text-foreground/80">
-              Last cleanup {formatAgo(lastRunAt)}
-            </span>
-            <span className="text-muted-foreground/60">
-              via {lastSource === "worker" ? "background worker" : "app scheduler"}
-            </span>
-          </p>
-          {lastResult && (
-            <p className="pl-5 text-muted-foreground/70">
-              {lastResult.trashFiles} trash files · {lastResult.trashFolders} folders ·{" "}
-              {lastResult.lifetimeSoftDeleted} expired · {lastResult.logsDeleted} logs
-            </p>
-          )}
-          {lastError && (
-            <p className="pl-5 text-red-500">Last run failed: {lastError}</p>
-          )}
-        </div>
-      ) : (
-        <p className="flex items-center gap-1.5 text-muted-foreground">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-          No cleanup has run yet — the first sweep happens within ~20 minutes of server start.
-        </p>
+    <div className="mt-4 grid gap-2">
+      <Note icon={CheckCircle2} tone={lastError ? "warning" : "success"}>
+        Last cleanup {formatAgo(lastRunAt, now)} via{" "}
+        {lastSource === "worker" ? "the background worker" : "the app scheduler"}.
+        {lastResult && (
+          <span className="adm-sub mt-0.5 block">
+            <span className="adm-num">{lastResult.trashFiles}</span> trash files ·{" "}
+            <span className="adm-num">{lastResult.trashFolders}</span> folders ·{" "}
+            <span className="adm-num">{lastResult.lifetimeSoftDeleted}</span> expired ·{" "}
+            <span className="adm-num">{lastResult.logsDeleted}</span> logs
+          </span>
+        )}
+      </Note>
+      {lastError && (
+        <Note icon={AlertCircle} tone="danger">
+          Last run failed: {lastError}
+        </Note>
       )}
     </div>
+  );
+}
+/** "90" is a worse way to say "1h 30m", so the idle readout spells it out. */
+function formatIdleMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/**
+ * Security section banner — explains how the two session cut-offs interact,
+ * because they can silently disagree and the shorter one is the one that ends the
+ * session. Both are now fields on this page (they used to be SESSION_INACTIVITY_MS
+ * in the environment, which is why the note used to talk about an env var).
+ */
+function SessionDurationNote({
+  idleMinutes,
+  sessionDurationHours,
+}: {
+  idleMinutes: number;
+  sessionDurationHours: number;
+}) {
+  const durationMinutes = sessionDurationHours * 60;
+  const idleActive = idleMinutes > 0;
+  const idleWins = idleActive && idleMinutes < durationMinutes;
+
+  if (!idleActive) {
+    return (
+      <Note icon={Info} tone="info">
+        Sessions expire{" "}
+        <span className="font-semibold">{formatSessionDuration(sessionDurationHours)}</span> after
+        sign-in. No idle timeout is active — a session stays alive even while the user is away,
+        until that duration runs out or they sign out. Set{" "}
+        <span className="font-semibold">Idle Timeout</span> below to also end quiet sessions early.
+      </Note>
+    );
+  }
+
+  const idleLabel = formatIdleMinutes(idleMinutes);
+
+  return (
+    <Note icon={idleWins ? AlertCircle : CheckCircle2} tone={idleWins ? "warning" : "success"}>
+      <span className="font-semibold">Idle Timeout</span> is set to {idleLabel}.{" "}
+      {idleWins ? (
+        <>
+          That is <span className="font-semibold">shorter</span> than the{" "}
+          {formatSessionDuration(sessionDurationHours)} session duration, so in practice inactive
+          users are signed out after <span className="font-semibold">{idleLabel}</span> and the
+          duration above only caps sessions that stay busy. Set the idle timeout to{" "}
+          <span className="adm-num">0</span> to let Session Duration decide on its own.
+        </>
+      ) : (
+        <>
+          That is longer than the {formatSessionDuration(sessionDurationHours)} session duration, so
+          the duration is always reached first and the idle timeout never gets a chance to fire.
+        </>
+      )}
+    </Note>
   );
 }
 
 /**
- * Security section info banner — always shown, explains how session duration
- * interacts with the optional SESSION_INACTIVITY_MS override.
+ * "Auto" is the default for IP binding, and on its own it does not tell the admin
+ * what is actually happening on this box — so the resolved answer is spelled out
+ * using `_meta.productionMode` from the server.
  */
-function SessionDurationNote({
-  inactivityMs,
-  sessionDurationHours,
-}: {
-  inactivityMs?: number | null;
-  sessionDurationHours: number;
-}) {
-  const durationMs = sessionDurationHours * 3600_000;
-  const hasInactivity = !!inactivityMs;
-  const inactivityOverrides = hasInactivity && inactivityMs! < durationMs;
-
-  if (!hasInactivity) {
-    return (
-      <div className="flex items-start gap-2 rounded-xl border border-accent/15 bg-accent/[0.05] px-3 py-2.5 text-xs text-accent/80">
-        <Info className="mt-px h-3.5 w-3.5 shrink-0 text-accent/60" />
-        <span>
-          Sessions expire after <span className="font-semibold">{formatSessionDuration(sessionDurationHours)}</span> of absolute age.
-          No idle timeout is active — a session stays alive even if the user is inactive,
-          until the full duration runs out or they sign out manually.
-        </span>
-      </div>
-    );
-  }
-
-  const idleMinutes = Math.round(inactivityMs! / 60000);
-  const idleLabel = idleMinutes < 60
-    ? `${idleMinutes} minutes`
-    : idleMinutes % 60 === 0
-      ? `${idleMinutes / 60} ${idleMinutes / 60 === 1 ? "hour" : "hours"}`
-      : `${Math.floor(idleMinutes / 60)}h ${idleMinutes % 60}m`;
-
+function IpBindingNote({ mode, productionMode }: { mode: string; productionMode?: boolean }) {
+  if (mode !== "auto" || productionMode === undefined) return null;
   return (
-    <div className={cn(
-      "flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs",
-      inactivityOverrides
-        ? "border-amber-500/20 bg-amber-500/[0.06] text-amber-700 dark:text-amber-400"
-        : "border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-700 dark:text-emerald-400"
-    )}>
-      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-      <span>
-        <code className="font-mono text-[10px] font-semibold">SESSION_INACTIVITY_MS</code> is set to{" "}
-        <span className="font-semibold">{idleLabel}</span> idle timeout.{" "}
-        {inactivityOverrides ? (
-          <>
-            This is <span className="font-semibold">shorter</span> than the {formatSessionDuration(sessionDurationHours)} session duration —
-            inactive users will be signed out after <span className="font-semibold">{idleLabel}</span>,
-            not the configured session duration. To make Session Duration take full effect, remove that env variable.
-          </>
-        ) : (
-          <>
-            The idle timeout is longer than the session duration, so the absolute {formatSessionDuration(sessionDurationHours)} expiry
-            still applies first. Both are in effect.
-          </>
-        )}
-      </span>
-    </div>
+    <Note icon={Info} tone={productionMode ? "success" : "info"} className="mt-1">
+      This deployment is running in{" "}
+      <span className="font-semibold">{productionMode ? "production" : "development"}</span>, so
+      auto currently means IP binding is{" "}
+      <span className="font-semibold">{productionMode ? "on" : "off"}</span>.
+    </Note>
   );
 }
+/**
+ * Share expiry has two knobs that are clamped independently, so "default 0" plus
+ * "max 30" is a reachable combination that reads like "never expires" but is not.
+ * This mirrors `shareExpiryPolicy()` on the server and states the outcome.
+ */
+function ShareExpiryNote({ defaultDays, maxDays }: { defaultDays: number; maxDays: number }) {
+  const effective =
+    maxDays > 0 && (defaultDays === 0 || defaultDays > maxDays) ? maxDays : defaultDays;
+  const capped = effective !== defaultDays;
+  const label = (d: number) => `${d} day${d === 1 ? "" : "s"}`;
 
-// ─── Settings Section ─────────────────────────────────────────────────────────
-
-function ToggleSwitch({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={value}
-      onClick={() => onChange(!value)}
-      className={cn(
-        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2",
-        value ? "bg-accent" : "bg-muted-foreground/20"
+    <Note icon={capped ? AlertCircle : Info} tone={capped ? "warning" : "info"} className="mt-1">
+      {effective === 0 ? (
+        <>
+          New links <span className="font-semibold">never expire</span> unless the person sharing
+          picks an expiry, and they may pick any length. Set a maximum to put a ceiling on that.
+        </>
+      ) : (
+        <>
+          A link created without a chosen expiry lasts{" "}
+          <span className="font-semibold">{label(effective)}</span>
+          {capped && <> — the maximum, because the default is longer than it or unset</>}.{" "}
+          {maxDays > 0 ? (
+            <>Nobody can ask for more than {label(maxDays)}.</>
+          ) : (
+            <>There is no ceiling, so a link can still be created with any expiry.</>
+          )}
+        </>
       )}
-    >
-      <span className={cn(
-        "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200",
-        value ? "translate-x-5" : "translate-x-0"
-      )} />
-    </button>
+    </Note>
   );
 }
 
-// ─── Loading Skeleton ─────────────────────────────────────────────────────────
+/* ── Page ────────────────────────────────────────────────────────────────────── */
 
 function SettingsSkeleton() {
   return (
-    <div className="space-y-6">
-      <div className="h-10 w-48 skeleton rounded-lg" />
-      <div className="h-8 w-72 skeleton rounded-lg" />
-      <div className="space-y-4">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-24 skeleton rounded-2xl" />
-        ))}
+    <div className="space-y-5">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-4 w-72" />
+      <Skeleton className="h-11 w-full" />
+      <div className="grid gap-5 lg:grid-cols-[13rem_1fr]">
+        <Skeleton className="h-11 w-full" rows={6} />
+        <Skeleton className="h-40 w-full" rows={2} />
       </div>
     </div>
   );
 }
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-const sections = SETTING_SECTIONS;
 
 export default function AdminSettingsPage() {
   const queryClient = useQueryClient();
@@ -590,6 +719,19 @@ export default function AdminSettingsPage() {
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Half-minute tick, so "last cleanup 3m ago" ages without any render reading
+  // the clock. It starts at 0 (meaning "unknown") so the server and the client
+  // render the same first paint; the short timeout fills it in right after mount.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const first = setTimeout(() => setNow(Date.now()), 60);
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, []);
+
   const { data, isLoading } = useQuery({
     queryKey: ["admin-settings"],
     queryFn: async () => {
@@ -598,14 +740,15 @@ export default function AdminSettingsPage() {
     },
   });
 
-  useEffect(() => {
-    if (data && !values) {
-      const { _meta: _, ...settings } = data as AdminSettings & { _meta?: unknown };
-      setValues(settings as AdminSettings);
-      setBaseline(settings as AdminSettings);
-    }
-  }, [data, values]);
-
+  // The form is a local draft of the saved values, so it is seeded during render
+  // rather than in an effect: an effect would paint an empty form first and then
+  // correct itself. `_meta` is server-side context (user count, cleanup status),
+  // not a setting, so it never enters the draft.
+  if (data && !values) {
+    const settings = stripMeta(data);
+    setValues(settings);
+    setBaseline(settings);
+  }
   const saveMutation = useMutation({
     mutationFn: async (settings: AdminSettings) => {
       const res = await apiFetch<AdminSettings>("/api/admin/settings", {
@@ -673,249 +816,257 @@ export default function AdminSettingsPage() {
 
   const meta = data?._meta as SettingsMeta | undefined;
 
+  // Loaded, but nothing came back — surfaced as a state rather than a blank page
+  // so it is obvious the fetch failed instead of the settings being empty.
+  if (!values) {
+    return (
+      <div className="space-y-5">
+        <AdminHeader icon={Sliders} kicker="Configuration" title="Settings" />
+        <AdminEmpty
+          icon={AlertCircle}
+          title="Settings could not be loaded"
+          body="The request came back empty. Reload the page — if it keeps happening the settings table may be unreachable."
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["admin-settings"] })}
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              Retry
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="pb-28">
-      {/* Header */}
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-accent/60 shadow-lg shadow-accent/20">
-            <Sliders className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Settings</h1>
-            <p className="text-sm text-muted-foreground/60">
-              Platform configuration · saved to database, applied within ~30 seconds
-            </p>
-          </div>
-        </div>
-      </motion.div>
+    <div className="space-y-5 pb-28">
+      <AdminHeader
+        icon={Sliders}
+        kicker="Configuration"
+        title="Settings"
+        lede="Stored in the database and picked up by the running app within about 30 seconds — no redeploy. Unsaved fields are marked, and nothing is written until you save."
+        actions={
+          <>
+            {meta?.totalUsers !== undefined && (
+              <Chip icon={Users} mono>
+                {meta.totalUsers} users
+              </Chip>
+            )}
+            {values?.maintenanceMode && (
+              <Chip icon={AlertCircle} tone="warning">
+                Maintenance mode
+              </Chip>
+            )}
+            {isDirty ? (
+              <Chip icon={AlertCircle} tone="warning">
+                {dirtyKeys.size} unsaved
+              </Chip>
+            ) : (
+              <Chip icon={CheckCircle2} tone="success">
+                All saved
+              </Chip>
+            )}
+          </>
+        }
+      />
 
-      {/* System info bar */}
-      <motion.div
-        initial={{ opacity: 0, y: -4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-        className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-border/40 bg-surface/60 px-5 py-3 text-xs text-muted-foreground"
-      >
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-1.5 rounded-full bg-emerald-500" />
-          <span className="font-medium text-foreground/80">System online</span>
-        </span>
-        {meta?.totalUsers !== undefined && (
-          <span className="inline-flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5" /> {meta.totalUsers} users
-          </span>
-        )}
-        {values?.maintenanceMode && (
-          <span className="inline-flex items-center gap-1.5 text-amber-500">
-            <AlertCircle className="h-3.5 w-3.5" /> Maintenance mode active
-          </span>
-        )}
-        <span className="inline-flex w-full items-center gap-1.5 sm:ml-auto sm:w-auto">
-          {isDirty ? (
-            <span className="inline-flex items-center gap-1.5 text-amber-500">
-              <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
-              {dirtyKeys.size} unsaved change{dirtyKeys.size > 1 ? "s" : ""}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-emerald-500">
-              <CheckCircle2 className="h-3.5 w-3.5" /> All changes saved
-            </span>
-          )}
-        </span>
-      </motion.div>
-
-      {/* Search */}
-      <div className="relative mb-6 max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-        <Input
+      <div className="adm-toolbar">
+        <SearchField
+          icon={Search}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search settings…"
-          className="h-10 pl-9"
+          onChange={setSearch}
+          label="Search settings"
+          placeholder="Quota, session, cooldown…"
         />
         {search && (
-          <button
-            onClick={() => setSearch("")}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground"
-            aria-label="Clear search"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <IconButton icon={X} label="Clear the settings search" onClick={() => setSearch("")} />
         )}
       </div>
 
-      {values && (
-        <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-          {/* Section nav — horizontal scroll chips on mobile, sticky sidebar on desktop.
-              Hidden while searching (results are flattened across sections). */}
-          {!query && (
-            <nav>
-              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2 no-scrollbar lg:sticky lg:top-4 lg:mx-0 lg:flex-col lg:gap-0 lg:space-y-1 lg:overflow-visible lg:px-0 lg:pb-0">
-                {sections.map((section) => {
-                  const Icon = section.icon;
-                  const active = section.id === activeSection;
-                  const sectionDirty = section.fields.some((f) => dirtyKeys.has(f.key as string));
-                  return (
+      <AnimatePresence>
+        {successMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+          >
+            <Note icon={CheckCircle2} tone="success">
+              {successMsg}
+            </Note>
+          </motion.div>
+        )}
+        {errorMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+          >
+            <Note icon={AlertCircle} tone="danger">
+              {errorMsg}
+            </Note>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className={cn("grid gap-5", !query && "lg:grid-cols-[13rem_1fr]")}>
+        {/* Section rail. Hidden while searching, because search results span
+            sections and a highlighted "current section" would be a lie. */}
+        {!query && (
+          <nav aria-label="Settings sections" className="lg:sticky lg:top-4 lg:self-start">
+            <ul className="flex gap-1.5 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+              {sections.map((section) => {
+                const active = section.id === activeSection;
+                const sectionDirty = section.fields.some((f) => dirtyKeys.has(f.key as string));
+                return (
+                  <li key={section.id} className="shrink-0 lg:shrink">
                     <button
-                      key={section.id}
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={
+                        sectionDirty ? `${section.title} — has unsaved changes` : undefined
+                      }
                       onClick={() => setActiveSection(section.id)}
                       className={cn(
-                        "flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl border px-3 py-2.5 text-left text-sm transition-colors lg:w-full lg:border-transparent",
+                        "flex w-full items-center gap-2 rounded-[0.7rem] border px-2.5 py-2 text-left text-[0.78rem] font-medium transition-colors",
                         active
-                          ? "border-accent/30 bg-accent/10 font-medium text-accent lg:border-transparent"
-                          : "border-border/40 text-muted-foreground hover:bg-accent/5 hover:text-foreground"
+                          ? "border-[var(--adm-rim-strong)] bg-[var(--adm-row)] text-foreground"
+                          : "border-transparent text-[var(--adm-muted)] hover:bg-[var(--adm-soft)] hover:text-foreground"
                       )}
                     >
-                      <div
-                        className={cn(
-                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br",
-                          section.gradient
-                        )}
-                      >
-                        <Icon className="h-3.5 w-3.5 text-white" />
-                      </div>
-                      <span className="flex-1 truncate">{section.title}</span>
-                      {sectionDirty && <span className="size-1.5 rounded-full bg-amber-500" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </nav>
-          )}
-
-          {/* Content */}
-          <div className="space-y-6">
-            <AnimatePresence>
-              {successMsg && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400"
-                >
-                  <CheckCircle2 className="h-4 w-4 shrink-0" /> {successMsg}
-                </motion.div>
-              )}
-              {errorMsg && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500"
-                >
-                  <AlertCircle className="h-4 w-4 shrink-0" /> {errorMsg}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {visibleSections.length === 0 && (
-              <div className="rounded-2xl border border-border/40 bg-surface/50 py-16 text-center text-sm text-muted-foreground">
-                No settings match “{search}”.
-              </div>
-            )}
-
-            {visibleSections.map((section) => {
-              const Icon = section.icon;
-              return (
-                <motion.div
-                  key={section.id}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="overflow-hidden rounded-2xl border border-border/50 bg-surface/80 backdrop-blur-sm"
-                >
-                  <div className="flex items-center gap-3 border-b border-border/30 px-6 py-4">
-                    <div
-                      className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br",
-                        section.gradient
-                      )}
-                    >
-                      <Icon className="h-5 w-5 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold">{section.title}</h3>
-                      <p className="text-xs text-muted-foreground/60">{section.description}</p>
-                    </div>
-                  </div>
-                  <div className="space-y-5 px-6 py-5">
-                    {section.id === "security" && (
-                      <>
-                        <SessionDurationNote
-                          inactivityMs={meta?.sessionInactivityMs}
-                          sessionDurationHours={values.sessionDurationHours}
+                      <section.icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{section.title}</span>
+                      {sectionDirty && (
+                        <span
+                          className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--warning)]"
+                          aria-hidden="true"
                         />
-                        <div className={cn(
-                          "rounded-xl transition-colors",
-                          dirtyKeys.has("sessionDurationHours") && "-mx-2 bg-amber-500/[0.04] px-2 py-2"
-                        )}>
-                          <SessionDurationPicker
-                            value={values.sessionDurationHours}
-                            onChange={(v) => handleChange("sessionDurationHours", v)}
-                          />
-                        </div>
-                      </>
-                    )}
-                    {section.fields.map((field) => {
-                      if (field.key === "sessionDurationHours") return null;
-                      return (
-                        <div
-                          key={field.key as string}
-                          className={cn(
-                            "rounded-xl transition-colors",
-                            dirtyKeys.has(field.key as string) && "-mx-2 bg-amber-500/[0.04] px-2 py-2"
-                          )}
-                        >
-                          <SettingsField
-                            field={field}
-                            value={values[field.key]}
-                            onChange={(v) => handleChange(field.key, v)}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {section.footer === "cleanup" && <CleanupStatus cleanup={meta?.cleanup} />}
-                </motion.div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+        )}
 
-      {/* Sticky action bar */}
+        <div className="space-y-4">
+          {visibleSections.length === 0 ? (
+            <AdminEmpty
+              icon={Search}
+              title="No setting matches that"
+              body="Try a shorter word — the search looks at setting names, their descriptions and the section titles."
+            />
+          ) : (
+            visibleSections.map((section) => {
+              const hasSessionField = section.fields.some(
+                (f) => f.key === "sessionDurationHours"
+              );
+              return (
+                <AdminPanel
+                  key={section.id}
+                  icon={section.icon}
+                  title={section.title}
+                  sub={section.description}
+                >
+                  {/* Session duration gets a picker instead of a bare hours box:
+                      typing "168" is a worse way to say "one week". */}
+                  {section.id === "security" && hasSessionField && (
+                    <div
+                      className="adm-field"
+                      data-dirty={dirtyKeys.has("sessionDurationHours") || undefined}
+                    >
+                      <SessionDurationPicker
+                        value={values.sessionDurationHours}
+                        onChange={(v) => handleChange("sessionDurationHours", v)}
+                      />
+                      <SessionDurationNote
+                        idleMinutes={values.sessionIdleTimeoutMinutes}
+                        sessionDurationHours={values.sessionDurationHours}
+                      />
+                    </div>
+                  )}
+
+                  {section.fields.map((field) => {
+                    if (field.key === "sessionDurationHours") return null;
+                    return (
+                      <div
+                        key={field.key as string}
+                        className="adm-field"
+                        data-dirty={dirtyKeys.has(field.key as string) || undefined}
+                      >
+                        <SettingsField
+                          field={field}
+                          value={values[field.key]}
+                          onChange={(v) => handleChange(field.key, v)}
+                        />
+                        {/* Notes that only make sense beside one specific field, so
+                            they sit inside it rather than at panel level. */}
+                        {field.key === "sessionIpBinding" && (
+                          <IpBindingNote
+                            mode={values.sessionIpBinding}
+                            productionMode={meta?.productionMode}
+                          />
+                        )}
+                        {field.key === "shareMaxExpiryDays" && (
+                          <ShareExpiryNote
+                            defaultDays={values.shareDefaultExpiryDays}
+                            maxDays={values.shareMaxExpiryDays}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {section.footer === "cleanup" && (
+                    <CleanupStatus cleanup={meta?.cleanup} now={now} />
+                  )}
+                </AdminPanel>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* The save bar only exists while something is unsaved, so the page never
+          shows a Save button that would do nothing. */}
       <AnimatePresence>
         {isDirty && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            className="adm-savebar"
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="fixed inset-x-0 bottom-4 z-40 mx-auto flex w-[calc(100%-2rem)] max-w-lg items-center justify-between gap-4 rounded-2xl border border-border/60 bg-surface/95 px-5 py-3 shadow-2xl backdrop-blur-xl"
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ type: "spring", stiffness: 380, damping: 30 }}
+            role="region"
+            aria-label="Unsaved changes"
           >
-            <span className="text-sm text-muted-foreground">
-              {dirtyKeys.size} unsaved change{dirtyKeys.size > 1 ? "s" : ""}
+            <AlertCircle className="h-4 w-4 shrink-0 text-[var(--warning)]" aria-hidden="true" />
+            <span className="min-w-0 text-[0.78rem]">
+              <span className="adm-num font-semibold">{dirtyKeys.size}</span> unsaved change
+              {dirtyKeys.size !== 1 ? "s" : ""}
+              <span className="adm-sub ml-1.5 hidden sm:inline">Nothing is written until you save</span>
             </span>
-            <div className="flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleReset}
                 disabled={saveMutation.isPending}
-                className="gap-1.5"
               >
-                <RotateCcw className="h-4 w-4" /> Discard
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                Discard
               </Button>
               <Button
                 size="sm"
-                onClick={() => values && saveMutation.mutate(values)}
+                onClick={() => saveMutation.mutate(values)}
                 disabled={saveMutation.isPending}
-                className="gap-1.5"
               >
                 {saveMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 ) : (
-                  <Save className="h-4 w-4" />
+                  <Save className="h-4 w-4" aria-hidden="true" />
                 )}
                 Save changes
               </Button>

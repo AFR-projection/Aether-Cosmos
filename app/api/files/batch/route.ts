@@ -1,11 +1,17 @@
 import { NextRequest } from "next/server";
-import { eq, and, inArray, isNotNull } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { files, folders } from "@/lib/db/schema";
-import { getClientIp, requireAuth } from "@/lib/auth/session";
+import { files, type File } from "@/lib/db/schema";
+import { getClientIp, requireAuth, type SessionUser } from "@/lib/auth/session";
 import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId, canAccessUserResource } from "@/lib/auth/permissions";
+import {
+  resolveFileAccess,
+  resolveWritableDestination,
+  fileDomainOwnerId,
+  fileRefusal,
+  type FileAccess,
+} from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
 import { deleteR2Objects } from "@/lib/storage/r2";
 import { validateCsrf } from "@/lib/security";
@@ -21,25 +27,65 @@ const patchSchema = z.object({
   folderId: z.string().uuid().nullable().optional(),
 });
 
+type FileCapability = "canEdit" | "canTrash" | "canPurge" | "canOwnerOnlyFlags";
+
+/**
+ * Resolve every id through the capability model, refusing the WHOLE batch on the first file
+ * the caller may not touch.
+ *
+ * All-or-nothing on purpose: a partially applied destructive batch is worse than a rejected
+ * one, and silently skipping rows would hide "you only have view access" from the user.
+ */
+async function resolveBatch(
+  sessionUser: SessionUser,
+  ids: string[],
+  need: FileCapability,
+  what: Parameters<typeof fileRefusal>[1]
+): Promise<{ rows: File[] } | { refusal: ReturnType<typeof apiError> }> {
+  const rows: File[] = [];
+  for (const id of ids) {
+    const access: FileAccess | null = await resolveFileAccess(sessionUser, id, {
+      includeDeleted: true,
+      anyStatus: true,
+    });
+    if (!access) return { refusal: apiError("File not found", 404) };
+    if (!access[need]) return { refusal: apiError(fileRefusal(access, what), 403) };
+    rows.push(access.file);
+  }
+  return { rows };
+}
+
 export async function PATCH(request: NextRequest) {
   try {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
 
     const sessionUser = await requireAuth();
-    const userId = getEffectiveUserId(sessionUser);
     const body = patchSchema.parse(await request.json());
     const ip = getClientIp(request);
 
-    const rows = await db.select().from(files).where(inArray(files.id, body.ids));
-    if (rows.length === 0) return apiError("No files found", 404);
+    // Same capability split as the single-file route: trashing is allowed for `edit`
+    // members, restoring and the favourite flag stay with the owner.
+    const need: FileCapability =
+      body.action === "delete"
+        ? "canTrash"
+        : body.action === "restore"
+          ? "canPurge"
+          : body.action === "favorite"
+            ? "canOwnerOnlyFlags"
+            : "canEdit";
+    const what: Parameters<typeof fileRefusal>[1] =
+      body.action === "delete"
+        ? "trash"
+        : body.action === "restore"
+          ? "restore"
+          : body.action === "favorite"
+            ? "favorite"
+            : "edit";
 
-    for (const row of rows) {
-      if (!canAccessUserResource(sessionUser, row.userId)) {
-        return apiError("File not found", 404);
-      }
-    }
+    const resolved = await resolveBatch(sessionUser, body.ids, need, what);
+    if ("refusal" in resolved) return resolved.refusal;
+    const rows = resolved.rows;
 
-    // Only operate on owned/allowed ids that were returned
     const ids = rows.map((r) => r.id);
     const ownerIds = [...new Set(rows.map((r) => r.userId))];
 
@@ -81,16 +127,21 @@ export async function PATCH(request: NextRequest) {
         break;
       }
       case "move": {
-        // Validate the destination folder belongs to the same owner (root = null is always ok).
-        if (body.folderId) {
-          const [dest] = await db
-            .select({ userId: folders.userId })
-            .from(folders)
-            .where(eq(folders.id, body.folderId))
-            .limit(1);
-          if (!dest || !ownerIds.every((o) => o === dest.userId)) {
-            return apiError("Destination folder not found", 404);
-          }
+        // Every file must be allowed to land there on its own terms: same owner, same
+        // sharing domain. A mixed batch can only move somewhere that holds for ALL of them,
+        // so one refusal rejects the batch (checked per distinct owner/domain pair, not per
+        // file, to keep the query count down on a 500-file selection).
+        const checked = new Set<string>();
+        for (const row of rows) {
+          const domainOwnerId = await fileDomainOwnerId(row);
+          const pair = `${row.userId}:${domainOwnerId}`;
+          if (checked.has(pair)) continue;
+          checked.add(pair);
+          const dest = await resolveWritableDestination(sessionUser, body.folderId ?? null, {
+            fileOwnerId: row.userId,
+            domainOwnerId,
+          });
+          if (!dest.ok) return apiError(dest.message, dest.status);
         }
         await db
           .update(files)
@@ -106,8 +157,6 @@ export async function PATCH(request: NextRequest) {
       metadata: { batch: true, count: ids.length, action: body.action },
       ip,
     });
-
-    void userId;
 
     return apiSuccess({ ids, count: ids.length, action: body.action });
   } catch (error) {
@@ -128,18 +177,13 @@ export async function DELETE(request: NextRequest) {
     const body = deleteSchema.parse(await request.json());
     const ip = getClientIp(request);
 
-    const rows = await db
-      .select()
-      .from(files)
-      .where(and(inArray(files.id, body.ids), isNotNull(files.deletedAt)));
-
+    // Purging is owner-only, whatever the member's role.
+    const resolved = await resolveBatch(sessionUser, body.ids, "canPurge", "purge");
+    if ("refusal" in resolved) return resolved.refusal;
+    // Only what is already in the bin can be purged — the same guard the single-file route
+    // applies, kept here so a batch cannot skip the recycle bin entirely.
+    const rows = resolved.rows.filter((r) => r.deletedAt);
     if (rows.length === 0) return apiError("No trashed files found", 404);
-
-    for (const row of rows) {
-      if (!canAccessUserResource(sessionUser, row.userId)) {
-        return apiError("File not found", 404);
-      }
-    }
 
     const ids = rows.map((r) => r.id);
     const ownerIds = [...new Set(rows.map((r) => r.userId))];

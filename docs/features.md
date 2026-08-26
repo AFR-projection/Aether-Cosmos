@@ -1,6 +1,6 @@
 # Features
 
-What Storage ByAFR does, grouped by area. Setup instructions live in
+What Aether Cosmos ByAFR does, grouped by area. Setup instructions live in
 [Getting Started](getting-started.md); the Second Brain has its
 [own documentation set](second-brain.md).
 

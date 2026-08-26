@@ -1,5 +1,6 @@
 import { appPublicUrl, isInternalHostname } from "@/lib/env/runtime";
 import { ALL_OAUTH_SCOPES, oauthBaseUrl } from "@/lib/oauth/constants";
+import { APP_NAME } from "@/lib/app-version";
 
 export function getOAuthIssuer(fallbackOrigin?: string): string {
   const env = appPublicUrl();
@@ -65,5 +66,5 @@ export function buildProtectedResourceMetadata(fallbackOrigin?: string) {
  * own challenge — so it is kept only as the canonical realm string.
  */
 export function buildWwwAuthenticateHeader(): string {
-  return `Bearer realm="Storage ByAFR"`;
+  return `Bearer realm="${APP_NAME}"`;
 }

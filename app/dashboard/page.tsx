@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
+import { APP_NAME } from "@/lib/app-version";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { getAccentColor, getGradientFallback, getFileTypeIcon } from "@/lib/file-type-utils";
 
@@ -333,7 +334,7 @@ function SystemPulse({ stats }: { stats: NonNullable<DashboardData["globalStats"
       <div>
         <p className="dashboard-kicker"><span aria-hidden="true" /> Admin signal</p>
         <h2 id="system-pulse-heading">System pulse</h2>
-        <p>A quick view of the whole Storage ByAFR workspace.</p>
+        <p>A quick view of the whole {APP_NAME} workspace.</p>
       </div>
       <div className="dashboard-system__metrics">
         {signals.map((signal) => {

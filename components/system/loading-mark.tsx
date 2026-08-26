@@ -30,6 +30,9 @@ export function LoadingMark({
       )}
       role="status"
       aria-live="polite"
+      // Every visual part of this loader is aria-hidden, so with `label=""` the
+      // live region would announce nothing at all.
+      aria-label={label || "Loading"}
     >
       <div className={cn("relative grid place-items-center", dim)}>
         {/* Breathing glow halo */}

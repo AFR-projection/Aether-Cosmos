@@ -7,6 +7,7 @@ import { getClientIp } from "@/lib/auth/session";
 import { logActivity } from "@/lib/auth/audit";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { completeLogin } from "@/lib/auth/login-complete";
+import { getAdminSettings, loginLockoutPolicy } from "@/lib/admin-settings";
 import {
   createStagedToken,
   verifyStagedToken,
@@ -26,9 +27,6 @@ import {
  * No CSRF check: like the login route itself, this runs pre-session and is
  * instead authenticated by the HMAC-signed staged token.
  */
-
-const LOCKOUT_WINDOW_MS =
-  parseInt(process.env.RATE_LIMIT_LOGIN_WINDOW_MS ?? "900000", 10) || 15 * 60 * 1000;
 
 const schema = z.object({
   stepToken: z.string().min(1),
@@ -112,7 +110,11 @@ export async function POST(request: NextRequest) {
       await completeLogin({ ...user, stepCodeMustChange: false }, {
         ip,
         userAgent,
-        lockoutWindowMs: LOCKOUT_WINDOW_MS,
+        // Same lockout window as the login route, now from Admin → Settings
+        // rather than RATE_LIMIT_LOGIN_WINDOW_MS frozen at import time.
+        lockoutWindowMs: loginLockoutPolicy(
+          await getAdminSettings().catch(() => undefined)
+        ).windowMs,
         layers: ["password", "step_code_enrollment"],
       })
     );

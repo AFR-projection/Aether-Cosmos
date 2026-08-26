@@ -7,26 +7,18 @@ import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { requireAuthOrApiKey } from "@/lib/auth/api-key";
 import { getClientIp } from "@/lib/auth/session";
-import { canAccessUserResource, getEffectiveUserId } from "@/lib/auth/permissions";
+import { resolveFileAccess, getEffectiveUserId } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
 import { downloadFromR2Stream } from "@/lib/storage/r2";
 import { validateCsrf } from "@/lib/security";
 import { apiError, handleApiError } from "@/lib/api/response";
 import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
+import { archiveSegment, uniqueArchivePath } from "@/lib/storage/archive-path";
 
 const MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 const schema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
 });
-
-function uniqueZipName(name: string, used: Map<string, number>): string {
-  const count = used.get(name) ?? 0;
-  used.set(name, count + 1);
-  if (count === 0) return name;
-  const dot = name.lastIndexOf(".");
-  if (dot > 0) return `${name.slice(0, dot)} (${count})${name.slice(dot)}`;
-  return `${name} (${count})`;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,8 +38,11 @@ export async function POST(request: NextRequest) {
 
     if (rows.length === 0) return apiError("No files found", 404);
 
+    // Downloading is a read, so a member of the shared folder may zip what they can see —
+    // the old ownership check 404'd the whole batch for them.
     for (const row of rows) {
-      if (!canAccessUserResource(sessionUser, row.userId)) {
+      const accessible = await resolveFileAccess(sessionUser, row.id);
+      if (!accessible?.canView) {
         return apiError("File not found", 404);
       }
     }
@@ -63,7 +58,7 @@ export async function POST(request: NextRequest) {
     const encryptedInSelection = downloadable.filter((r) => r.encrypted);
     if (encryptedInSelection.length > 0) {
       return apiError(
-        "File terenkripsi tidak bisa dimasukkan ke ZIP — download satu per satu dengan passphrase",
+        "Encrypted files can't go into a ZIP — download them one at a time with the passphrase",
         400
       );
     }
@@ -111,7 +106,10 @@ export async function POST(request: NextRequest) {
               ? (body as Readable)
               : Readable.fromWeb(body as import("stream/web").ReadableStream);
 
-          const entryName = uniqueZipName(file.name, nameCounts);
+          // The stored name is uploader-controlled. Written straight into the ZIP
+          // it is a traversal path for whoever extracts the archive, so the entry
+          // name is flattened to a single safe segment first.
+          const entryName = uniqueArchivePath(archiveSegment(file.name), nameCounts);
           archive.append(nodeStream, { name: entryName });
         }
         await archive.finalize();

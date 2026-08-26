@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Check, Cloud, LockKeyhole } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { APP_NAME } from "@/lib/app-version";
 import {
   SecurityAlertBanner,
   type SecurityAlertPayload,
@@ -52,7 +53,7 @@ export function AuthShell({
       </div>
 
       <div className="auth-frame">
-        <aside className="auth-visual" aria-label="Storage ByAFR">
+        <aside className="auth-visual" aria-label={APP_NAME}>
           <div className="auth-visual__canvas" aria-hidden="true" />
           <div className="auth-visual__shade" aria-hidden="true" />
           <div className="auth-visual__content">
@@ -139,7 +140,7 @@ export function AuthBrand() {
         <span className="auth-brand__spark" />
       </span>
       <span className="auth-brand__name">
-        <strong>Storage</strong>
+        <strong>Aether Cosmos</strong>
         <span>ByAFR</span>
       </span>
     </div>

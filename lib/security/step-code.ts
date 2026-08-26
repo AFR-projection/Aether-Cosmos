@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { appSecret } from "@/lib/security/app-secret";
 
 /**
  * 2-Step Code — the second of three login layers (password → 2-Step Code → TOTP).
@@ -135,14 +136,8 @@ interface StagedTokenPayload {
 
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 
-function tokenSecret(): string {
-  return (
-    process.env.SESSION_SECRET || process.env.CSRF_SECRET || "dev-insecure-secret-change-me"
-  );
-}
-
 function sign(payload: string): string {
-  return createHmac("sha256", tokenSecret()).update(payload).digest("base64url");
+  return createHmac("sha256", appSecret()).update(payload).digest("base64url");
 }
 
 export function createStagedToken(

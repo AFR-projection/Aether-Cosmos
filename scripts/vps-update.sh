@@ -9,7 +9,7 @@ cd "$ROOT"
 
 COMPOSE=(docker compose -f docker/docker-compose.yml)
 
-echo "==> Storage ByAFR — Update"
+echo "==> Aether Cosmos ByAFR — Update"
 
 if [[ -d .git ]]; then
   echo "==> git pull..."

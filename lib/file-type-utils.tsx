@@ -9,10 +9,19 @@ const ICONS: Record<string, React.ElementType> = {
   presentation: FileText, archive: FileArchive, text: FileText,
 };
 
+/**
+ * One hue per file category, defined once.
+ *
+ * These are deliberately palette colours rather than theme tokens: they encode
+ * *identity* (this is a PDF, that is audio), not status, so they must stay
+ * distinguishable from each other and from the five status tokens. The neutral
+ * cases are the exception — a fixed gray is dim on the dark theme, so those
+ * resolve to the foreground token instead.
+ */
 const ACCENT_COLORS: Record<string, string> = {
   image: "text-violet-500", video: "text-blue-500", audio: "text-emerald-500",
   pdf: "text-red-500", document: "text-sky-500", spreadsheet: "text-green-500",
-  presentation: "text-orange-500", archive: "text-amber-500", text: "text-gray-500",
+  presentation: "text-orange-500", archive: "text-amber-500", text: "text-muted-foreground",
 };
 
 const GRADIENT_FALLBACKS: Record<string, string> = {
@@ -24,7 +33,7 @@ const GRADIENT_FALLBACKS: Record<string, string> = {
   spreadsheet: "from-green-500/20 to-lime-500/10",
   presentation: "from-orange-500/20 to-amber-500/10",
   archive: "from-amber-500/20 to-yellow-500/10",
-  text: "from-gray-500/15 to-zinc-500/10",
+  text: "from-muted-foreground/15 to-muted-foreground/5",
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -38,11 +47,11 @@ export function getFileTypeIcon(mimeType: string): React.ElementType {
 }
 
 export function getAccentColor(mimeType: string): string {
-  return ACCENT_COLORS[getMimeCategory(mimeType)] ?? "text-gray-400";
+  return ACCENT_COLORS[getMimeCategory(mimeType)] ?? "text-muted-foreground";
 }
 
 export function getGradientFallback(mimeType: string): string {
-  return GRADIENT_FALLBACKS[getMimeCategory(mimeType)] ?? "from-gray-500/10 to-zinc-500/5";
+  return GRADIENT_FALLBACKS[getMimeCategory(mimeType)] ?? "from-muted-foreground/10 to-muted-foreground/5";
 }
 
 export function getTypeLabel(mimeType: string): string {

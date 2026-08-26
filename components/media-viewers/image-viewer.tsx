@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import { ZoomIn, ZoomOut, RotateCw, Maximize2, Minimize2, Download } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ExternalLink, ImageOff, RefreshCw, RotateCw, ZoomIn, ZoomOut,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/system/spinner";
 import { cn } from "@/lib/utils";
+import { isTypingTarget, ViewerMessage } from "./viewer-chrome";
 
 interface ImageViewerProps {
   src: string;
@@ -11,15 +15,22 @@ interface ImageViewerProps {
   mimeType: string;
 }
 
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 5;
+const clampZoom = (z: number) => Math.min(Math.max(z, MIN_ZOOM), MAX_ZOOM);
+
 export function ImageViewer({ src, fileName, mimeType }: ImageViewerProps) {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
+  // Remounts the <img> so "Try again" actually refetches instead of showing the
+  // browser's cached failure.
+  const [attempt, setAttempt] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const dragStart = useRef({ x: 0, y: 0 });
 
   const reset = useCallback(() => {
     setZoom(1);
@@ -27,99 +38,164 @@ export function ImageViewer({ src, fileName, mimeType }: ImageViewerProps) {
     setPan({ x: 0, y: 0 });
   }, []);
 
+  // Bare keys, so anything the user is typing into keeps its keystrokes.
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") reset();
-      if (e.key === "+" || e.key === "=") setZoom((z) => Math.min(z + 0.25, 5));
-      if (e.key === "-") setZoom((z) => Math.max(z - 0.25, 0.25));
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (e.key === "+" || e.key === "=") setZoom((z) => clampZoom(z + 0.25));
+      else if (e.key === "-") setZoom((z) => clampZoom(z - 0.25));
+      else if (e.key === "0") reset();
+      else return;
+      e.preventDefault();
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [reset]);
 
-  function handleWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setZoom((z) => Math.min(Math.max(z + delta, 0.25), 5));
-  }
+  // React's onWheel is registered passively, so preventDefault there is ignored
+  // and the page scrolls while zooming. This listener opts out explicitly.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((z) => clampZoom(z + (e.deltaY > 0 ? -0.1 : 0.1)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
-  function handleMouseDown(e: React.MouseEvent) {
+  // Pointer events cover mouse, pen and touch with one path — panning a zoomed
+  // image used to be mouse-only.
+  function handlePointerDown(e: React.PointerEvent) {
     if (zoom <= 1) return;
-    setIsDragging(true);
-    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+    setDragging(true);
   }
 
-  function handleMouseMove(e: React.MouseEvent) {
-    if (!isDragging) return;
-    setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+  function handlePointerMove(e: React.PointerEvent) {
+    if (!dragging) return;
+    setPan({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
   }
 
-  function handleMouseUp() {
-    setIsDragging(false);
+  function handlePointerUp(e: React.PointerEvent) {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    setDragging(false);
+  }
+
+  if (status === "error") {
+    return (
+      <ViewerMessage
+        icon={ImageOff}
+        tone="warning"
+        title="Image could not be displayed"
+        hint="The file may be corrupt, or its format is not supported by this browser."
+        onRetry={() => {
+          setStatus("loading");
+          setAttempt((n) => n + 1);
+        }}
+      />
+    );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="flex items-center justify-center gap-1 px-4 py-2 border-b border-border/30 bg-muted/20">
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.min(z + 0.25, 5))} title="Zoom in">
-          <ZoomIn className="h-4 w-4" />
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-center gap-1 border-b border-border/40 bg-surface/70 px-4 py-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Zoom out"
+          disabled={zoom <= MIN_ZOOM}
+          onClick={() => setZoom((z) => clampZoom(z - 0.25))}
+        >
+          <ZoomOut className="h-4 w-4" aria-hidden="true" />
         </Button>
-        <span className="min-w-[48px] text-center text-xs font-mono text-muted-foreground">
+        <span
+          role="status"
+          aria-label={`Zoom ${Math.round(zoom * 100)} percent`}
+          className="min-w-12 text-center font-mono text-xs text-muted-foreground"
+        >
           {Math.round(zoom * 100)}%
         </span>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.max(z - 0.25, 0.25))} title="Zoom out">
-          <ZoomOut className="h-4 w-4" />
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Zoom in"
+          disabled={zoom >= MAX_ZOOM}
+          onClick={() => setZoom((z) => clampZoom(z + 0.25))}
+        >
+          <ZoomIn className="h-4 w-4" aria-hidden="true" />
         </Button>
-        <div className="w-px h-4 bg-border/40 mx-1" />
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setRotation((r) => r + 90)} title="Rotate">
-          <RotateCw className="h-4 w-4" />
+        <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Rotate 90 degrees"
+          onClick={() => setRotation((r) => r + 90)}
+        >
+          <RotateCw className="h-4 w-4" aria-hidden="true" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={reset} title="Reset">
-          <Maximize2 className="h-4 w-4" />
+        <Button variant="ghost" size="icon" aria-label="Reset view" onClick={reset}>
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
         </Button>
-        <div className="w-px h-4 bg-border/40 mx-1" />
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => window.open(src)} title="Open full size">
-          <Minimize2 className="h-4 w-4" />
+        <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Open full size in a new tab"
+          onClick={() => window.open(src, "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="h-4 w-4" aria-hidden="true" />
         </Button>
       </div>
 
-      {/* Image Container */}
       <div
         ref={containerRef}
         className={cn(
-          "flex-1 overflow-hidden flex items-center justify-center bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#222_0%_50%)] bg-[length:20px_20px] dark:bg-[repeating-conic-gradient(#333_0%_25%,#2a2a2a_0%_50%)]",
-          zoom > 1 ? "cursor-grab" : "cursor-default",
-          isDragging && "cursor-grabbing"
+          "checkerboard relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden",
+          zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-default"
         )}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       >
+        {status === "loading" && (
+          <span className="absolute inset-0 flex items-center justify-center">
+            <Spinner size="lg" />
+          </span>
+        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          ref={imgRef}
+          key={attempt}
           src={src}
           alt={fileName}
-          className="max-w-full max-h-full select-none transition-transform duration-100"
+          draggable={false}
+          className={cn(
+            "max-h-full max-w-full select-none transition-transform duration-100",
+            status === "loading" && "opacity-0"
+          )}
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) rotate(${rotation}deg)`,
             transformOrigin: "center center",
           }}
           onLoad={(e) => {
-            const img = e.target as HTMLImageElement;
+            const img = e.currentTarget;
             setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+            setStatus("ready");
           }}
-          draggable={false}
+          onError={() => setStatus("error")}
         />
       </div>
 
-      {/* Status Bar */}
-      <div className="flex items-center justify-between px-4 py-1.5 border-t border-border/30 bg-muted/20 text-[11px] text-muted-foreground">
-        <span>{naturalSize.w} × {naturalSize.h} px</span>
-        <span>{mimeType}</span>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border/40 bg-surface/70 px-4 py-1.5 text-xs text-muted-foreground">
+        <span>
+          {naturalSize.w > 0 ? `${naturalSize.w} × ${naturalSize.h} px` : "Reading dimensions…"}
+        </span>
+        <span className="truncate font-mono">{mimeType}</span>
       </div>
     </div>
   );

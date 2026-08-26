@@ -17,7 +17,7 @@ function sender(overrides: Partial<MailSender> = {}): MailSender {
     email: overrides.email ?? "a@gmail.com",
     appPasswordEncrypted: "enc",
     displayName: "A",
-    fromName: "Storage ByAFR",
+    fromName: "Aether Cosmos ByAFR",
     status: "ok",
     isActive: true,
     lastError: null,

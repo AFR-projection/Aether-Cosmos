@@ -1,6 +1,6 @@
 # Deployment
 
-Production deployment of Storage ByAFR on a fresh Ubuntu VPS, from nothing to a
+Production deployment of Aether Cosmos ByAFR on a fresh Ubuntu VPS, from nothing to a
 working HTTPS site. Written to be followable without prior DevOps experience: the
 whole path is a fresh VPS + a domain + `./install.sh`.
 

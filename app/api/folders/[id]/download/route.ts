@@ -9,40 +9,12 @@ import { validateCsrf } from "@/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
 import { enqueueJob } from "@/lib/queue";
 import { escapeLike } from "@/lib/utils";
+import { archiveFileName, archiveSegment, uniqueArchivePath } from "@/lib/storage/archive-path";
 
 const requestSchema = z.object({
   idempotencyKey: z.string().min(16).max(128).optional(),
   archiveName: z.string().min(1).max(180).optional(),
 });
-
-function archiveSegment(value: string): string {
-  const cleaned = value
-    .replace(/[\\/]/g, "_")
-     
-    .replace(/[\u0000-\u001f\u007f]/g, "_")
-    .trim();
-  return cleaned === "." || cleaned === ".." || cleaned.length === 0 ? "_" : cleaned;
-}
-
-function archiveFileName(value: string): string {
-  const base = archiveSegment(value).replace(/\.zip$/i, "");
-  return `${base || "archive"}.zip`;
-}
-
-function uniqueArchivePath(path: string, used: Map<string, number>): string {
-  const count = used.get(path) ?? 0;
-  used.set(path, count + 1);
-  if (count === 0) return path;
-
-  const slash = path.lastIndexOf("/");
-  const parent = slash >= 0 ? path.slice(0, slash + 1) : "";
-  const name = slash >= 0 ? path.slice(slash + 1) : path;
-  const dot = name.lastIndexOf(".");
-  const renamed = dot > 0
-    ? `${name.slice(0, dot)} (${count})${name.slice(dot)}`
-    : `${name} (${count})`;
-  return `${parent}${renamed}`;
-}
 
 export async function POST(
   request: NextRequest,
@@ -98,12 +70,12 @@ export async function POST(
       ));
 
     if (sourceFiles.some((file) => file.encrypted)) {
-      return apiError("File terenkripsi tidak bisa dimasukkan ke archive server", 400);
+      return apiError("Encrypted files can't be added to a server-built archive", 400);
     }
     const downloadable = sourceFiles.filter(
       (file) => file.r2Key && file.r2Key !== "pending" && !file.r2Key.startsWith("notes/")
     );
-    if (downloadable.length === 0) return apiError("Folder tidak memiliki file yang siap di-download", 400);
+    if (downloadable.length === 0) return apiError("This folder has no files ready to download", 400);
 
     const usedPaths = new Map<string, number>();
     const items = downloadable.map((file) => {
@@ -156,7 +128,7 @@ export async function POST(
         errorMessage: "Archive worker queue is unavailable",
         updatedAt: new Date(),
       }).where(and(eq(archiveJobs.id, jobId), eq(archiveJobs.status, "created")));
-      return apiError("Archive worker sedang tidak tersedia, silakan coba lagi", 503);
+      return apiError("The archive worker is unavailable right now — please try again", 503);
     }
 
     return apiSuccess({ job }, 202);

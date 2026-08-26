@@ -1,8 +1,9 @@
 "use client";
 
+import { FileText, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Download, ExternalLink } from "lucide-react";
 import { downloadViewerSource } from "@/lib/download/download-actions";
+import { ViewerBar, ViewerDownloadButton } from "./viewer-chrome";
 
 interface PdfViewerProps {
   fileId: string;
@@ -12,21 +13,25 @@ interface PdfViewerProps {
 
 export function PdfViewer({ fileId, previewUrl, fileName }: PdfViewerProps) {
   const src = previewUrl ?? `/api/files/${fileId}/preview`;
+  const name = fileName ?? "document.pdf";
 
   return (
-    <div className="flex flex-col h-full bg-neutral-800">
-      <div className="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-border/30 bg-muted/20 shrink-0">
-        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => window.open(src, "_blank")}>
-          <ExternalLink className="h-3.5 w-3.5 mr-1" /> Tab baru
+    <div className="flex h-full flex-col bg-viewer-stage">
+      <ViewerBar icon={FileText} fileName={name} tone="danger">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Open in a new tab"
+          onClick={() => window.open(src, "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="h-4 w-4" aria-hidden="true" />
         </Button>
-        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => downloadViewerSource(src, fileId, fileName ?? "document.pdf")}>
-          <Download className="h-3.5 w-3.5 mr-1" /> Download
-        </Button>
-      </div>
+        <ViewerDownloadButton onDownload={() => downloadViewerSource(src, fileId, name)} />
+      </ViewerBar>
       <iframe
         src={`${src}#toolbar=1&navpanes=0&view=FitH`}
-        className="flex-1 w-full border-0 bg-white min-h-0"
-        title="PDF Preview"
+        className="min-h-0 w-full flex-1 border-0 bg-white"
+        title={`PDF preview of ${name}`}
       />
     </div>
   );

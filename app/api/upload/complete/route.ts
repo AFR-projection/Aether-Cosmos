@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getClientIp } from "@/lib/auth/session";
 import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId, canAccessUserResource } from "@/lib/auth/permissions";
+import { getEffectiveUserId } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/auth/audit";
 import { objectExists, downloadFromR2Bytes } from "@/lib/storage/r2";
 import { validateCsrf } from "@/lib/security";
@@ -49,7 +49,11 @@ export async function POST(request: NextRequest) {
       .where(and(eq(files.id, fileId), isNull(files.deletedAt)))
       .limit(1);
 
-    if (!file || !canAccessUserResource(sessionUser, file.userId)) {
+    // Finishing an upload is only ever the uploader's own move: the row was created by
+    // /upload/presign for this caller. Ownership equality (not the master override) is the
+    // right test — a master completing someone else's half-finished upload is meaningless
+    // and would let an admin session mutate another account's storage accounting.
+    if (!file || file.userId !== userId) {
       return apiError("File not found", 404);
     }
 

@@ -332,7 +332,7 @@ beforeEach(() => {
   listRelationships.mockResolvedValue([
     {
       id: "rel-1",
-      sourceName: "Storage ByAFR",
+      sourceName: "Aether Cosmos ByAFR",
       relationshipType: "uses",
       targetName: "nginx",
       confidence: 0.9,
@@ -480,7 +480,7 @@ const BRAIN_SCOPED_CALLS: ToolCall[] = [
   { tool: "brain_delete", args: { memoryId: MEM_A }, service: deleteMemory },
   {
     tool: "brain_link",
-    args: { source: "Storage ByAFR", target: "nginx", relationshipType: "uses" },
+    args: { source: "Aether Cosmos ByAFR", target: "nginx", relationshipType: "uses" },
     service: upsertRelationship,
   },
   {

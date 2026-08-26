@@ -1,12 +1,15 @@
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { Secret, TOTP } from "otpauth";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { appSecret } from "@/lib/security/app-secret";
+import { APP_NAME } from "@/lib/app-version";
 
-const ISSUER = "Storage ByAFR";
-
-function appSecret(): string {
-  return process.env.SESSION_SECRET || process.env.CSRF_SECRET || "dev-insecure-secret-change-me";
-}
+/**
+ * The label an authenticator app files the entry under. Display only — it is not
+ * part of the code derivation, so already-enrolled devices keep working (they just
+ * keep showing the old brand until the user re-enrolls).
+ */
+const ISSUER = APP_NAME;
 
 export function generateTotpSecret(): { secret: string; uri: (username: string) => string } {
   const secret = new Secret({ size: 20 });

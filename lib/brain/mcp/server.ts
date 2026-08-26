@@ -2,7 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerBrainMcpTools } from "./tools";
 import type { McpPrincipal } from "./principal";
 
-export const BRAIN_MCP_SERVER_NAME = "storage-byafr-brain";
+/**
+ * The MCP server identity, and the key users put in their Claude Desktop config.
+ *
+ * Renaming this is a breaking change for anyone who already added the server: the
+ * old key keeps working on their side but no longer matches what
+ * `/api/brain/[id]/connect` hands out, so the snippet has to be re-pasted.
+ */
+export const BRAIN_MCP_SERVER_NAME = "aether-cosmos-brain";
 export const BRAIN_MCP_SERVER_VERSION = "2.0.0";
 
 /**

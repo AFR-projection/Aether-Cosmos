@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Wifi, WifiOff, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -19,33 +19,36 @@ type Variant = {
   indicator: "bars" | "live" | "pulse" | "none";
 };
 
+/* Status is status: these four read from the semantic tokens, so the pill agrees
+   with every other piece of state in the app and follows the theme. The
+   indicators inside inherit `currentColor`, so the tone carries them too. */
 const VARIANTS: Record<ConnectionStatus, Variant> = {
   idle: { text: "", tone: "", glow: "", show: false, indicator: "none" },
   connecting: {
     text: "Connecting",
-    tone: "text-sky-400 border-sky-400/25 bg-sky-500/10",
-    glow: "shadow-[0_4px_20px_-4px_rgba(56,189,248,0.5)]",
+    tone: "text-info border-info/25 bg-info/10",
+    glow: "shadow-lg",
     show: true,
     indicator: "bars",
   },
   live: {
     text: "Live",
-    tone: "text-emerald-400 border-emerald-400/25 bg-emerald-500/10",
-    glow: "shadow-[0_4px_20px_-4px_rgba(52,211,153,0.5)]",
+    tone: "text-success border-success/25 bg-success/10",
+    glow: "shadow-lg",
     show: true,
     indicator: "live",
   },
   reconnecting: {
     text: "Reconnecting",
-    tone: "text-amber-400 border-amber-400/30 bg-amber-500/10",
-    glow: "shadow-[0_4px_20px_-4px_rgba(251,191,36,0.5)]",
+    tone: "text-warning border-warning/30 bg-warning/10",
+    glow: "shadow-lg",
     show: true,
     indicator: "bars",
   },
   offline: {
     text: "Offline",
-    tone: "text-red-400 border-red-400/30 bg-red-500/10",
-    glow: "shadow-[0_4px_20px_-4px_rgba(248,113,113,0.45)]",
+    tone: "text-danger border-danger/30 bg-danger/10",
+    glow: "shadow-lg",
     show: true,
     indicator: "pulse",
   },
@@ -71,6 +74,7 @@ export function ConnectionStatusPill({ className }: { className?: string }) {
     getConnectionStatus,
     () => "idle" as ConnectionStatus
   );
+  const reduceMotion = useReducedMotion();
   const v = VARIANTS[status];
 
   return (
@@ -78,15 +82,25 @@ export function ConnectionStatusPill({ className }: { className?: string }) {
       {v.show && (
         <motion.div
           key={status}
-          initial={{ opacity: 0, y: -10, scale: 0.9 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -10, scale: 0.9 }}
-          transition={{ type: "spring", stiffness: 440, damping: 30 }}
+          // Losing the connection is not something to find out only by noticing a
+          // colour at the top of the screen.
+          role="status"
+          aria-live="polite"
+          // Centred with framer's own `x` rather than a utility class, so the whole
+          // position is described in one place next to the `y`/`scale` it animates.
+          style={{ x: "-50%" }}
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 0.9 }}
+          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 0.9 }}
+          transition={
+            reduceMotion ? { duration: 0.15 } : { type: "spring", stiffness: 440, damping: 30 }
+          }
           className={cn(
-            "pointer-events-none fixed left-1/2 top-3 z-[115] -translate-x-1/2",
-            "relative overflow-hidden",
+            // `fixed` and `relative` cannot both apply — the pill needs the first
+            // to pin itself, and `overflow-hidden` alone contains the sheen.
+            "pointer-events-none fixed left-1/2 top-3 z-[120] overflow-hidden",
             "inline-flex items-center gap-1.5 rounded-full border px-3 py-1",
-            "text-[11px] font-semibold tracking-wide backdrop-blur-xl",
+            "text-xs font-semibold tracking-wide backdrop-blur-xl",
             v.tone,
             v.glow,
             className

@@ -15,7 +15,7 @@ So the Brain lives in PostgreSQL, alongside (not inside) the storage product, an
 agents reach it only through an authorized API.
 
 ```
-                    STORAGE BYAFR
+                AETHER COSMOS BYAFR
                          │
               ┌──────────┴──────────┐
               │                     │

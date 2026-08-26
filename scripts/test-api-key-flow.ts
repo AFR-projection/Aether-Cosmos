@@ -2,7 +2,7 @@
  * API key smoke test — uses DB directly (no session login needed).
  * Usage: npx tsx scripts/test-api-key-flow.ts [baseUrl]
  */
-import "dotenv/config";
+import "./load-env";
 import { eq } from "drizzle-orm";
 import { db } from "../lib/db";
 import { users } from "../lib/db/schema";

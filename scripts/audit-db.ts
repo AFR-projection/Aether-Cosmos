@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./load-env";
 import postgres from "postgres";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import * as schema from "../lib/db/schema";

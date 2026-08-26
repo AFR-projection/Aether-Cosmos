@@ -1,13 +1,18 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Spinner } from "@/components/system/spinner";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
+import { AlertTriangle, Table2 } from "lucide-react";
 import { usePreviewSource } from "@/hooks/use-preview-source";
-import { Button } from "@/components/ui/button";
-import { Download, Table2, AlertTriangle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { downloadViewerSource } from "@/lib/download/download-actions";
 import { cn } from "@/lib/utils";
+import {
+  ViewerBar,
+  ViewerDownloadButton,
+  ViewerLoading,
+  ViewerMessage,
+} from "./viewer-chrome";
 
 interface SpreadsheetViewerProps {
   src: string;
@@ -32,7 +37,7 @@ export function SpreadsheetViewer({ src, fileName, fileId }: SpreadsheetViewerPr
       setActiveSheet(0);
       setParseError(null);
     } catch {
-      setParseError("Format spreadsheet tidak didukung atau file rusak");
+      setParseError("This spreadsheet format is not supported, or the file is damaged.");
       setWorkbook(null);
     }
   }, [arrayBuffer]);
@@ -57,67 +62,80 @@ export function SpreadsheetViewer({ src, fileName, fileId }: SpreadsheetViewerPr
     [grid.rows]
   );
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full bg-card">
-        <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
-          <p className="text-xs text-muted-foreground">Memuat spreadsheet...</p>
-        </div>
-      </div>
-    );
-  }
+  const handleDownload = useCallback(
+    () => downloadViewerSource(src, fileId, fileName),
+    [src, fileId, fileName]
+  );
 
-  if (error || parseError) {
+  if (loading) return <ViewerLoading label="Loading spreadsheet…" />;
+
+  const message = error ?? parseError;
+  if (message) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-card gap-3">
-        <p className="text-sm">{error ?? parseError}</p>
-        <Button variant="secondary" size="sm" onClick={() => downloadViewerSource(src, fileId, fileName)}>
-          <Download className="h-3.5 w-3.5 mr-1.5" /> Download
-        </Button>
-      </div>
+      <ViewerMessage
+        icon={Table2}
+        tone="danger"
+        title="Preview unavailable"
+        hint={message}
+        onDownload={handleDownload}
+      />
     );
   }
 
   if (!workbook || grid.rows.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-card">
-        <Table2 className="h-10 w-10 mb-2 opacity-40" />
-        <p className="text-sm">Spreadsheet kosong</p>
-      </div>
+      <ViewerMessage
+        icon={Table2}
+        title="Nothing to show"
+        hint={
+          workbook
+            ? `The sheet "${sheetName}" has no rows.`
+            : "This workbook contains no readable sheets."
+        }
+        onDownload={handleDownload}
+      />
     );
   }
 
   const headers = grid.rows[0] ?? [];
 
   return (
-    <div className="flex flex-col h-full bg-card">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/30 bg-muted/20 shrink-0 gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <Table2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-          <span className="text-xs text-muted-foreground truncate">{fileName}</span>
-          {grid.truncated && (
-            <span className="flex items-center gap-1 text-[10px] text-amber-500 shrink-0">
-              <AlertTriangle className="h-3 w-3" /> dipotong
-            </span>
-          )}
-        </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => downloadViewerSource(src, fileId, fileName)}>
-          <Download className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+    <div className="flex h-full flex-col bg-surface">
+      <ViewerBar
+        icon={Table2}
+        fileName={fileName}
+        tone="success"
+        meta={
+          grid.truncated ? (
+            <Badge tone="warning">
+              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+              First {MAX_ROWS} rows
+            </Badge>
+          ) : undefined
+        }
+      >
+        <ViewerDownloadButton onDownload={handleDownload} />
+      </ViewerBar>
 
       {workbook.SheetNames.length > 1 && (
-        <div className="flex gap-1 px-3 py-1.5 border-b border-border/20 overflow-x-auto shrink-0">
+        <div
+          role="tablist"
+          aria-label="Sheets"
+          className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/40 px-3 py-1.5"
+        >
           {workbook.SheetNames.map((name, i) => (
             <button
               key={name}
+              type="button"
+              role="tab"
+              aria-selected={i === activeSheet}
               onClick={() => setActiveSheet(i)}
               className={cn(
-                "px-2.5 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors",
+                "min-h-8 whitespace-nowrap rounded-lg px-2.5 text-xs font-medium transition-colors duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                 i === activeSheet
-                  ? "bg-accent text-accent-foreground"
-                  : "bg-muted/40 text-muted-foreground hover:bg-muted/60"
+                  ? "bg-accent text-white"
+                  : "bg-surface text-muted-foreground hover:text-foreground"
               )}
             >
               {name}
@@ -126,15 +144,24 @@ export function SpreadsheetViewer({ src, fileName, fileId }: SpreadsheetViewerPr
         </div>
       )}
 
-      <div className="flex-1 overflow-auto">
-        <table className="w-full border-collapse text-xs min-w-max">
-          <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table className="w-full min-w-max border-collapse text-xs">
+          <caption className="sr-only">
+            {fileName} — sheet {sheetName}, {grid.rows.length} rows, {colCount} columns
+          </caption>
+          <thead className="sticky top-0 z-10 bg-surface-elevated/95 backdrop-blur-sm">
             <tr>
-              <th className="w-10 px-2 py-2 text-left text-muted-foreground/50 font-normal border-b border-border/30">#</th>
+              <th
+                scope="col"
+                className="w-10 border-b border-border/40 px-2 py-2 text-left font-normal text-muted-foreground"
+              >
+                #
+              </th>
               {Array.from({ length: colCount }).map((_, i) => (
                 <th
                   key={i}
-                  className="px-3 py-2 text-left font-medium border-b border-border/30 whitespace-nowrap max-w-[220px] truncate"
+                  scope="col"
+                  className="max-w-[220px] truncate whitespace-nowrap border-b border-border/40 px-3 py-2 text-left font-medium text-foreground"
                 >
                   {headers[i] || XLSX.utils.encode_col(i)}
                 </th>
@@ -143,12 +170,17 @@ export function SpreadsheetViewer({ src, fileName, fileId }: SpreadsheetViewerPr
           </thead>
           <tbody>
             {grid.rows.slice(1).map((row, ri) => (
-              <tr key={ri} className={cn("hover:bg-accent/5", ri % 2 === 0 && "bg-muted/10")}>
-                <td className="px-2 py-1.5 text-muted-foreground/40 font-mono border-b border-border/10">{ri + 1}</td>
+              <tr key={ri} className={cn("hover:bg-accent/5", ri % 2 === 1 && "bg-muted/20")}>
+                <th
+                  scope="row"
+                  className="border-b border-border/20 px-2 py-1.5 text-left font-mono font-normal text-muted-foreground"
+                >
+                  {ri + 1}
+                </th>
                 {Array.from({ length: colCount }).map((_, ci) => (
                   <td
                     key={ci}
-                    className="px-3 py-1.5 border-b border-border/10 whitespace-nowrap max-w-[240px] truncate"
+                    className="max-w-[240px] truncate whitespace-nowrap border-b border-border/20 px-3 py-1.5 text-foreground"
                     title={String(row[ci] ?? "")}
                   >
                     {String(row[ci] ?? "")}

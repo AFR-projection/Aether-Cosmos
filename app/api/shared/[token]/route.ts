@@ -8,6 +8,16 @@ import { publishToUser } from "@/lib/realtime/events";
 import { tiptapToPlainText } from "@/lib/search/tiptap-text";
 import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
 import { checkRateLimit } from "@/lib/security";
+import { claimShareAccess, shareBudgetExhausted, shareExpired } from "@/lib/shares/access";
+import { isPossibleShareToken } from "@/lib/shares/token";
+import { readBoundedJson, bodyErrorResponse } from "@/lib/api/body";
+
+/** A Tiptap document is prose, not a payload. */
+const MAX_NOTE_BODY_BYTES = 2 * 1024 * 1024;
+
+/** Anonymous callers, so these are the only ceilings on either handler. */
+const VIEW_MAX_PER_MINUTE = 120;
+const EDIT_MAX_PER_MINUTE = 60;
 
 export async function GET(
   request: NextRequest,
@@ -15,6 +25,13 @@ export async function GET(
 ) {
   try {
     const { token } = await params;
+    // Same answer as a token that does not exist, so this is not an oracle — it
+    // just keeps an unbounded path segment out of the query and the cache key.
+    if (!isPossibleShareToken(token)) return apiError("Share not found", 404);
+
+    const ip = getClientIpFromRequest(request);
+    const viewLimit = await checkRateLimit(`share_view:${ip}`, VIEW_MAX_PER_MINUTE, 60_000);
+    if (!viewLimit.allowed) return apiError("Too many requests. Slow down.", 429);
 
     const [share] = await db.select().from(shares).where(eq(shares.token, token)).limit(1);
     if (!share) return apiError("Share not found", 404);
@@ -28,40 +45,47 @@ export async function GET(
     if (!file) return apiError("File not found", 404);
 
     // Duration Check
-    if (share.expiresAt && share.expiresAt < new Date()) {
+    if (shareExpired(share)) {
       return apiError("Share link expired", 410);
     }
 
-    // Access Count Check
-    if (share.maxAccessCount && share.accessCount >= share.maxAccessCount) {
-      return apiError("Share link has reached maximum access limit", 403);
-    }
-
-    // Notes have no R2 object — their body is Tiptap JSON in file_contents.
-    // Include it so the public page can render (and, if permitted, edit) it
-    // instead of trying to stream a file that doesn't exist.
+    /**
+     * Notes have no R2 object — their body is Tiptap JSON in file_contents, so for
+     * a note THIS endpoint is the content path and spends a unit of the budget.
+     * For everything else the bytes leave via /preview, which spends it there;
+     * counting in both places would charge two units for one visit.
+     */
     let noteContent: unknown = null;
+    let updatedShare = share;
+
     if (file.isNote) {
+      const claimed = await claimShareAccess(share.id);
+      if (!claimed) {
+        return apiError("Share link has reached maximum access limit", 403);
+      }
+      updatedShare = claimed;
+
       const [content] = await db
         .select({ contentJson: fileContents.contentJson })
         .from(fileContents)
         .where(eq(fileContents.fileId, file.id))
         .limit(1);
       noteContent = content?.contentJson ?? null;
+    } else if (shareBudgetExhausted(share)) {
+      return apiError("Share link has reached maximum access limit", 403);
     }
 
-    // Increment access count (track page view)
-    const [updatedShare] = await db
-      .update(shares)
-      .set({
-        accessCount: share.accessCount + 1,
-        lastAccessedAt: new Date(),
-      })
-      .where(eq(shares.id, share.id))
-      .returning();
+
+    // Record the visit. For a note the claim above already moved the counter and
+    // the timestamp; for a file only the timestamp belongs here.
+    if (!file.isNote) {
+      await db
+        .update(shares)
+        .set({ lastAccessedAt: new Date() })
+        .where(eq(shares.id, share.id));
+    }
 
     // Log detailed access info
-    const ip = getClientIpFromRequest(request);
     const userAgent = request.headers.get("user-agent") ?? "unknown";
     const deviceInfo = parseUserAgent(userAgent);
 
@@ -129,14 +153,29 @@ export async function PUT(
 ) {
   try {
     const { token } = await params;
+    if (!isPossibleShareToken(token)) return apiError("Share not found", 404);
 
-    // Rate limit: 60 edits per minute per share token (prevents spam writes)
-    const rateLimitCheck = await checkRateLimit(`share_edit:${token}`, 60, 60_000);
+    // Rate limit: per share token, and per caller — the token limit alone let one
+    // client spread writes across guessed tokens, and built the Redis key out of
+    // whatever path segment arrived.
+    const editorIp = getClientIpFromRequest(request);
+    const ipLimit = await checkRateLimit(`share_edit_ip:${editorIp}`, EDIT_MAX_PER_MINUTE, 60_000);
+    if (!ipLimit.allowed) {
+      return apiError("Too many edit requests. Slow down.", 429);
+    }
+    const rateLimitCheck = await checkRateLimit(`share_edit:${token}`, EDIT_MAX_PER_MINUTE, 60_000);
     if (!rateLimitCheck.allowed) {
       return apiError("Too many edit requests. Slow down.", 429);
     }
 
-    const body = (await request.json()) as { content?: unknown };
+    let body: { content?: unknown };
+    try {
+      body = await readBoundedJson<{ content?: unknown }>(request, MAX_NOTE_BODY_BYTES);
+    } catch (error) {
+      const response = bodyErrorResponse(error);
+      if (response) return response;
+      throw error;
+    }
     if (body.content == null || typeof body.content !== "object") {
       return apiError("Missing note content", 400);
     }
@@ -148,10 +187,10 @@ export async function PUT(
       return apiError("This share is view-only", 403);
     }
 
-    if (share.expiresAt && share.expiresAt < new Date()) {
+    if (shareExpired(share)) {
       return apiError("Share link expired", 410);
     }
-    if (share.maxAccessCount && share.accessCount >= share.maxAccessCount) {
+    if (shareBudgetExhausted(share)) {
       return apiError("Share link has reached maximum access limit", 403);
     }
 

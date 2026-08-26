@@ -19,6 +19,7 @@ import { configureEncryptedDownloadScope } from "@/lib/download/encrypted-downlo
 import { clearLocalUploads } from "@/lib/system/local-upload-registry";
 import { publishActivityIdentity } from "@/lib/activity/activity-identity";
 import { resetCsrfToken } from "@/lib/api/client";
+import { APP_NAME } from "@/lib/app-version";
 
 const STORAGE_KEY = "sidebar_collapsed";
 
@@ -32,7 +33,7 @@ const PAGE_TITLES: Record<string, string> = {
 
 function getPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin")) return "Admin";
-  return PAGE_TITLES[pathname] ?? "Storage ByAFR";
+  return PAGE_TITLES[pathname] ?? APP_NAME;
 }
 
 function getStoredCollapsed(): boolean {

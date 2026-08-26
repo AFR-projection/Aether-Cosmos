@@ -1,30 +1,60 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
-  X, CheckCircle2, AlertCircle, Pause, Play, RotateCcw,
-  Zap, Clock, Pin, PinOff,
+  AlertCircle, CheckCircle2, ChevronDown, Clock, Pause, Pin, PinOff, Play,
+  RotateCcw, X, Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { UploadQueue, formatSpeed, formatETA, type UploadItem, type UploadStats } from "@/lib/upload-queue";
+import {
+  UploadQueue, formatSpeed, formatETA,
+  type UploadItem, type UploadItemStatus, type UploadStats,
+} from "@/lib/upload-queue";
 import { formatBytes, cn } from "@/lib/utils";
-import { notify } from "@/lib/system/notify-store";
 
 interface UploadPanelProps {
   queue: UploadQueue;
   onDismiss: () => void;
 }
 
+/** Statuses where bytes are still moving, so the row shows a spinner and a bar. */
+const IN_FLIGHT: ReadonlySet<UploadItemStatus> = new Set([
+  "preparing",
+  "uploading",
+  "verifying",
+]);
+
+const STATUS_TEXT: Record<UploadItemStatus, string> = {
+  queued: "Waiting",
+  preparing: "Preparing",
+  uploading: "Uploading",
+  verifying: "Verifying",
+  done: "Uploaded",
+  error: "Failed",
+  cancelled: "Canceled",
+  resume_requires_file: "Needs the file again",
+};
+
+/** The queue reports codes; a person needs a sentence. */
+function errorText(code: string | undefined): string | null {
+  if (!code) return null;
+  if (code === "RESUME_REQUIRES_FILE") {
+    return "Pick this file again to carry on where it stopped.";
+  }
+  return code;
+}
+
+/** Decoration only: the same numbers are in the text beside it. */
 function ProgressRing({ progress, active }: { progress: number; active: boolean }) {
   const size = 36;
   const stroke = 3;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (progress / 100) * circumference;
+  const offset = circumference - (Math.min(100, Math.max(0, progress)) / 100) * circumference;
 
   return (
-    <svg width={size} height={size} className="shrink-0 -rotate-90">
+    <svg width={size} height={size} className="-rotate-90 shrink-0" aria-hidden="true">
       <circle
         cx={size / 2}
         cy={size / 2}
@@ -32,7 +62,7 @@ function ProgressRing({ progress, active }: { progress: number; active: boolean 
         fill="none"
         stroke="currentColor"
         strokeWidth={stroke}
-        className="text-muted/30"
+        className="text-muted"
       />
       <circle
         cx={size / 2}
@@ -44,70 +74,108 @@ function ProgressRing({ progress, active }: { progress: number; active: boolean 
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={offset}
-        className={cn(
-          "transition-all duration-300",
-          active ? "text-accent" : "text-emerald-500"
-        )}
+        className={cn("transition-all duration-300", active ? "text-accent" : "text-success")}
       />
     </svg>
   );
 }
 
-function UploadRow({ item, onRetry, onCancel }: {
+function RowStatusIcon({ status }: { status: UploadItemStatus }) {
+  if (status === "done") {
+    return <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />;
+  }
+  if (status === "error") {
+    return <AlertCircle className="h-3.5 w-3.5 text-danger" aria-hidden="true" />;
+  }
+  if (status === "resume_requires_file") {
+    return <AlertCircle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />;
+  }
+  if (IN_FLIGHT.has(status)) {
+    return (
+      <span
+        className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent"
+        aria-hidden="true"
+      />
+    );
+  }
+  return <span className="h-3.5 w-3.5 rounded-full border border-border" aria-hidden="true" />;
+}
+
+function UploadRow({
+  item,
+  onRetry,
+  onCancel,
+}: {
   item: UploadItem;
   onRetry: () => void;
   onCancel: () => void;
 }) {
+  const name = item.file?.name ?? item.remotePath;
+  const inFlight = IN_FLIGHT.has(item.status);
+  const failed = item.status === "error" || item.status === "resume_requires_file";
+  const detail = failed ? errorText(item.error) : null;
+
   return (
-    <motion.div
+    <motion.li
       layout
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0, marginTop: 0 }}
-      className="group px-3 py-2 rounded-lg hover:bg-muted/30 transition-colors"
+      className="rounded-lg px-3 py-2 transition-colors hover:bg-muted/30"
     >
       <div className="flex items-center gap-2.5">
-        <div className="shrink-0">
-          {item.status === "done" && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
-          {item.status === "error" && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
-          {item.status === "resume_requires_file" && <AlertCircle className="h-3.5 w-3.5 text-amber-500" />}
-          {item.status === "uploading" && (
-            <div className="h-3.5 w-3.5 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
-          )}
-          {item.status === "queued" && (
-            <div className="h-3.5 w-3.5 rounded-full border border-muted-foreground/20" />
-          )}
-        </div>
+        <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+          <RowStatusIcon status={item.status} />
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium truncate leading-tight">{item.file?.name ?? item.remotePath}</p>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[10px] text-muted-foreground">{formatBytes(item.totalBytes)}</span>
-            {(item.status === "uploading" || item.status === "verifying") && (
-              <span className="text-[10px] font-mono text-accent">{Math.round(item.progress)}%</span>
+          <p className="truncate text-xs font-medium leading-tight text-foreground" title={name}>
+            {name}
+          </p>
+          <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+            <span>{formatBytes(item.totalBytes)}</span>
+            {inFlight ? (
+              <span className="font-mono tabular-nums text-accent">
+                {Math.round(item.progress)}%
+              </span>
+            ) : (
+              <span className={cn(failed && "text-warning")}>{STATUS_TEXT[item.status]}</span>
             )}
-            {item.status === "queued" && (
-              <span className="text-[10px] text-muted-foreground/50">Waiting</span>
-            )}
-            {item.status === "resume_requires_file" && (
-              <span className="text-[10px] text-amber-500/80">Pilih ulang file untuk resume</span>
-            )}
-          </div>
+          </p>
         </div>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {item.status === "error" && (
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRetry} title="Retry">
-              <RotateCcw className="h-3 w-3" />
+        {/* Always visible: hover-revealed controls cannot be reached by touch. */}
+        <div className="flex shrink-0 items-center gap-0.5">
+          {failed && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Retry ${name}`}
+              onClick={onRetry}
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
           )}
-          {(item.status === "queued" || item.status === "error") && (
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onCancel} title="Cancel">
-              <X className="h-3 w-3" />
+          {(item.status === "queued" || failed) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Remove ${name} from the queue`}
+              onClick={onCancel}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
           )}
         </div>
       </div>
-      {(item.status === "uploading" || item.status === "verifying") && (
-        <div className="mt-1.5 h-0.5 rounded-full bg-muted/40 overflow-hidden ml-5">
+
+      {inFlight && (
+        <div
+          role="progressbar"
+          aria-label={`Uploading ${name}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(item.progress)}
+          className="ml-6 mt-1.5 h-0.5 overflow-hidden rounded-full bg-muted"
+        >
           <motion.div
             className="h-full rounded-full bg-accent"
             animate={{ width: `${item.progress}%` }}
@@ -115,10 +183,9 @@ function UploadRow({ item, onRetry, onCancel }: {
           />
         </div>
       )}
-      {(item.status === "error" || item.status === "resume_requires_file") && item.error && (
-        <p className="mt-0.5 ml-5 text-[10px] text-red-500/80 truncate">{item.error}</p>
-      )}
-    </motion.div>
+
+      {detail && <p className="ml-6 mt-0.5 text-xs text-danger">{detail}</p>}
+    </motion.li>
   );
 }
 
@@ -131,8 +198,8 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [paused, setPaused] = useState(false);
-  const notifiedRef = useRef(false);
   const autoDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     const onChange = (newItems: UploadItem[], newStats: UploadStats) => {
@@ -140,7 +207,9 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
       setStats(newStats);
     };
     queue.on("change", onChange);
-    return () => { queue.off("change"); };
+    return () => {
+      queue.off("change", onChange);
+    };
   }, [queue]);
 
   const allDone = stats.completed + stats.failed === stats.total && stats.total > 0;
@@ -148,12 +217,12 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
 
   const smartItems = useMemo(() => {
     const visible = items.filter((i) => i.status !== "cancelled");
-    const active = visible.filter((i) => i.status === "uploading" || i.status === "verifying" || i.status === "queued");
-    const failed = visible.filter((i) => i.status === "error" || i.status === "resume_requires_file");
+    const active = visible.filter((i) => IN_FLIGHT.has(i.status) || i.status === "queued");
+    const failed = visible.filter(
+      (i) => i.status === "error" || i.status === "resume_requires_file"
+    );
     const done = visible.filter((i) => i.status === "done");
-    if (expanded) {
-      return [...active, ...failed, ...done.slice(-3)];
-    }
+    if (expanded) return [...active, ...failed, ...done.slice(-3)];
     const current = active[0] ?? failed[0];
     return current ? [current] : [];
   }, [items, expanded]);
@@ -165,7 +234,6 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
 
   useEffect(() => {
     if (!allDone) {
-      notifiedRef.current = false;
       if (autoDismissRef.current) {
         clearTimeout(autoDismissRef.current);
         autoDismissRef.current = null;
@@ -173,26 +241,22 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
       return;
     }
 
-    if (!notifiedRef.current) {
-      notifiedRef.current = true;
-      notify({
-        title: stats.failed > 0 ? "Upload selesai dengan error" : "Upload selesai",
-        description: `${stats.completed}/${stats.total} file berhasil${stats.failed > 0 ? ` · ${stats.failed} gagal` : ""}`,
-        tone: stats.failed > 0 ? "warning" : "success",
-        duration: 4500,
-      });
-    }
-
-    if (!pinned && !expanded) {
+    // No toast from here. This panel is already on screen showing the same
+    // result, and file-browser.tsx raises the one completion notice for the
+    // batch — two of them read as the app firing twice.
+    //
+    // A run that ended with failures is never dismissed on a timer: the only
+    // record of what went wrong is in this panel.
+    if (!pinned && !expanded && stats.failed === 0) {
       autoDismissRef.current = setTimeout(handleDismiss, 4000);
     }
 
     return () => {
       if (autoDismissRef.current) clearTimeout(autoDismissRef.current);
     };
-  }, [allDone, stats.completed, stats.failed, stats.total, pinned, expanded, handleDismiss]);
+  }, [allDone, pinned, expanded, stats.failed, handleDismiss]);
 
-  // Auto-collapse when idle
+  // Collapse again once the queue has been idle for a moment.
   useEffect(() => {
     if (!hasActive && expanded && !pinned) {
       const t = setTimeout(() => setExpanded(false), 2500);
@@ -200,140 +264,207 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
     }
   }, [hasActive, expanded, pinned]);
 
-  const statusLabel = stats.active > 0
-    ? `Mengupload ${stats.active} file`
-    : allDone
-    ? stats.failed > 0 ? "Selesai · ada error" : "Semua selesai"
-    : stats.queued > 0
-    ? "Menunggu antrian"
-    : "Upload";
+  const statusLabel =
+    stats.active > 0
+      ? `Uploading ${stats.active} ${stats.active === 1 ? "file" : "files"}`
+      : allDone
+        ? stats.failed > 0
+          ? `Finished · ${stats.failed} failed`
+          : "All uploads finished"
+        : stats.queued > 0
+          ? "Waiting in queue"
+          : "Uploads";
 
   return (
-    <motion.div
-      initial={{ y: 24, opacity: 0, scale: 0.96 }}
-      animate={{ y: 0, opacity: 1, scale: 1 }}
-      exit={{ y: 24, opacity: 0, scale: 0.96 }}
-      transition={{ type: "spring", stiffness: 420, damping: 32 }}
+    <motion.section
+      aria-label="Upload progress"
+      initial={reduceMotion ? { opacity: 0 } : { y: 24, opacity: 0, scale: 0.96 }}
+      animate={reduceMotion ? { opacity: 1 } : { y: 0, opacity: 1, scale: 1 }}
+      exit={reduceMotion ? { opacity: 0 } : { y: 24, opacity: 0, scale: 0.96 }}
+      transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 32 }}
       className={cn(
         "fixed z-50 overflow-hidden",
         "bottom-5 right-5 sm:bottom-6 sm:right-6",
-        "rounded-2xl border border-border/40 bg-surface/90 backdrop-blur-2xl shadow-xl shadow-black/10",
+        "rounded-2xl border border-border/40 bg-surface/90 shadow-xl backdrop-blur-2xl",
         expanded ? "w-[min(100vw-2rem,340px)]" : "w-auto max-w-[min(100vw-2rem,320px)]"
       )}
-      onMouseEnter={() => { if (hasActive && !pinned) setExpanded(true); }}
-      onMouseLeave={() => { if (!pinned && allDone) setExpanded(false); }}
+      // Hover only ever anticipates the click; the header button below does the
+      // same job for keyboard and touch.
+      onMouseEnter={() => {
+        if (hasActive && !pinned) setExpanded(true);
+      }}
+      onMouseLeave={() => {
+        if (!pinned && allDone) setExpanded(false);
+      }}
     >
-      {/* Compact header — always visible */}
       <div
         className={cn(
-          "flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none",
+          "flex items-center gap-1 pr-2.5",
           expanded && "border-b border-border/30"
         )}
-        onClick={() => setExpanded((v) => !v)}
       >
-        <div className="relative shrink-0">
-          <ProgressRing progress={stats.overallProgress} active={hasActive} />
-          <div className="absolute inset-0 flex items-center justify-center">
-            {allDone && stats.failed === 0 ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-            ) : stats.failed > 0 && allDone ? (
-              <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-            ) : (
-              <span className="text-[9px] font-bold font-mono text-foreground/80">
-                {Math.round(stats.overallProgress)}
-              </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
+        >
+          <span className="relative shrink-0">
+            <ProgressRing progress={stats.overallProgress} active={hasActive} />
+            <span className="absolute inset-0 flex items-center justify-center">
+              {allDone && stats.failed === 0 ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+              ) : allDone && stats.failed > 0 ? (
+                <AlertCircle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />
+              ) : (
+                <span className="font-mono text-xs font-bold tabular-nums text-foreground">
+                  {Math.round(stats.overallProgress)}
+                </span>
+              )}
+            </span>
+          </span>
+
+          <span className="min-w-0 flex-1">
+            <span
+              role="status"
+              className="block truncate text-xs font-semibold leading-tight text-foreground"
+            >
+              {statusLabel}
+            </span>
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              {stats.completed}/{stats.total} files
+              {hasActive && stats.speed > 0 && ` · ${formatSpeed(stats.speed)}`}
+              {hasActive && stats.eta > 0 && ` · ${formatETA(stats.eta)} left`}
+            </span>
+          </span>
+
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+              expanded && "rotate-180"
             )}
-          </div>
-        </div>
+            aria-hidden="true"
+          />
+        </button>
 
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold truncate leading-tight">{statusLabel}</p>
-          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-            {stats.completed}/{stats.total} file
-            {stats.speed > 0 && hasActive && ` · ${formatSpeed(stats.speed)}`}
-            {stats.eta > 0 && hasActive && ` · ${formatETA(stats.eta)}`}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center gap-0.5">
           {hasActive && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
-              onClick={() => { paused ? queue.resume() : queue.pause(); setPaused(!paused); }}
-              title={paused ? "Lanjutkan" : "Jeda"}
+              aria-label={paused ? "Resume uploads" : "Pause uploads"}
+              aria-pressed={paused}
+              onClick={() => {
+                if (paused) queue.resume();
+                else queue.pause();
+                setPaused(!paused);
+              }}
             >
-              {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+              {paused ? (
+                <Play className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <Pause className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
             </Button>
           )}
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            aria-label={pinned ? "Let this panel close on its own" : "Keep this panel open"}
+            aria-pressed={pinned}
             onClick={() => setPinned((p) => !p)}
-            title={pinned ? "Lepas pin" : "Pin panel"}
           >
-            {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+            {pinned ? (
+              <PinOff className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Pin className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleDismiss} title="Tutup">
-            <X className="h-3.5 w-3.5" />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Dismiss upload panel"
+            onClick={handleDismiss}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
           </Button>
         </div>
       </div>
 
-      {/* Expanded detail */}
       <AnimatePresence>
         {expanded && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: reduceMotion ? 0 : 0.2 }}
             className="overflow-hidden"
           >
-            {/* Mini stats bar */}
-            <div className="px-3 py-2 border-b border-border/20">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2.5 text-[10px] text-muted-foreground">
-                  <span className="flex items-center gap-1"><Zap className="h-3 w-3 text-accent" />{formatSpeed(stats.speed)}</span>
-                  {stats.eta > 0 && hasActive && (
-                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatETA(stats.eta)}</span>
+            <div className="border-b border-border/20 px-3 py-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span className="flex items-center gap-2.5">
+                  {stats.speed > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Zap className="h-3 w-3 text-accent" aria-hidden="true" />
+                      {formatSpeed(stats.speed)}
+                    </span>
                   )}
-                </div>
-                <span className="text-[10px] font-mono">{formatBytes(stats.loadedBytes)}/{formatBytes(stats.totalBytes)}</span>
+                  {hasActive && stats.eta > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" aria-hidden="true" />
+                      {formatETA(stats.eta)}
+                    </span>
+                  )}
+                </span>
+                <span className="font-mono tabular-nums">
+                  {formatBytes(stats.loadedBytes)} / {formatBytes(stats.totalBytes)}
+                </span>
               </div>
-              <div className="h-1 rounded-full bg-muted/40 overflow-hidden">
+              <div
+                role="progressbar"
+                aria-label="Overall upload progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(stats.overallProgress)}
+                className="h-1 overflow-hidden rounded-full bg-muted"
+              >
                 <motion.div
-                  className={cn("h-full rounded-full", stats.failed > 0 && !hasActive ? "bg-amber-500" : "bg-accent")}
+                  className={cn(
+                    "h-full rounded-full",
+                    stats.failed > 0 && !hasActive ? "bg-warning" : "bg-accent"
+                  )}
                   animate={{ width: `${stats.overallProgress}%` }}
-                  transition={{ duration: 0.3 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.3 }}
                 />
               </div>
             </div>
 
-            {/* File rows */}
             <div className="max-h-[200px] overflow-y-auto py-1">
-              <AnimatePresence mode="popLayout">
-                {smartItems.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground text-center py-4">Tidak ada upload aktif</p>
-                ) : (
-                  smartItems.map((item) => (
-                    <UploadRow
-                      key={item.id}
-                      item={item}
-                      onRetry={() => queue.retryItem(item.id)}
-                      onCancel={() => queue.cancelItem(item.id)}
-                    />
-                  ))
-                )}
-              </AnimatePresence>
+              {smartItems.length === 0 ? (
+                <p className="py-4 text-center text-xs text-muted-foreground">
+                  Nothing is uploading right now.
+                </p>
+              ) : (
+                <ul>
+                  <AnimatePresence mode="popLayout">
+                    {smartItems.map((item) => (
+                      <UploadRow
+                        key={item.id}
+                        item={item}
+                        onRetry={() => queue.retryItem(item.id)}
+                        onCancel={() => queue.cancelItem(item.id)}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </ul>
+              )}
             </div>
 
             {stats.failed > 0 && (
-              <div className="px-3 py-2 border-t border-border/20 flex justify-end">
-                <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => queue.retryFailed()}>
-                  <RotateCcw className="h-3 w-3 mr-1" /> Ulangi yang gagal
+              <div className="flex justify-end border-t border-border/20 px-3 py-2">
+                <Button variant="ghost" size="sm" onClick={() => queue.retryFailed()}>
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                  Retry {stats.failed} failed
                 </Button>
               </div>
             )}
@@ -341,14 +472,11 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
         )}
       </AnimatePresence>
 
-      {/* Collapsed peek — current file name */}
       {!expanded && smartItems[0] && (
-        <div className="px-3 pb-2.5 -mt-0.5">
-          <p className="text-[10px] text-muted-foreground/70 truncate pl-[48px]">
-            {smartItems[0].file?.name ?? smartItems[0].remotePath}
-          </p>
-        </div>
+        <p className="-mt-0.5 truncate px-3 pb-2.5 pl-12 text-xs text-muted-foreground">
+          {smartItems[0].file?.name ?? smartItems[0].remotePath}
+        </p>
       )}
-    </motion.div>
+    </motion.section>
   );
 }
