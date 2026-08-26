@@ -28,7 +28,7 @@
     "deploy:fix-env": "bash install.sh --fix-env",
     "deploy:health": "bash scripts/deploy/health.sh",
     "deploy:update": "bash update.sh",
-    "deploy:install": "bash scripts/vps-install.sh"
+    "deploy:bootstrap": "bash scripts/deploy/setup.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1081.0",

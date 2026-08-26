@@ -1,19 +1,22 @@
 # Deployment
 
 Production deployment of Aether Cosmos ByAFR on a fresh Ubuntu VPS, from nothing to a
-working HTTPS site. Written to be followable without prior DevOps experience: the
-whole path is a fresh VPS + a domain + `./install.sh`.
+working HTTPS site. One command does the whole thing; everything below that command
+is either an explanation of it or a way out of a specific problem.
 
 For local development, see [Getting Started](getting-started.md).
 
-- [Already installed? Update in three lines](#updating-an-existing-deployment)
-- [First install](#first-install)
-- [Daily operations](#daily-operations)
+- [Before you start](#before-you-start)
+- [Install in one command](#install-in-one-command)
+- [Redeploy](#redeploy)
+- [The `aether` command](#the-aether-command)
+- [What the installer asks for](#what-the-installer-asks-for)
+- [After the first install](#after-the-first-install)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Requirements
+## Before you start
 
 ### Server
 
@@ -23,7 +26,7 @@ For local development, see [Getting Started](getting-started.md).
 | RAM | 2 GB (4 GB recommended) |
 | CPU | 2 vCPU |
 | Disk | 20 GB SSD |
-| Network | Ports **80** and **443** open in both the OS firewall and the provider's security group |
+| Network | Ports **80** and **443** open in the provider's security group |
 
 ### External services (free tiers are sufficient)
 
@@ -36,14 +39,63 @@ For local development, see [Getting Started](getting-started.md).
 The database and Redis are **external to the VPS**. The VPS runs the app, the
 worker, Redis, and Nginx; it never becomes the system of record.
 
+### One thing to do first: point the domain at the VPS
+
+| Type | Name | Value |
+|------|------|-------|
+| A | `aether` (or `@`) | YOUR-VPS-IP |
+
+Propagation takes 5–30 minutes. `ping aether.example.com` must answer with the VPS
+IP before you install — Let's Encrypt verifies over HTTP, so certificate issuance
+fails while DNS still points elsewhere.
+
 ---
 
-## First install
+## Install in one command
 
-The whole sequence, if you already know what goes in `.env`:
+SSH into the VPS and run:
 
 ```bash
-ssh ubuntu@YOUR-VPS-IP
+curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash
+```
+
+That is the whole install. It installs git and Docker, opens ports 80/443, clones
+the repository to `/opt/aether-cosmos`, installs the `aether` command, and then
+asks you four questions (domain, database, R2, admin account) before building and
+starting everything. Expect 5–10 minutes, most of it the container build.
+
+It is safe to re-run: an existing checkout takes the update path instead of being
+cloned over.
+
+> **`curl … | bash` runs code from the internet as it downloads.** That is a
+> reasonable thing to be uneasy about. Download it, read it, then run it:
+>
+> ```bash
+> curl -fsSLO https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh
+> less setup.sh
+> bash setup.sh
+> ```
+
+Knobs, if the defaults do not fit:
+
+```bash
+AETHER_DIR=/srv/aether  bash setup.sh   # install somewhere else
+AETHER_BRANCH=dev       bash setup.sh   # a different branch
+AETHER_NO_FIREWALL=1    bash setup.sh   # leave ufw alone
+AETHER_NO_INSTALL=1     bash setup.sh   # clone and stop, configure by hand
+```
+
+### Doing it by hand instead
+
+The bootstrap is the same seven commands you would type yourself. If you would
+rather see each one, run these **one line at a time**:
+
+```bash
+sudo apt update && sudo apt install -y git curl
+
+# Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER" && newgrp docker
 
 # /opt belongs to root, so hand the directory over before cloning — cloning as
 # root instead would leave every file, including .env, owned by root.
@@ -53,78 +105,128 @@ cd /opt/aether-cosmos
 
 # Into "." — the URL and the destination on one line is the shape that breaks
 # when a terminal wraps a pasted block, and the clone then lands in $HOME.
-git clone <repo-url> .
-chmod +x install.sh deploy.sh update.sh
+git clone https://github.com/AFR-projection/Aether-Cosmos.git .
 
-cp .env.example .env
-nano .env          # DATABASE_URL, R2 credentials, domain — see step 4
-
-./install.sh
+./install.sh --wizard      # or: cp .env.example .env && nano .env && ./install.sh
 ```
 
-Run these one line at a time. Pasting the whole block at once works only if
-nothing wraps: a broken line turns `git clone <url> /opt/aether-cosmos` into a
-clone into `$HOME` followed by bash trying to execute the directory.
+Pasting that whole block at once works only if nothing wraps: a broken line turns
+`git clone <url> /opt/aether-cosmos` into a clone into `$HOME`, followed by bash
+trying to execute a directory.
 
-The steps below explain each part.
+---
 
-### Step 1 — Point the domain at the VPS
-
-In your DNS panel:
-
-| Type | Name | Value |
-|------|------|-------|
-| A | `aether` (or `@`) | YOUR-VPS-IP |
-
-Propagation takes 5–30 minutes. Verify before continuing — `ping aether.example.com`
-must resolve to the VPS IP. Certificate issuance fails if it does not.
-
-### Step 2 — Open the firewall
+## Redeploy
 
 ```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-sudo ufw status
+aether update
 ```
 
-Cloud providers (AWS, Tencent, GCP, …) have a second firewall in the console. Open
-ports 80 and 443 in that **security group** as well, or the certificate request
-will time out even though `ufw` looks correct.
+From anywhere on the VPS, as the user who installed it. It backs up `.env` and the
+Nginx config, pulls the latest commit, re-validates the configuration, rebuilds the
+containers, syncs the database schema, renews the certificate, and health-checks
+the result — stopping at the first stage that fails, and printing which one.
 
-### Step 3 — Install Docker
+**Push first.** It pulls from the Git remote, so your local work has to be on
+`origin/main` before it can arrive on the server.
 
-`./install.sh` builds and runs everything in containers, so Docker and the Compose
-plugin have to exist first. It refuses to start without them.
+Rebuild without pulling — after editing `.env`, for example:
 
 ```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker "$USER"
-newgrp docker            # or log out and back in
-docker compose version   # must print a version
+aether deploy
 ```
 
-Without the group membership the scripts still work — they fall back to
-`sudo docker` and say so — but every container command then needs sudo.
+### When the update fails with "Not possible to fast-forward"
 
-### Step 4 — Write `.env` and install
+```
+fatal: Not possible to fast-forward, aborting.
+```
+
+The VPS checkout has diverged from the remote — someone edited files on the server.
+Three ways out, in order of preference:
+
+**1. Force reset** — the right choice when nothing on the VPS is worth keeping:
 
 ```bash
-ssh ubuntu@YOUR-VPS-IP
-sudo apt update && sudo apt install -y git curl
+aether update --force     # discards local changes, resets to origin, then updates
+```
 
-# /opt belongs to root. Without this the clone fails with
-# "could not create work tree dir '/opt/aether-cosmos': Permission denied".
-sudo mkdir -p /opt/aether-cosmos
-sudo chown "$USER:$USER" /opt/aether-cosmos
+**2. Stash and rebase** — keeps the local changes:
+
+```bash
 cd /opt/aether-cosmos
+git stash                       # set local changes aside
+git fetch origin
+git rebase origin/main
+git stash pop                   # reapply; resolve conflicts by hand if any
+aether update
+```
 
-git clone <repo-url> .
-chmod +x install.sh deploy.sh update.sh
+**3. Manual reset** — same effect as option 1, done explicitly:
 
+```bash
+cd /opt/aether-cosmos
+git fetch origin
+git reset --hard origin/main    # discards all local changes
+aether update
+```
+
+Options 1 and 3 delete uncommitted work on the server permanently. `.env` and the
+Nginx config survive either way, because the update backs them up first.
+
+---
+
+## The `aether` command
+
+Installed to `/usr/local/bin/aether` by the bootstrap, and it remembers where the
+checkout lives (`/etc/aether-cosmos.conf`), so none of these need a `cd` first.
+
+| Command | What it does |
+|---------|--------------|
+| `aether update` | Pull, back up, rebuild, sync schema, renew cert, health-check |
+| `aether deploy` | Rebuild the checkout already on the VPS, without pulling |
+| `aether status` | Health of every service — Redis, app, worker, Nginx, DB, SSL, email |
+| `aether logs [service]` | Follow logs; `app`, `worker`, `redis`, or `nginx` |
+| `aether ps` | Container list |
+| `aether doctor` | Re-run every pre-flight check: `.env`, database, R2, DNS, ports |
+| `aether restart [service]` | Restart one service, or all of them |
+| `aether stop` / `aether start` | Stop or start the whole stack |
+| `aether env` | Open `.env` in `$EDITOR`, then re-validate it |
+| `aether backup` | Copy `.env` and the Nginx config into `.deploy/backups/` |
+| `aether shell [service]` | Shell inside a container (default `app`) |
+| `aether version` | Version, install directory, domain, deployed commit |
+
+The repository scripts it wraps still work directly — `./install.sh`,
+`./deploy.sh`, `./update.sh` — and `./bin/aether` runs from a checkout without
+being installed. `aether` is the surface worth remembering.
+
+---
+
+## What the installer asks for
+
+Four things. Have them open in a browser tab before you start.
+
+**1. Domain and email** — a bare hostname, and an address Let's Encrypt can warn
+about expiry.
+
+**2. `DATABASE_URL`** — copy it from the Neon dashboard exactly as given.
+
+**3. R2 credentials** — account ID, access key ID, secret access key, bucket name,
+and the bucket's public URL.
+
+**4. Admin account** — username and a password of at least 10 characters. This
+becomes the master account.
+
+The wizard writes them to `/opt/aether-cosmos/.env` and generates `SESSION_SECRET`
+itself. Nothing leaves the machine.
+
+### Or write `.env` yourself
+
+```bash
+cd /opt/aether-cosmos
 cp .env.example .env
 nano .env
+./install.sh
 ```
 
 `cp` failing with `cannot stat '.env.example'` means the clone did not land
@@ -171,23 +273,17 @@ REDIS_DISABLED=false
 Every variable, including the optional ones, is documented in
 [Getting Started § Environment variables](getting-started.md#environment-variables-reference).
 
-Then run the installer:
+Everything settable from the running app — upload limits, presigned URL lifetime,
+rate limits, login lockout — lives in **Admin → Settings**, not in `.env`.
 
-```bash
-./install.sh
-```
+### What the installer does, in order
 
-It performs, in order:
-
-1. validates `.env` formatting,
+1. validates `.env` formatting and reachability of the database and R2,
 2. requests a Let's Encrypt certificate,
 3. generates the Nginx configuration,
 4. builds and starts the containers (app, worker, redis, nginx),
 5. syncs the database schema and bootstraps the master admin,
 6. health-checks every service.
-
-An interactive wizard is available instead of hand-editing `.env`:
-`./install.sh --wizard`.
 
 A successful run ends with a health report; the labels are `Redis`, `App`,
 `Worker`, `Nginx`, `Database`, `SSL`, and `Email`:
@@ -204,9 +300,15 @@ A successful run ends with a health report; the labels are `Redis`, `App`,
 ```
 
 `Email` warns rather than fails on a fresh install — see
-[Step 7](#step-7--add-an-email-sender-otp-delivery).
+[Add an email sender](#3-add-an-email-sender-otp-delivery).
 
-### Step 5 — Configure R2 CORS
+---
+
+## After the first install
+
+Three things the installer cannot do for you.
+
+### 1. Configure R2 CORS
 
 Browser uploads go straight to R2, so the bucket must accept your origin.
 Uploads fail with a CORS error until this is done.
@@ -218,13 +320,13 @@ Uploads fail with a CORS error until this is done.
 wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
 ```
 
-### Step 6 — Allowlist the VPS in Neon (if required)
+### 2. Allowlist the VPS in Neon (if required)
 
 Neon projects with IP restrictions enabled reject the VPS until it is listed:
 Neon Dashboard → Project → Settings → **IP Allow** → add the VPS public IP. The
 installer prints the IP it connected from when the check fails.
 
-### Step 7 — Add an email sender (OTP delivery)
+### 3. Add an email sender (OTP delivery)
 
 Registration codes, verification codes, and notifications go out over SMTP using
 Gmail senders you add yourself. Until at least one sender is verified, the health
@@ -247,79 +349,22 @@ it survives restarts.
 > Rotating `SESSION_SECRET` makes every stored App Password unreadable. Re-enter
 > them from Admin → Email afterwards.
 
----
+### Backups
 
-## Updating an existing deployment
+Automatic, on every `aether update`: `.env` and the generated Nginx config, under
+`.deploy/backups/`. On demand: `aether backup`.
 
-Three lines, no extra steps:
+Worth doing yourself:
 
-```bash
-cd /opt/aether-cosmos
-git pull            # fetch the latest code
-./update.sh         # backup → validate → rebuild → sync schema → health check
-```
-
-`./update.sh` runs `git pull` itself, so this is equivalent:
-
-```bash
-cd /opt/aether-cosmos && ./update.sh
-```
-
-It backs up `.env` and the Nginx config, rebuilds the containers, syncs the
-database schema, renews the certificate, and health-checks at the end. If any
-stage fails it stops and reports which one.
-
-**Push first.** `./update.sh` pulls from the Git remote, so commit and push your
-local changes before running it on the VPS.
-
-Backups it writes before touching anything:
-
-- `.deploy/backups/.env.TIMESTAMP`
-- `.deploy/backups/nginx.TIMESTAMP.conf`
-
-### When the update fails with "Not possible to fast-forward"
-
-```
-fatal: Not possible to fast-forward, aborting.
-```
-
-The VPS checkout has diverged from the remote — someone edited files on the server.
-Three ways out, in order of preference:
-
-**1. Force reset** — the right choice when nothing on the VPS is worth keeping:
-
-```bash
-./update.sh --force      # discards local changes, resets to origin, then updates
-```
-
-**2. Stash and rebase** — keeps the local changes:
-
-```bash
-cd /opt/aether-cosmos
-git stash                       # set local changes aside
-git fetch origin
-git rebase origin/main          # or origin/master
-git stash pop                   # reapply; resolve conflicts by hand if any
-./update.sh
-```
-
-**3. Manual reset** — same effect as option 1, done explicitly:
-
-```bash
-cd /opt/aether-cosmos
-git fetch origin
-git reset --hard origin/main    # discards all local changes
-./update.sh
-```
-
-Options 1 and 3 delete uncommitted work on the server permanently. `.env` and the
-Nginx config survive either way, because `./update.sh` backs them up first.
+- keep an offline copy of `.env` — it holds every secret, and nothing else does;
+- use Neon's built-in backups or branches for the database;
+- R2 objects are already durable on Cloudflare's side.
 
 ### Why schema updates need no manual step
 
 - PostgreSQL (Neon) and Redis are **external services**. The VPS only connects to
   them, and it connects to the same database used during development.
-- `./update.sh` syncs the schema with **`npm run db:push`**, not
+- `aether update` syncs the schema with **`npm run db:push`**, not
   `drizzle-kit migrate`. `db:push` compares `lib/db/schema.ts` against the live
   database and applies only the difference; when they already match it is a no-op.
 - Schema changes already applied to Neon during development (new columns, indexes,
@@ -334,39 +379,17 @@ Nginx config survive either way, because `./update.sh` backs them up first.
 
 ---
 
-## Daily operations
-
-| Command | What it does |
-|---------|--------------|
-| `./install.sh` | First-time install (optionally with `--wizard`) |
-| `./update.sh` | Update: pull, back up, rebuild, sync schema, health check |
-| `./deploy.sh` | Rebuild from the code already on the VPS, without pulling |
-| `npm run deploy:logs` | Tail container logs |
-| `npm run deploy:health` | Report the status of every service |
-
-Use `./update.sh` to move to a newer version; use `./deploy.sh` only to rebuild
-the current checkout, for example after editing `.env`.
-
-### Backups
-
-Automatic, on every `./update.sh`: `.env` and the generated Nginx config, under
-`.deploy/backups/`.
-
-Worth doing yourself:
-
-- keep an offline copy of `.env` — it holds every secret, and nothing else does;
-- use Neon's built-in backups or branches for the database;
-- R2 objects are already durable on Cloudflare's side.
-
----
-
 ## Troubleshooting
+
+Start with `aether doctor` — it re-runs every pre-flight check (`.env` format,
+database, R2, DNS, ports) and names what is wrong. `aether status` reports the
+health of the running services.
 
 ### Login fails or returns a CSRF error
 
 - Access the site over **HTTPS**, not the raw IP or `http://`.
 - `NEXT_PUBLIC_APP_URL` in `.env` must be exactly `https://your-domain.com`.
-- That value is baked in at build time — rebuild after changing it: `./deploy.sh`.
+- That value is baked in at build time — rebuild after changing it: `aether deploy`.
 
 ### Certificate issuance fails
 
@@ -390,7 +413,7 @@ The installer falls back to `sudo docker` when it has to.
 - Re-copy `DATABASE_URL` from the Neon dashboard — it must be **one unbroken line**.
 - Neon → Project Settings → **IP Allow** → add the VPS IP (printed by the installer
   when the connection is refused), or disable the restriction temporarily.
-- Verify with `npm run deploy:health`.
+- Verify with `aether doctor`.
 
 ### `.env` is malformed (stray quote or newline inside a value)
 
@@ -411,7 +434,7 @@ Repair it in place, or regenerate it:
 ### Uploads fail with a CORS error
 
 - The R2 bucket CORS policy must list your HTTPS origin (see
-  [Step 5](#step-5--configure-r2-cors)).
+  [Configure R2 CORS](#1-configure-r2-cors)).
 - `NEXT_PUBLIC_APP_URL` must match the URL in the browser's address bar.
 
 ### Encrypted files ask for a passphrase and are excluded from ZIPs
@@ -430,7 +453,7 @@ encrypted in the browser before they reach the server:
 ### The worker reports FAIL in the health check
 
 ```bash
-docker compose -f docker/docker-compose.yml logs worker --tail 50
+aether logs worker
 ```
 
 Usual causes: Redis is down, `DATABASE_URL` is wrong, or the R2 credentials are
@@ -441,7 +464,7 @@ invalid.
 Delivery is plain SMTP through the Gmail senders in **Admin → Email**. There is no
 session or socket to restore — a stalled pool is always a sender problem.
 
-1. Check the health line: `npm run deploy:health` reports `Email OK` with the
+1. Check the health line: `aether status` reports `Email OK` with the
    number of ready senders, or `WARN` when none is verified.
 2. **Admin → Email** shows each sender's status, last error, daily count, and
    cooldown. A sender on cooldown resumes automatically; one marked failed needs
@@ -487,16 +510,17 @@ metadata and Second Brain content.
 
 | Path | Purpose |
 |------|---------|
+| `scripts/deploy/setup.sh` | The one-command bootstrap; the only file that runs before the clone |
+| `bin/aether` | The `aether` command, copied to `/usr/local/bin` |
 | `install.sh` | Install entry point |
-| `update.sh` | Safe update path |
-| `deploy.sh` | Rebuild without pulling |
+| `update.sh` | Safe update path (`aether update`) |
+| `deploy.sh` | Rebuild without pulling (`aether deploy`) |
 | `.env` | All secrets and configuration |
 | `docker/docker-compose.yml` | Container topology |
 | `docker/generated/nginx.conf` | Generated Nginx config — do not edit by hand |
 | `scripts/deploy/` | Modular deploy steps |
 | `.deploy/backups/` | Automatic `.env` and Nginx backups |
-
-`scripts/vps-deploy.sh` is a legacy script kept for reference; use `./install.sh`.
+| `/etc/aether-cosmos.conf` | Where `aether` looks up the install directory |
 
 ---
 

@@ -24,6 +24,11 @@ while [[ $# -gt 0 ]]; do
       echo "  --wizard   Wizard interaktif (opsional)"
       echo "  --fix-env    Perbaiki .env rusak (multiline/quote)"
       echo "  --skip-ssl   Skip SSL (testing saja)"
+      echo ""
+      echo "  VPS baru dari nol (install Docker, clone, lalu wizard):"
+      echo "    curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash"
+      echo ""
+      echo "  Setelah terinstall semuanya lewat satu perintah: aether help"
       exit 0
       ;;
     *) die "Unknown option: $1" ;;
@@ -31,9 +36,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 main() {
-  print_banner
+  local started=$SECONDS
+  print_banner "First install"
   cd "$ROOT"
 
+  # 6 steps on the happy path; --skip-ssl merges two of them away, which is why the
+  # total is computed rather than hardcoded — a "[5/6]" that never reaches 6 looks
+  # like something crashed.
+  if [[ $SKIP_SSL -eq 0 ]]; then step_init 6; else step_init 5; fi
+
+  step "Docker"
   ensure_docker
 
   if [[ $FIX_ENV -eq 1 ]]; then
@@ -44,6 +56,7 @@ main() {
     exit $?
   fi
 
+  step "Configuration"
   if [[ $USE_WIZARD -eq 1 ]]; then
     bash "$SCRIPT_DIR/wizard.sh"
   else
@@ -53,15 +66,19 @@ main() {
   fi
 
   load_env
+
+  step "Checking .env, database, R2, DNS, ports"
   bash "$SCRIPT_DIR/validate.sh"
 
   if [[ $SKIP_SSL -eq 0 ]]; then
+    step "HTTPS certificate"
     bash "$SCRIPT_DIR/ssl.sh"
     bash "$SCRIPT_DIR/nginx.sh"
   else
     warn "SSL skipped — only for development testing"
   fi
 
+  step "Building and starting containers"
   bash "$SCRIPT_DIR/deploy-stack.sh"
 
   if [[ $SKIP_SSL -eq 0 ]]; then
@@ -69,11 +86,12 @@ main() {
     "${COMPOSE[@]}" up -d nginx
   fi
 
+  step "Health check"
   if bash "$SCRIPT_DIR/health.sh"; then
-    print_final_status "https://${DEPLOY_DOMAIN}"
+    print_final_status "https://${DEPLOY_DOMAIN}" "$(( SECONDS - started ))"
   else
     warn "Deploy finished with warnings — review health output above"
-    print_final_status "https://${DEPLOY_DOMAIN}"
+    print_final_status "https://${DEPLOY_DOMAIN}" "$(( SECONDS - started ))"
     exit 1
   fi
 }

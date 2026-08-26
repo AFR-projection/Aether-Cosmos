@@ -13,14 +13,16 @@ if [[ "${1:-}" == "--force" ]]; then
 fi
 
 main() {
-  print_banner
+  local started=$SECONDS
+  print_banner "Update"
   cd "$ROOT"
   [[ -f "$ENV_FILE" ]] || die "No .env — run ./install.sh first"
 
   load_env
   ensure_docker
+  step_init 7
 
-  log "Backing up configuration..."
+  step "Backing up .env and nginx config"
   mkdir -p "$ROOT/.deploy/backups"
   local stamp
   stamp="$(date +%Y%m%d-%H%M%S)"
@@ -28,7 +30,10 @@ main() {
   [[ -f "$NGINX_GEN" ]] && cp "$NGINX_GEN" "$ROOT/.deploy/backups/nginx.${stamp}.conf"
   ok "Backup saved to .deploy/backups/"
 
+  step "Fetching the latest code"
+  local before="" after=""
   if [[ -d .git ]]; then
+    before="$(git rev-parse HEAD 2>/dev/null || true)"
     log "git pull..."
 
     if [[ "$FORCE_RESET" == "true" ]]; then
@@ -60,17 +65,31 @@ main() {
 
       ok "Repository updated"
     fi
+
+    after="$(git rev-parse HEAD 2>/dev/null || true)"
+    # Saying "already up to date" out loud matters: without it, a no-op update looks
+    # identical to a real one and the operator cannot tell whether the pull worked.
+    if [[ -n "$before" && "$before" == "$after" ]]; then
+      ok "Already at the latest commit ($(git log -1 --format=%h))"
+    elif [[ -n "$before" ]]; then
+      log "New commits:"
+      # `|| true`: head closes the pipe after ten lines, git dies of SIGPIPE, and
+      # pipefail would otherwise abort the whole update over a cosmetic listing.
+      git log --oneline --no-decorate "${before}..${after}" | head -n 10 | sed 's/^/    /' || true
+    fi
   fi
 
+  step "Checking .env, database, R2, DNS, ports"
   bash "$SCRIPT_DIR/validate.sh"
 
-  log "Rebuilding containers..."
+  step "Rebuilding containers"
   "${COMPOSE[@]}" build app worker setup
   "${COMPOSE[@]}" up -d redis app worker
 
-  log "Database migration..."
+  step "Syncing the database schema"
   "${COMPOSE[@]}" --profile setup run --rm setup
 
+  step "Certificate and nginx"
   if [[ -f "$NGINX_TEMPLATE" ]]; then
     bash "$SCRIPT_DIR/ssl.sh" 2>/dev/null || warn "SSL renew skipped"
     bash "$SCRIPT_DIR/nginx.sh" || warn "Nginx config generation skipped"
@@ -79,8 +98,9 @@ main() {
     "${COMPOSE[@]}" up -d
   fi
 
+  step "Health check"
   bash "$SCRIPT_DIR/health.sh" || die "Update completed with health failures"
-  ok "Update complete — https://${DEPLOY_DOMAIN}"
+  print_final_status "https://${DEPLOY_DOMAIN}" "$(( SECONDS - started ))"
 }
 
 main "$@"

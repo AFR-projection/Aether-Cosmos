@@ -30,6 +30,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 log()  { echo -e "${CYAN}==>${NC} $*"; }
@@ -37,6 +38,86 @@ ok()   { echo -e "${GREEN}  ✓${NC} $*"; }
 warn() { echo -e "${YELLOW}  !${NC} $*"; }
 fail() { echo -e "${RED}  ✗${NC} $*" >&2; }
 die()  { fail "$*"; exit 1; }
+
+# ── Frame drawing ─────────────────────────────────────────────────────────────
+# Padding is computed from the plain text, never from the string that carries the
+# colour escapes — `${#s}` counts those escapes as characters and every box would
+# come out ragged.
+BOX_W=62
+BOX_RULE="$(printf '─%.0s' $(seq 1 $BOX_W))"
+SUB_RULE="$(printf '─%.0s' $(seq 1 42))"
+
+box_top() { printf "${DIM}╭%s╮${NC}\n" "$BOX_RULE"; }
+box_mid() { printf "${DIM}├%s┤${NC}\n" "$BOX_RULE"; }
+box_bot() { printf "${DIM}╰%s╯${NC}\n" "$BOX_RULE"; }
+
+box_row() {
+  local text=${1:-} color=${2:-} pad
+  pad=$(( BOX_W - 2 - ${#text} ))
+  (( pad < 0 )) && pad=0
+  printf "${DIM}│${NC} ${color}%s${NC}%*s ${DIM}│${NC}\n" "$text" "$pad" ""
+}
+
+box_kv() {
+  local label=$1 value=$2 color=${3:-} plain pad
+  plain="$(printf '%-11s %s' "$label" "$value")"
+  pad=$(( BOX_W - 2 - ${#plain} ))
+  (( pad < 0 )) && pad=0
+  printf "${DIM}│${NC} ${BOLD}%-11s${NC} ${color}%s${NC}%*s ${DIM}│${NC}\n" \
+    "$label" "$value" "$pad" ""
+}
+
+# ── Step counter ──────────────────────────────────────────────────────────────
+# Only the orchestrator calls step(); the sub-scripts it invokes are separate
+# processes and could not share the counter anyway.
+STEP_TOTAL=0
+STEP_N=0
+step_init() { STEP_TOTAL=${1:-0}; STEP_N=0; }
+
+step() {
+  STEP_N=$(( STEP_N + 1 ))
+  echo
+  if (( STEP_TOTAL > 0 )); then
+    printf "${BOLD}${CYAN}[%d/%d]${NC} ${BOLD}%s${NC}\n" "$STEP_N" "$STEP_TOTAL" "$1"
+  else
+    printf "${BOLD}${CYAN}==>${NC} ${BOLD}%s${NC}\n" "$1"
+  fi
+  printf "${DIM}%s${NC}\n" "$BOX_RULE"
+}
+
+# A heading inside a step, for scripts the orchestrator runs as a child. It carries
+# no number on purpose: a "[2/4]" nested under the installer's own "[2/6]" reads
+# like the counter jumped backwards.
+section() {
+  echo
+  printf "${BOLD}${CYAN}  ▸ ${NC}${BOLD}%s${NC}\n" "$1"
+  printf "${DIM}  %s${NC}\n" "$SUB_RULE"
+}
+
+elapsed_human() {
+  local secs=${1:-0}
+  if (( secs < 60 )); then
+    printf '%ds' "$secs"
+  else
+    printf '%dm %ds' "$(( secs / 60 ))" "$(( secs % 60 ))"
+  fi
+}
+
+# Report that a secret was captured without putting it back on screen. Length only:
+# a scrollback buffer, an SSH log, or a screen share would otherwise carry the value
+# out of the machine it was typed into.
+#
+# ASCII mask on purpose. Box padding is computed with `${#s}`, which counts bytes
+# unless the locale is UTF-8, so a row of bullets would come out short on a host
+# with LANG unset.
+secret_hint() {
+  local v=${1:-}
+  if [[ -z "$v" ]]; then
+    printf 'belum diisi'
+  else
+    printf '********** (%d karakter)' "${#v}"
+  fi
+}
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Command '$1' not found. Install it first."
@@ -202,29 +283,45 @@ start_nginx_container() {
   "${COMPOSE[@]}" up -d nginx
 }
 
+app_version() {
+  local v=""
+  if [[ -f "$ROOT/package.json" ]]; then
+    v="$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$ROOT/package.json" | head -n1)"
+  fi
+  printf '%s' "${v:-0.0.0}"
+}
+
 print_banner() {
+  local subtitle=${1:-Production deploy}
   echo
-  echo -e "${BOLD}==============================================${NC}"
-  echo -e "${BOLD}  Aether Cosmos ByAFR — Production Installer${NC}"
-  echo -e "${BOLD}==============================================${NC}"
-  echo
+  box_top
+  box_row "AETHER COSMOS ByAFR   v$(app_version)" "$BOLD"
+  box_row "$subtitle" "$DIM"
+  box_bot
 }
 
 print_final_status() {
   local url="${1:-https://${DEPLOY_DOMAIN:-unknown}}"
+  local seconds=${2:-}
+  # A hand-rolled install never ran setup.sh, so `aether` is not on PATH there.
+  # Print the form that actually works on this machine rather than the prettier one.
+  local cli="aether"
+  command -v aether >/dev/null 2>&1 || cli="./bin/aether"
   echo
-  echo -e "${BOLD}==========================================${NC}"
-  echo -e "${GREEN}${BOLD}  Deployment Complete${NC}"
-  echo -e "${BOLD}==========================================${NC}"
-  echo -e "  Application : ${GREEN}Running${NC}"
-  echo -e "  URL         : ${BOLD}${url}${NC}"
-  echo -e "  Admin login : MASTER_USERNAME / MASTER_PASSWORD (from setup)"
-  echo
-  echo "  Commands:"
-  echo "    ./update.sh          Update safely"
-  echo "    npm run deploy:logs  View logs"
-  echo "    npm run deploy:health  Re-check services"
-  echo -e "${BOLD}==========================================${NC}"
+  box_top
+  box_row "DEPLOYED" "${GREEN}${BOLD}"
+  box_mid
+  box_kv "URL" "$url" "$BOLD"
+  box_kv "Admin" "${MASTER_USERNAME:-see .env}"
+  [[ -n "$seconds" ]] && box_kv "Took" "$(elapsed_human "$seconds")" "$DIM"
+  box_mid
+  box_row "Next:" "$DIM"
+  box_row "  $cli status     health of every service"
+  box_row "  $cli logs       follow the logs"
+  box_row "  $cli update     pull, rebuild, migrate, verify"
+  [[ "$cli" == "./bin/aether" ]] && \
+    box_row "  sudo install -m 0755 bin/aether /usr/local/bin/" "$DIM"
+  box_bot
   echo
 }
 

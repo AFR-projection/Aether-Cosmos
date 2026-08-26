@@ -53,26 +53,30 @@ A type error there is only caught by the build. See
 
 ## Production (VPS + Docker)
 
+`aether doctor` re-checks the configuration (`.env`, database, R2, DNS, ports) and
+`aether status` reports the running services. Both name the failing item, so start
+there rather than reading logs cold.
+
 **SSL certificate missing or renewal fails**
 
-Certificates are fetched and renewed by the installer (`install.sh`) and updater
-(`update.sh`). If the health check reports `SSL FAIL`:
+Certificates are fetched and renewed by the installer (`install.sh`) and by
+`aether update`. If the health check reports `SSL FAIL`:
 
 1. Confirm DNS points at the VPS public IP (`dig +short <yourdomain>`).
 2. Confirm port 80 is open (`ufw allow 80`).
-3. Re-run `./update.sh` — it requests a certificate if none exists.
-4. If the request still fails, check `docker compose -f docker/docker-compose.yml logs nginx`.
+3. Re-run `aether update` — it requests a certificate if none exists.
+4. If the request still fails, check `aether logs nginx`.
 
-Let's Encrypt renews certs older than 60 days automatically on every `update.sh`.
+Let's Encrypt renews certs older than 60 days automatically on every
+`aether update`.
 
 **Container won't start**
 
 Check the service logs:
 
 ```bash
-cd /var/www/storage
-docker compose -f docker/docker-compose.yml logs app --tail 100
-docker compose -f docker/docker-compose.yml logs worker --tail 100
+aether logs app
+aether logs worker
 ```
 
 Usual causes:
@@ -83,12 +87,12 @@ Usual causes:
 - `DATABASE_URL` is unreachable — test it with `psql`.
 - Docker permissions — the installer adds your user to the `docker` group, but the
   session must be restarted (`exit`, then SSH back in) for the group membership to
-  apply.
+  apply. Until then the scripts fall back to `sudo docker` on their own.
 
 **Database connection fails**
 
-1. Verify `DATABASE_URL` in `/var/www/storage/.env` points at the right Neon
-   project.
+1. Verify `DATABASE_URL` in `/opt/aether-cosmos/.env` points at the right Neon
+   project — `aether env` opens it and re-validates on save.
 2. Check the Neon dashboard **IP Allow** list includes the VPS public IP.
 3. Test the connection: `psql "$DATABASE_URL" -c "SELECT 1"` from the VPS.
 
@@ -100,13 +104,13 @@ enrichment). A `FAIL` status means the container is running but recent logs cont
 
 1. Read the logs:
    ```bash
-   docker compose -f docker/docker-compose.yml logs worker --tail 100
+   aether logs worker
    ```
 2. Usual causes: Redis went away (`ECONNREFUSED`), R2 credentials are wrong
    (`ENOTFOUND` for `*.r2.cloudflarestorage.com`), or `DATABASE_URL` is stale.
 3. After fixing `.env`, restart the worker:
    ```bash
-   docker compose -f docker/docker-compose.yml restart worker
+   aether restart worker
    ```
 
 **CSRF token mismatch after changing `NEXT_PUBLIC_APP_URL`**
@@ -118,9 +122,7 @@ old domain in the cookie, and the new origin rejects it as cross-site.
 Fix: rebuild and restart:
 
 ```bash
-docker compose -f docker/docker-compose.yml down
-docker compose -f docker/docker-compose.yml build --no-cache app worker
-docker compose -f docker/docker-compose.yml up -d
+aether deploy
 ```
 
 **OTP emails stop arriving**

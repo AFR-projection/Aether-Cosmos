@@ -47,25 +47,48 @@ require_secret_nonempty() {
 }
 
 run_wizard() {
-  print_banner
-  echo "Wizard akan membuat file .env otomatis."
-  echo "Tekan Enter untuk nilai default (jika ada)."
+  print_banner "Setup wizard"
+
+  local public_ip
+  public_ip="$(get_public_ip)"
+
+  echo "  Wizard ini menulis .env untukmu. Enter = pakai nilai default."
+  echo "  Secret disembunyikan saat diketik dan tidak pernah ditampilkan lagi."
   echo
 
+  section "Domain  ·  1 dari 4"
+  echo -e "  IP publik VPS ini: ${BOLD}${public_ip}${NC}"
+  echo -e "  ${DIM}A record domain harus sudah mengarah ke IP di atas.${NC}"
+  echo
   prompt_into "Domain (contoh: aether.example.com)" DEPLOY_DOMAIN
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN#https://}"
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN#http://}"
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN%%/*}"
+  require_nonempty "Domain" DEPLOY_DOMAIN
 
-  prompt_into "Email admin (Let's Encrypt notifications)" CERTBOT_EMAIL "admin@${DEPLOY_DOMAIN}"
+  # Cek DNS di sini, bukan nanti: kalau A record belum mengarah ke VPS, certbot
+  # yang gagal 10 menit kemudian jauh lebih membingungkan daripada peringatan ini.
+  local resolved=""
+  resolved="$(getent hosts "$DEPLOY_DOMAIN" 2>/dev/null | awk '{print $1}' | head -n1 || true)"
+  if [[ -z "$resolved" ]]; then
+    warn "$DEPLOY_DOMAIN belum resolve — SSL akan gagal sampai DNS jadi"
+  elif [[ "$resolved" == "$public_ip" ]]; then
+    ok "DNS sudah benar ($DEPLOY_DOMAIN → $resolved)"
+  else
+    warn "$DEPLOY_DOMAIN mengarah ke $resolved, bukan $public_ip"
+  fi
 
+  prompt_into "Email admin (notifikasi Let's Encrypt)" CERTBOT_EMAIL "admin@${DEPLOY_DOMAIN}"
+
+  section "Database  ·  2 dari 4"
+  echo -e "  ${DIM}Ambil connection string dari dashboard Neon — satu baris utuh.${NC}"
   echo
-  echo "--- Database (Neon PostgreSQL) ---"
-  prompt_into "DATABASE_URL (paste dari Neon dashboard)" DATABASE_URL
+  prompt_into "DATABASE_URL" DATABASE_URL
   require_nonempty "DATABASE_URL" DATABASE_URL
 
+  section "Cloudflare R2  ·  3 dari 4"
+  echo -e "  ${DIM}dash.cloudflare.com → R2 → bucket → Manage API tokens.${NC}"
   echo
-  echo "--- Cloudflare R2 ---"
   prompt_into "R2 Account ID" R2_ACCOUNT_ID
   require_nonempty "R2 Account ID" R2_ACCOUNT_ID
   prompt_into "R2 Access Key ID" R2_ACCESS_KEY_ID
@@ -78,8 +101,7 @@ run_wizard() {
   prompt_into "R2 Public URL (https://pub-xxx.r2.dev)" R2_PUBLIC_URL
   require_nonempty "R2 Public URL" R2_PUBLIC_URL
 
-  echo
-  echo "--- Admin pertama ---"
+  section "Akun admin  ·  4 dari 4"
   prompt_into "Admin username" MASTER_USERNAME "ByAFR"
   prompt_secret_into "Admin password (min 10 karakter)" MASTER_PASSWORD
   while [[ ${#MASTER_PASSWORD} -lt 10 ]]; do
@@ -99,6 +121,30 @@ run_wizard() {
   REDIS_URL=redis://redis:6379
   REDIS_DISABLED=false
   NODE_ENV=production
+
+  # Ringkasan sebelum menulis. Nilai rahasia hanya dilaporkan panjangnya —
+  # menampilkan ulang isinya bikin secret nongkrong di scrollback dan di log SSH.
+  echo
+  box_top
+  box_row "Konfirmasi" "$BOLD"
+  box_mid
+  box_kv "Domain" "$DEPLOY_DOMAIN"
+  box_kv "URL" "$NEXT_PUBLIC_APP_URL"
+  box_kv "Email" "$CERTBOT_EMAIL"
+  box_kv "Database" "$(secret_hint "$DATABASE_URL")"
+  box_kv "R2 bucket" "$R2_BUCKET_NAME"
+  box_kv "R2 secret" "$(secret_hint "$R2_SECRET_ACCESS_KEY")"
+  box_kv "Admin" "$MASTER_USERNAME"
+  box_kv "Password" "$(secret_hint "$MASTER_PASSWORD")"
+  box_kv "Secret" "digenerate otomatis (64 hex)" "$DIM"
+  box_bot
+  echo
+
+  local confirm=""
+  read -rp "  Tulis ke .env dan lanjut deploy? [Y/n] " confirm </dev/tty || true
+  case "${confirm,,}" in
+    n|no) die "Dibatalkan — tidak ada yang ditulis. Jalankan ./install.sh --wizard lagi kapan saja." ;;
+  esac
 
   mkdir -p "$ROOT/.deploy"
   echo "$DEPLOY_DOMAIN" > "$DOMAIN_FILE"

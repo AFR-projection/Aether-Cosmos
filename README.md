@@ -63,19 +63,31 @@ Started](docs/getting-started.md).
 npm run dev        # dev server
 npm run build      # production build
 npm run lint       # eslint
-npm test           # vitest (1247 tests)
+npm test           # vitest (2382 tests)
 npm run worker     # background worker (requires Redis)
 npm run db:studio  # Drizzle Studio
 ```
 
 ## Production
 
+One command on a fresh Ubuntu VPS — installs Docker, clones, asks four questions,
+issues the certificate, builds, and health-checks:
+
 ```bash
-./install.sh       # first-time VPS install (interactive wizard, sets up HTTPS)
-./update.sh        # pull, rebuild, sync schema, renew certificates
+curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash
 ```
 
-See [Deployment](docs/deployment.md) for prerequisites, DNS, R2 CORS, and recovery.
+Afterwards, everything runs through one command:
+
+```bash
+aether update      # pull, rebuild, sync schema, renew certificates, verify
+aether status      # health of every service
+aether logs app    # follow logs
+aether help        # the rest
+```
+
+See [Deployment](docs/deployment.md) for prerequisites, DNS, R2 CORS, the
+inspect-before-running form of that one-liner, and recovery.
 
 ---
 

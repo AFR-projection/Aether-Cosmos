@@ -13,7 +13,7 @@ This directory is the single home for all project documentation. The root
 | # | Guide | For |
 |---|-------|-----|
 | 1 | [Getting Started](getting-started.md) | Running it locally: install, configure, verify |
-| 2 | [Deployment](deployment.md) | Production on an Ubuntu VPS with Docker + HTTPS |
+| 2 | [Deployment](deployment.md) | Production on an Ubuntu VPS: the one-command install, redeploy, and the `aether` CLI |
 | 3 | [Architecture](architecture.md) | Tech stack, project layout, data flow, security layers |
 
 ---
@@ -63,7 +63,7 @@ docs/
 | | |
 |---|---|
 | **Version** | 0.4.0 |
-| **Automated tests** | 1247 passing, 4 skipped (71 test files, 1 skipped) |
+| **Automated tests** | 2382 passing, 35 skipped (120 test files, 3 skipped) |
 | **Typecheck / lint** | `tsc --noEmit` and `eslint` clean |
 | **Storage platform** | In production use by the maintainer |
 | **Second Brain 1.0** | Memories, versions, graph, MCP — covered by tests |

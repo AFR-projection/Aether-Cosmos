@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# aether — operator CLI for an Aether Cosmos ByAFR deployment.
+#
+# Installed to /usr/local/bin/aether by scripts/deploy/setup.sh, but it also runs
+# straight from the checkout as ./bin/aether. Because the installed copy lives
+# outside the repo it cannot derive the install directory from its own path, so
+# setup.sh records it in /etc/aether-cosmos.conf.
+
+set -euo pipefail
+
+CONF_FILE="${AETHER_CONF:-/etc/aether-cosmos.conf}"
+
+looks_like_repo() {
+  [[ -f "$1/docker/docker-compose.yml" && -d "$1/scripts/deploy" ]]
+}
+
+resolve_dir() {
+  local self_root
+  # 1. explicit override, for running several deployments on one host
+  if [[ -n "${AETHER_DIR:-}" ]] && looks_like_repo "$AETHER_DIR"; then
+    printf '%s' "$AETHER_DIR"; return 0
+  fi
+  # 2. this file inside a checkout (./bin/aether)
+  self_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
+  if [[ -n "$self_root" ]] && looks_like_repo "$self_root"; then
+    printf '%s' "$self_root"; return 0
+  fi
+  # 3. what setup.sh recorded
+  if [[ -f "$CONF_FILE" ]]; then
+    local recorded
+    recorded="$(sed -nE 's/^AETHER_DIR=(.*)$/\1/p' "$CONF_FILE" | tail -n1)"
+    recorded="${recorded%\"}"; recorded="${recorded#\"}"
+    if [[ -n "$recorded" ]] && looks_like_repo "$recorded"; then
+      printf '%s' "$recorded"; return 0
+    fi
+  fi
+  # 4. the documented default, then the current directory
+  if looks_like_repo /opt/aether-cosmos; then printf '%s' /opt/aether-cosmos; return 0; fi
+  if looks_like_repo "$PWD"; then printf '%s' "$PWD"; return 0; fi
+  return 1
+}
+
+if ! DIR="$(resolve_dir)"; then
+  echo "aether: no Aether Cosmos install found." >&2
+  echo "        Set AETHER_DIR=/path/to/checkout, or run the installer:" >&2
+  echo "        curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash" >&2
+  exit 1
+fi
+
+# shellcheck source=../scripts/deploy/common.sh
+source "$DIR/scripts/deploy/common.sh"
+cd "$DIR"
+
+usage() {
+  echo
+  printf "${BOLD}  aether${NC} ${DIM}— Aether Cosmos ByAFR v$(app_version) · %s${NC}\n" "$DIR"
+  cat <<'EOF'
+
+  Deploy
+    aether update            pull the latest code, rebuild, sync schema, verify
+    aether deploy            rebuild the checkout that is already here (no pull)
+
+  Inspect
+    aether status            health of every service
+    aether logs [service]    follow logs — app, worker, redis, nginx
+    aether ps                container list
+    aether doctor            re-run every pre-flight check (.env, DB, R2, DNS, ports)
+
+  Operate
+    aether restart [service] restart one service, or all of them
+    aether stop | start      stop or start the whole stack
+    aether env               edit .env, then re-validate it
+    aether backup            copy .env and the nginx config into .deploy/backups
+    aether shell [service]   open a shell inside a container (default: app)
+    aether version           versions and the deployed commit
+
+EOF
+}
+
+cmd="${1:-help}"
+[[ $# -gt 0 ]] && shift
+
+case "$cmd" in
+  update|up)
+    exec bash "$DIR/scripts/deploy/update.sh" "$@"
+    ;;
+  deploy|rebuild)
+    exec bash "$DIR/scripts/deploy/install.sh" --skip-wizard "$@"
+    ;;
+  status|health)
+    exec bash "$DIR/scripts/deploy/health.sh" "$@"
+    ;;
+  doctor|check|validate)
+    exec bash "$DIR/scripts/deploy/validate.sh" "$@"
+    ;;
+  logs)
+    ensure_docker >/dev/null
+    if [[ $# -gt 0 ]]; then
+      exec "${COMPOSE[@]}" logs -f --tail=100 "$@"
+    else
+      exec "${COMPOSE[@]}" logs -f --tail=100
+    fi
+    ;;
+  ps)
+    ensure_docker >/dev/null
+    exec "${COMPOSE[@]}" ps
+    ;;
+  restart)
+    ensure_docker >/dev/null
+    if [[ $# -gt 0 ]]; then
+      "${COMPOSE[@]}" restart "$@"
+    else
+      "${COMPOSE[@]}" restart
+    fi
+    ok "Restarted${1:+ $1}"
+    ;;
+  stop|down)
+    ensure_docker >/dev/null
+    "${COMPOSE[@]}" stop
+    ok "Stack stopped — 'aether start' brings it back"
+    ;;
+  start)
+    ensure_docker >/dev/null
+    "${COMPOSE[@]}" up -d
+    ok "Stack started"
+    ;;
+  shell|sh|exec)
+    ensure_docker >/dev/null
+    svc="${1:-app}"
+    exec "${COMPOSE[@]}" exec "$svc" sh
+    ;;
+  env|edit)
+    [[ -f "$ENV_FILE" ]] || die "No .env here — run the installer first"
+    "${EDITOR:-nano}" "$ENV_FILE"
+    # validate.sh normalizes and reloads .env itself, so editing straight into it
+    # is safe even if the editor left a quoted or wrapped value behind.
+    bash "$DIR/scripts/deploy/validate.sh" || die "Validation failed — fix .env and try again"
+    echo
+    warn "NEXT_PUBLIC_APP_URL is baked in at build time: run 'aether deploy' for it to take effect"
+    ;;
+  backup)
+    mkdir -p "$DIR/.deploy/backups"
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    cp "$ENV_FILE" "$DIR/.deploy/backups/.env.${stamp}"
+    [[ -f "$NGINX_GEN" ]] && cp "$NGINX_GEN" "$DIR/.deploy/backups/nginx.${stamp}.conf"
+    ok "Saved .deploy/backups/.env.${stamp}"
+    ;;
+  version|--version|-v)
+    load_env
+    echo
+    box_top
+    box_row "AETHER COSMOS ByAFR   v$(app_version)" "$BOLD"
+    box_mid
+    box_kv "Directory" "$DIR"
+    box_kv "Domain" "${DEPLOY_DOMAIN:-not set}"
+    box_kv "Commit" "$(git -C "$DIR" log -1 --format='%h  %s' 2>/dev/null | cut -c1-45 || echo 'not a git checkout')"
+    box_kv "Branch" "$(git -C "$DIR" branch --show-current 2>/dev/null || echo '-')"
+    box_bot
+    echo
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    fail "Unknown command: $cmd"
+    usage
+    exit 1
+    ;;
+esac
