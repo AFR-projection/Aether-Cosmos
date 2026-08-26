@@ -83,7 +83,7 @@ main() {
   bash "$SCRIPT_DIR/validate.sh"
 
   step "Rebuilding containers"
-  "${COMPOSE[@]}" build app worker setup
+  build_all_images
   "${COMPOSE[@]}" up -d redis app worker
 
   step "Syncing the database schema"

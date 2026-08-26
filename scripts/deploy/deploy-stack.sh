@@ -6,9 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "$SCRIPT_DIR/common.sh"
 
+# One service at a time, retried — see build_service in common.sh for why serial.
 deploy_stack() {
   log "Building containers (first time may take several minutes)..."
-  "${COMPOSE[@]}" build app worker setup
+  build_all_images
 
   log "Starting redis, app, worker..."
   "${COMPOSE[@]}" up -d redis

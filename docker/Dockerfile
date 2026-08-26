@@ -1,10 +1,23 @@
 FROM node:20-alpine AS base
 
+# npm gives up after 2 retries and treats a stalled socket as fatal, which a VPS on
+# a congested link hits routinely — a dropped connection halfway through the install
+# then fails the whole build. Retry harder, wait longer, and skip the audit/funding
+# round-trips that add nothing to a deploy.
+ENV NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=180000 \
+    NPM_CONFIG_FETCH_TIMEOUT=600000 \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# Cache mount, so a retry after a network drop resumes from what already downloaded
+# instead of pulling every tarball again — and the three images share one cache.
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
 
 FROM base AS builder
 WORKDIR /app

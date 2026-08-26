@@ -13,6 +13,12 @@ NGINX_GEN="$ROOT/docker/generated/nginx.conf"
 NGINX_TEMPLATE="$ROOT/docker/nginx.conf.template"
 DOMAIN_FILE="$ROOT/.deploy/domain"
 
+# The Dockerfiles use `RUN --mount=type=cache` for the npm cache, which the classic
+# builder rejects outright. BuildKit is the default in modern Docker, but a host with
+# DOCKER_BUILDKIT=0 in its environment would fail the build on syntax rather than on
+# anything real — so ask for it explicitly.
+export DOCKER_BUILDKIT=1
+
 # Compose picks the Bake builder when COMPOSE_BAKE=true, but Bake needs the buildx
 # plugin. On a host with COMPOSE_BAKE=true and no buildx, every `compose build` prints
 # "configured to build using Bake, but buildx isn't installed" and silently falls back
@@ -372,6 +378,37 @@ init_docker() {
 
 docker_run() {
   "${DOCKER[@]}" run "$@"
+}
+
+# One service at a time, retried. Compose builds all three images in parallel by
+# default, which means three concurrent `npm ci` runs fighting over one uplink — and
+# the way that fails is ECONNRESET halfway through a tarball, taking the whole deploy
+# with it. Serial costs a few minutes on a good link; a failed build costs a redeploy.
+# The npm cache mount in the Dockerfiles means a retry only re-fetches what the
+# dropped connection actually lost.
+build_service() {
+  local svc=$1 attempt
+  for attempt in 1 2 3; do
+    if "${COMPOSE[@]}" build "$svc"; then
+      ok "Image $svc siap"
+      return 0
+    fi
+    if (( attempt < 3 )); then
+      warn "Build $svc gagal (percobaan ${attempt}/3) — hampir selalu jaringan npm. Ulang..."
+      sleep 10
+    fi
+  done
+  fail "Build $svc gagal 3x."
+  fail "Kalau errornya ECONNRESET / ETIMEDOUT / network aborted: itu koneksi ke"
+  fail "registry npm, bukan kodenya. Ulangi saja — layer yang sudah jadi dipakai lagi."
+  return 1
+}
+
+build_all_images() {
+  local svc
+  for svc in app worker setup; do
+    build_service "$svc" || die "Dibatalkan di build $svc"
+  done
 }
 
 ensure_docker() {

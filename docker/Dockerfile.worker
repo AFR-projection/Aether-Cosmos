@@ -1,16 +1,34 @@
 FROM node:20-alpine
 
+# See docker/Dockerfile: npm's default 2 retries turn a single dropped connection
+# into a failed deploy.
+ENV NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=180000 \
+    NPM_CONFIG_FETCH_TIMEOUT=600000 \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+
 RUN apk add --no-cache ffmpeg
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-RUN npm install tsx sharp drizzle-orm postgres @aws-sdk/client-s3 @neondatabase/serverless ioredis bullmq @node-rs/argon2 pdfjs-dist @napi-rs/canvas mammoth xlsx
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci --omit=dev
+# Everything workers/ imports is a runtime dependency, so `npm ci` above already has
+# it. Only tsx is missing, because it is a devDependency — and the old
+# `npm install tsx sharp drizzle-orm …` line reinstalled twelve packages that were
+# already present AND, because plain `npm install` reconciles the whole tree, dragged
+# in every other devDependency (next, typescript, eslint, vitest) as well. That was
+# the largest download in the build and the first thing to break on a flaky link.
+# Installed globally so the project tree stays exactly as the lockfile describes.
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm install -g tsx@4.23.0
 
 COPY lib ./lib
 COPY workers ./workers
 COPY drizzle.config.ts ./
 COPY tsconfig.json ./
 
-CMD ["npx", "tsx", "workers/index.ts"]
+# tsx, not `npx tsx`: npx falls back to fetching from the registry when it cannot
+# resolve the binary, which turns a broken image into a slow runtime failure.
+CMD ["tsx", "workers/index.ts"]
