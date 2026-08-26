@@ -10,6 +10,15 @@ const nextConfig: NextConfig = {
   // nodemailer is Node-only (net/tls) — keep it external so SMTP works in the
   // standalone Docker server, not just `next dev`.
   serverExternalPackages: ["sharp", "@node-rs/argon2", "nodemailer"],
+  // The "Running TypeScript" phase of `next build` wants roughly a gigabyte of heap on
+  // top of the compile, which is more than a small VPS has to give — the Docker build
+  // aborted there three times with "Reached heap limit". Only the image build sets this
+  // flag (docker/Dockerfile), and CI runs `npx tsc --noEmit` on every push, so nothing
+  // ships unchecked. A local `npm run build` still type-checks, which matters: tsc
+  // alone never looks inside dot-directories like app/.well-known/.
+  typescript: {
+    ignoreBuildErrors: process.env.NEXT_SKIP_TYPECHECK === "1",
+  },
   experimental: {
     turbopackFileSystemCacheForDev: true,
     // lucide-react, date-fns and recharts are already on Next's built-in

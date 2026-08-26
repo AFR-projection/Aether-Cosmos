@@ -386,29 +386,133 @@ docker_run() {
 # with it. Serial costs a few minutes on a good link; a failed build costs a redeploy.
 # The npm cache mount in the Dockerfiles means a retry only re-fetches what the
 # dropped connection actually lost.
+#
+# Retrying is only ever right for a network failure. Retrying a type error or an
+# out-of-memory abort just burns two more builds and buries the real message under a
+# wrong one ("hampir selalu jaringan npm" printed three times over a heap limit), so
+# the output is read and the failure is named before deciding.
 build_service() {
-  local svc=$1 attempt
+  local svc=$1 attempt rc buildlog
+  buildlog="$(mktemp)"
   for attempt in 1 2 3; do
-    if "${COMPOSE[@]}" build "$svc"; then
+    # tee, so the operator still watches it live AND we can classify it afterwards.
+    # PIPESTATUS[0] is docker's status; tee's own success says nothing.
+    set +e
+    "${COMPOSE[@]}" build "$svc" 2>&1 | tee "$buildlog"
+    rc=${PIPESTATUS[0]}
+    set -e
+    if (( rc == 0 )); then
+      rm -f "$buildlog"
       ok "Image $svc siap"
       return 0
     fi
+
+    if build_log_is_oom "$buildlog"; then
+      rm -f "$buildlog"
+      fail "Build $svc kehabisan MEMORI, bukan jaringan — diulang pun hasilnya sama."
+      fail "Lihat 'Reached heap limit' / 'heap out of memory' di output di atas."
+      fail "Cek: free -h    (butuh RAM+swap minimal ~3GB untuk next build)"
+      fail "Tambah swap 2G manual kalau perlu:"
+      fail "  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile"
+      fail "  sudo mkswap /swapfile && sudo swapon /swapfile"
+      return 1
+    fi
+
+    if ! build_log_is_network "$buildlog"; then
+      rm -f "$buildlog"
+      fail "Build $svc gagal BUKAN karena jaringan — mengulang tidak akan menolong."
+      fail "Errornya ada di output di atas (baris yang diawali ERROR / error TS)."
+      return 1
+    fi
+
     if (( attempt < 3 )); then
-      warn "Build $svc gagal (percobaan ${attempt}/3) — hampir selalu jaringan npm. Ulang..."
+      warn "Build $svc gagal karena koneksi (percobaan ${attempt}/3) — ulang..."
       sleep 10
     fi
   done
-  fail "Build $svc gagal 3x."
-  fail "Kalau errornya ECONNRESET / ETIMEDOUT / network aborted: itu koneksi ke"
-  fail "registry npm, bukan kodenya. Ulangi saja — layer yang sudah jadi dipakai lagi."
+  rm -f "$buildlog"
+  fail "Build $svc gagal 3x karena koneksi ke registry npm."
+  fail "ECONNRESET / ETIMEDOUT / network aborted itu jaringan, bukan kodenya."
+  fail "Ulangi saja — layer yang sudah jadi dipakai lagi, jadi makin cepat."
   return 1
+}
+
+# Matched against the build output, not the exit code: BuildKit reports every failure
+# as "exit code: 1" no matter what actually went wrong inside the layer.
+build_log_is_network() {
+  grep -qiE 'ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|socket hang up|network (aborted|timeout)|Temporary failure in name resolution|TLS handshake|failed to (fetch|do request)|502 Bad Gateway|503 Service' "$1"
+}
+
+build_log_is_oom() {
+  grep -qiE 'heap out of memory|Reached heap limit|JavaScript heap|Allocation failed|SIGABRT|SIGKILL|exit code: 137|Cannot allocate memory|out of memory' "$1"
 }
 
 build_all_images() {
   local svc
+  ensure_build_memory
   for svc in app worker setup; do
     build_service "$svc" || die "Dibatalkan di build $svc"
   done
+}
+
+# `next build` needs more memory than a small VPS has spare. The type-check phase is
+# skipped in the image now, but the compile itself still peaks near a gigabyte, and a
+# host with zero swap has nothing to fall back on — Node aborts instead of paging.
+#
+# Only ever ADDS swap, and only when there is none at all. A host that already has some
+# is left exactly as it is. Set AETHER_NO_SWAP=1 to skip this entirely.
+ensure_build_memory() {
+  local mem_mb swap_mb disk_mb
+  [[ -r /proc/meminfo ]] || return 0
+  mem_mb="$(awk '/^MemTotal:/  {printf "%d", $2/1024}' /proc/meminfo)"
+  swap_mb="$(awk '/^SwapTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
+  [[ -n "$mem_mb" ]] || return 0
+
+  if (( mem_mb + swap_mb >= 3500 )); then
+    ok "Memori cukup untuk build (RAM ${mem_mb}MB + swap ${swap_mb}MB)"
+    return 0
+  fi
+
+  if (( swap_mb > 0 )); then
+    warn "RAM ${mem_mb}MB + swap ${swap_mb}MB — build jalan tapi agak lambat"
+    return 0
+  fi
+
+  if [[ -n "${AETHER_NO_SWAP:-}" ]]; then
+    warn "RAM ${mem_mb}MB tanpa swap, AETHER_NO_SWAP diset — build bisa kehabisan memori"
+    return 0
+  fi
+
+  if [[ -e /swapfile ]]; then
+    warn "/swapfile ada tapi tidak aktif. Aktifkan: sudo swapon /swapfile"
+    return 0
+  fi
+
+  disk_mb="$(df -Pm / 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [[ -z "$disk_mb" ]] || (( disk_mb < 4096 )); then
+    warn "RAM ${mem_mb}MB tanpa swap dan disk sisa ${disk_mb:-?}MB — tidak bikin swap"
+    return 0
+  fi
+
+  warn "RAM ${mem_mb}MB tanpa swap sama sekali — next build gampang kehabisan memori."
+  log "Bikin /swapfile 2G (sekali saja, permanen di /etc/fstab)"
+  log "Hapus kapan saja: sudo swapoff /swapfile && sudo rm /swapfile"
+  # fallocate is instant but fails on filesystems that cannot do unwritten extents
+  # (btrfs, some overlay setups) — dd always works, it is only slower.
+  if as_root fallocate -l 2G /swapfile 2>/dev/null \
+    || as_root dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none 2>/dev/null; then
+    as_root chmod 600 /swapfile
+    if as_root mkswap /swapfile >/dev/null 2>&1 && as_root swapon /swapfile 2>/dev/null; then
+      grep -q '^/swapfile' /etc/fstab 2>/dev/null \
+        || printf '/swapfile none swap sw 0 0\n' | as_root tee -a /etc/fstab >/dev/null
+      ok "Swap 2G aktif — build punya ruang sekarang"
+    else
+      as_root rm -f /swapfile
+      warn "swapon gagal — lanjut tanpa swap"
+    fi
+  else
+    warn "Gagal bikin swapfile — lanjut tanpa swap"
+  fi
 }
 
 ensure_docker() {

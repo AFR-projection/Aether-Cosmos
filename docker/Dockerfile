@@ -24,6 +24,15 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# See next.config.ts: the type-check phase is the single largest memory consumer in the
+# build and it is the one that killed three deploys on a 2 GB VPS. CI type-checks every
+# push, so running it again on the smallest machine in the pipeline buys nothing.
+ENV NEXT_SKIP_TYPECHECK=1
+# Node sizes its heap from the host's RAM, which on a small VPS lands near 1 GB — and
+# then any phase that wants more aborts the whole build instead of paging. Ask for real
+# headroom; build_all_images in scripts/deploy/common.sh makes sure swap exists so this
+# ceiling is not the physical one.
+ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN npm run build
 
 FROM base AS runner
