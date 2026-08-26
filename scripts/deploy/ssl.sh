@@ -19,13 +19,8 @@ setup_ssl() {
 
   if ! command -v certbot >/dev/null 2>&1; then
     log "Installing certbot..."
-    if [[ $EUID -eq 0 ]]; then
-      apt-get update -qq
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot
-    else
-      sudo apt-get update -qq
-      DEBIAN_FRONTEND=noninteractive sudo apt-get install -y -qq certbot
-    fi
+    as_root apt-get update -qq
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot
   fi
 
   stop_nginx_container
@@ -33,40 +28,28 @@ setup_ssl() {
   # Free port 80 for standalone challenge
   if ! port_free 80; then
     warn "Port 80 busy — stopping conflicting services..."
-    if [[ $EUID -eq 0 ]]; then
-      fuser -k 80/tcp 2>/dev/null || true
-    else
-      sudo fuser -k 80/tcp 2>/dev/null || true
-    fi
+    as_root fuser -k 80/tcp 2>/dev/null || true
     sleep 2
   fi
 
   local cert_dir="/etc/letsencrypt/live/${domain}"
-  if [[ -f "${cert_dir}/fullchain.pem" ]]; then
+  if root_test_f "${cert_dir}/fullchain.pem"; then
     ok "Certificate already exists — renewing if needed..."
-    if [[ $EUID -eq 0 ]]; then
-      certbot renew --quiet --cert-name "$domain" 2>/dev/null || true
-    else
-      sudo certbot renew --quiet --cert-name "$domain" 2>/dev/null || true
-    fi
+    as_root certbot renew --quiet --cert-name "$domain" 2>/dev/null || true
   else
     log "Requesting new certificate (Let's Encrypt)..."
-    if [[ $EUID -eq 0 ]]; then
-      certbot certonly --standalone \
-        -d "$domain" \
-        --non-interactive \
-        --agree-tos \
-        -m "$email" \
-        --preferred-challenges http
-    else
-      sudo certbot certonly --standalone \
-        -d "$domain" \
-        --non-interactive \
-        --agree-tos \
-        -m "$email" \
-        --preferred-challenges http
-    fi
+    as_root certbot certonly --standalone \
+      -d "$domain" \
+      --non-interactive \
+      --agree-tos \
+      -m "$email" \
+      --preferred-challenges http
   fi
+
+  # root_test_f, not [[ -f ]]: this runs as the deploy user, and the directory
+  # certbot just wrote into is root-only. Testing the path directly reported
+  # "certificate not found" one line after certbot said it had saved it.
+  root_test_f "${cert_dir}/fullchain.pem" || die "SSL certificate not found at ${cert_dir}"
 
   [[ -f "${cert_dir}/fullchain.pem" ]] || die "SSL certificate not found at ${cert_dir}"
 
@@ -88,23 +71,21 @@ cd \"$ROOT\"
 ${compose_cmd} restart nginx || true
 "
 
+  # The deploy-hooks directory ships with certbot, but a certbot installed from a
+  # snap or built from source may not have it, and `tee` into a missing directory
+  # fails the whole install one step from the finish line.
+  as_root mkdir -p "$(dirname "$hook")"
   if [[ $EUID -eq 0 ]]; then
     echo "$hook_content" > "$hook"
-    chmod +x "$hook"
-    [[ -f "$legacy_hook" ]] && rm -f "$legacy_hook"
   else
     echo "$hook_content" | sudo tee "$hook" >/dev/null
-    sudo chmod +x "$hook"
-    [[ -f "$legacy_hook" ]] && sudo rm -f "$legacy_hook"
   fi
+  as_root chmod +x "$hook"
+  as_root rm -f "$legacy_hook"
 
   # Cron for renewal (daily check)
   local cron_line="0 3 * * * certbot renew --quiet --deploy-hook ${hook}"
-  if [[ $EUID -eq 0 ]]; then
-    (crontab -l 2>/dev/null | grep -v "certbot renew" || true; echo "$cron_line") | crontab -
-  else
-    (sudo crontab -l 2>/dev/null | grep -v "certbot renew" || true; echo "$cron_line") | sudo crontab -
-  fi
+  (as_root crontab -l 2>/dev/null | grep -v "certbot renew" || true; echo "$cron_line") | as_root crontab -
   ok "Auto-renewal cron configured"
 }
 

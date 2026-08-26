@@ -71,19 +71,9 @@ check_ssl() {
   local domain="${DEPLOY_DOMAIN:-}"
   domain="${domain,,}"
   local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
-  local cert_exists=1
-  if [[ $EUID -eq 0 ]]; then
-    [[ -f "$cert" ]] && cert_exists=0
-  else
-    sudo test -f "$cert" 2>/dev/null && cert_exists=0
-  fi
-  if [[ $cert_exists -eq 0 ]]; then
+  if root_test_f "$cert"; then
     local expiry
-    if [[ $EUID -eq 0 ]]; then
-      expiry="$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2 || echo "?")"
-    else
-      expiry="$(sudo openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2 || echo "?")"
-    fi
+    expiry="$(as_root openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2 || echo "?")"
     status_line 0 "SSL" "valid until $expiry"
   else
     status_line 1 "SSL" "certificate missing"

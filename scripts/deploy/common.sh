@@ -123,6 +123,28 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Command '$1' not found. Install it first."
 }
 
+# Run a command as root: directly when we already are, through sudo otherwise.
+# Every privileged call in these scripts goes through here instead of carrying its
+# own `if [[ $EUID -eq 0 ]]` copy.
+#
+# Note the `env` form for anything needing a variable: `FOO=bar sudo cmd` sets FOO
+# for sudo, which then drops it. `as_root env FOO=bar cmd` is the shape that works.
+as_root() {
+  if [[ $EUID -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+# /etc/letsencrypt/live and /archive are 0700 root:root, so an unprivileged
+# `[[ -f … ]]` on a certificate returns false even when the file is right there —
+# certbot reports success and the very next check calls the cert missing. Test
+# privileged paths through this, never with a bare [[ -f ]].
+root_test_f() {
+  as_root test -f "$1"
+}
+
 get_public_ip() {
   curl -sf --max-time 5 ifconfig.me 2>/dev/null \
     || curl -sf --max-time 5 icanhazip.com 2>/dev/null \

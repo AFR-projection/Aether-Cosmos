@@ -17,15 +17,11 @@ generate_nginx() {
   local key="/etc/letsencrypt/live/${domain}/privkey.pem"
 
   [[ -f "$NGINX_TEMPLATE" ]] || die "Template not found: $NGINX_TEMPLATE"
-  if [[ $EUID -eq 0 ]]; then
-    [[ -f "$cert" ]] || die "SSL cert not found at $cert — run ssl.sh first"
-  else
-    sudo test -f "$cert" || die "SSL cert not found at $cert — run ssl.sh first"
-  fi
+  root_test_f "$cert" || die "SSL cert not found at $cert — run ssl.sh first"
 
   command -v envsubst >/dev/null 2>&1 || {
     log "Installing gettext-base (envsubst)..."
-    if [[ $EUID -eq 0 ]]; then apt-get install -y -qq gettext-base; else sudo apt-get install -y -qq gettext-base; fi
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gettext-base
   }
 
   mkdir -p "$(dirname "$NGINX_GEN")"
