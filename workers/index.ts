@@ -26,7 +26,17 @@ import {
   webhooks,
 } from "../lib/db/schema";
 import { QUEUE_NAME } from "../lib/queue";
-import { buildTrimArgs, chooseImageEncoder, containerExtensionFor, DEFAULT_EDIT_QUALITY } from "../lib/files/media-edit";
+import {
+  AUDIO_EXTRACT_TARGETS,
+  buildExtractAudioArgs,
+  buildTrimArgs,
+  chooseImageEncoder,
+  containerExtensionFor,
+  DEFAULT_EDIT_QUALITY,
+  extractedAudioName,
+  isMissingAudioStreamError,
+  type AudioExtractTarget,
+} from "../lib/files/media-edit";
 import { EDIT_INPUT_MAX_PIXELS } from "../lib/files/edit-limits";
 import { WEBHOOK_USER_AGENT } from "../lib/webhooks/constants";
 import { fetchWebhook } from "../lib/webhooks/ssrf";
@@ -39,6 +49,7 @@ import { Queue } from "bullmq";
 import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
 import {
+  buildR2Key,
   deleteR2Object,
   deleteR2Objects,
   downloadFromR2Stream,
@@ -101,6 +112,26 @@ async function downloadFromR2(key: string): Promise<Buffer> {
     new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key })
   );
   return Buffer.from(await response.Body!.transformToByteArray());
+}
+
+/**
+ * Copy an R2 object onto local disk without buffering it in the process.
+ *
+ * `downloadFromR2` reads the whole object into memory, which is fine for an image and not
+ * fine for a video — a job that streams to a temporary file costs disk instead of heap,
+ * and ffmpeg wants a seekable file anyway.
+ */
+async function downloadR2ToFile(key: string, destination: string): Promise<void> {
+  const object = await downloadFromR2Stream(key);
+  if (!object.body) throw new Error(`Source object is empty: ${key}`);
+  const body = object.body as unknown;
+  const source =
+    typeof (body as { pipe?: unknown }).pipe === "function"
+      ? (body as Readable)
+      : Readable.fromWeb(body as import("stream/web").ReadableStream);
+  const { createWriteStream } = await import("fs");
+  const { pipeline } = await import("stream/promises");
+  await pipeline(source, createWriteStream(destination));
 }
 
 async function uploadToR2(key: string, body: Buffer, contentType: string) {
@@ -367,6 +398,126 @@ async function trimMedia(
   } finally {
     await fs.unlink(tmpIn).catch(() => {});
     await fs.unlink(tmpOut).catch(() => {});
+  }
+}
+
+/**
+ * Pull the audio track out of a video into a NEW file next to it.
+ *
+ * The row is inserted only once ffmpeg has produced bytes, so a failed extraction leaves
+ * nothing behind to explain — unlike a trim, which edits a file that already exists, this
+ * job's whole output is the file, and a half-created one would show up in the folder as a
+ * broken entry the user cannot do anything with.
+ *
+ * The audio is re-encoded rather than copied out of the container (see
+ * `AUDIO_EXTRACT_TARGETS`), so the result plays in the browser whatever the video held.
+ */
+async function extractAudio(data: {
+  fileId: string;
+  r2Key: string;
+  mimeType: string;
+  userId: string;
+  folderId: string | null;
+  name: string;
+}): Promise<void> {
+  // The route refuses everything else, so a job carrying another type is stale.
+  if (!data.mimeType.startsWith("video/")) return;
+
+  const fs = await import("fs/promises");
+  // The extension only helps ffmpeg's probe; it demuxes by content, so an unmapped
+  // container is still readable.
+  const tmpIn = tmpPath(`${data.fileId}-audio-in.${containerExtensionFor(data.mimeType) ?? "bin"}`);
+  const candidates = AUDIO_EXTRACT_TARGETS.map((target) => ({
+    target,
+    path: tmpPath(`${data.fileId}-audio-out${target.extension}`),
+  }));
+
+  try {
+    await downloadR2ToFile(data.r2Key, tmpIn);
+
+    let produced: { target: AudioExtractTarget; body: Buffer } | null = null;
+    let lastError: unknown = null;
+    for (const candidate of candidates) {
+      try {
+        await execFileAsync(
+          "ffmpeg",
+          buildExtractAudioArgs({
+            inputPath: tmpIn,
+            outputPath: candidate.path,
+            target: candidate.target,
+          })
+        );
+        const body = await fs.readFile(candidate.path);
+        // An encoder that writes a header and nothing else would otherwise become a
+        // zero-length file in the user's folder.
+        if (body.length === 0) throw new Error("ffmpeg produced an empty file");
+        produced = { target: candidate.target, body };
+        break;
+      } catch (error) {
+        lastError = error;
+        // "This video has no audio" is a fact about the file: the next encoder fails the
+        // same way and so would a retry, so stop without leaving a failed job behind.
+        if (isMissingAudioStreamError(String((error as { stderr?: unknown }).stderr ?? ""))) {
+          console.log(`extract_audio ${data.fileId}: no audio track, nothing to extract`);
+          return;
+        }
+      }
+    }
+    if (!produced) {
+      throw lastError instanceof Error ? lastError : new Error("Audio extraction failed");
+    }
+
+    // The route checked there was headroom before queueing; this is the check against the
+    // size that actually came out. Skipped rather than thrown: a retry cannot make the
+    // account bigger.
+    const [owner] = await db
+      .select({
+        quotaBytes: users.quotaBytes,
+        usedBytes: users.usedBytes,
+        reservedBytes: users.reservedBytes,
+      })
+      .from(users)
+      .where(eq(users.id, data.userId))
+      .limit(1);
+    if (!owner) return;
+    if (owner.usedBytes + owner.reservedBytes + produced.body.length > owner.quotaBytes) {
+      console.log(`extract_audio ${data.fileId}: skipped, the extracted audio is over quota`);
+      return;
+    }
+
+    const name = extractedAudioName(data.name, produced.target.extension);
+    const now = new Date();
+    const [created] = await db
+      .insert(files)
+      .values({
+        // Filed under the video's OWNER rather than whoever pressed the button: a shared
+        // video's audio belongs in the same account as the video, or it would count
+        // against the wrong quota and disappear from the folder it was made in.
+        userId: data.userId,
+        folderId: data.folderId,
+        name,
+        mimeType: produced.target.mimeType,
+        sizeBytes: produced.body.length,
+        r2Key: "pending",
+        isNote: false,
+      })
+      .returning();
+
+    const key = buildR2Key(data.userId, created.id, name);
+    await uploadToR2(key, produced.body, produced.target.mimeType);
+    await db
+      .update(files)
+      .set({ r2Key: key, status: "ready", completedAt: now, verifiedAt: now, updatedAt: now })
+      .where(eq(files.id, created.id));
+    await recomputeUsedBytes(data.userId);
+    // Album art if the video carried any, a waveform placeholder otherwise.
+    await generateThumbnail(created.id, key, produced.target.mimeType);
+    console.log(`extract_audio ${data.fileId}: wrote ${name} (${produced.body.length} bytes)`);
+  } finally {
+    await fs.unlink(tmpIn).catch(() => {});
+    for (const candidate of candidates) {
+      await fs.unlink(candidate.path).catch(() => {});
+    }
   }
 }
 
@@ -825,6 +976,9 @@ const worker = new Worker(
       mimeType?: string;
       startSeconds?: number;
       endSeconds?: number;
+      userId?: string;
+      folderId?: string | null;
+      name?: string;
       webhookId?: string;
       url?: string;
       secret?: string;
@@ -846,6 +1000,20 @@ const worker = new Worker(
       case "trim_media":
         if (data.startSeconds !== undefined && data.endSeconds !== undefined) {
           await trimMedia(data.fileId!, data.r2Key!, data.mimeType!, data.startSeconds, data.endSeconds);
+        }
+        break;
+      case "extract_audio":
+        // Every field is required: without an owner and a name there is nothing to file
+        // the new audio under, and guessing either would put it in the wrong account.
+        if (data.fileId && data.r2Key && data.mimeType && data.userId && data.name) {
+          await extractAudio({
+            fileId: data.fileId,
+            r2Key: data.r2Key,
+            mimeType: data.mimeType,
+            userId: data.userId,
+            folderId: data.folderId ?? null,
+            name: data.name,
+          });
         }
         break;
       case "deliver_webhook":

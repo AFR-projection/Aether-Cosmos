@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  AUDIO_EXTRACT_TARGETS,
   CROP_ASPECTS,
   DEFAULT_EDIT_QUALITY,
   FULL_FRAME,
@@ -8,7 +9,9 @@ import {
   MIN_TRIM_SECONDS,
   RESIZE_PRESETS,
   buildImageEditRequest,
+  buildExtractAudioArgs,
   buildTrimArgs,
+  canExtractAudioFrom,
   canReencodeInPlace,
   chooseImageEncoder,
   clampRect,
@@ -18,10 +21,12 @@ import {
   currentImageFormat,
   emptyImageDraft,
   encoderForFormat,
+  extractedAudioName,
   fitAspect,
   formatClock,
   hasImageChanges,
   isFullFrame,
+  isMissingAudioStreamError,
   mediaEditorKindFor,
   mirrorRect,
   nextRotation,
@@ -1107,6 +1112,161 @@ describe("formatClock", () => {
   it("treats nonsense as the start of the clip", () => {
     expect(formatClock(NaN)).toBe("0:00.0");
     expect(formatClock(-5)).toBe("0:00.0");
+  });
+});
+
+describe("canExtractAudioFrom", () => {
+  it("takes video of any container", () => {
+    for (const mime of ["video/mp4", "video/webm", "video/x-matroska", "video/x-flv"]) {
+      expect(canExtractAudioFrom(mime)).toBe(true);
+    }
+  });
+
+  it("refuses audio, since extracting a sound file from itself is just a copy", () => {
+    expect(canExtractAudioFrom("audio/mpeg")).toBe(false);
+  });
+
+  it("refuses everything that is not media", () => {
+    for (const mime of ["image/png", "application/pdf", "text/plain", ""]) {
+      expect(canExtractAudioFrom(mime)).toBe(false);
+    }
+  });
+
+  it("reads a type with parameters and odd casing", () => {
+    expect(canExtractAudioFrom("VIDEO/MP4; codecs=avc1")).toBe(true);
+  });
+});
+
+describe("AUDIO_EXTRACT_TARGETS", () => {
+  it("tries MP3 first, because that is the one every browser plays", () => {
+    expect(AUDIO_EXTRACT_TARGETS[0]).toMatchObject({
+      encoder: "libmp3lame",
+      extension: ".mp3",
+      mimeType: "audio/mpeg",
+    });
+  });
+
+  it("falls back to an encoder that is part of ffmpeg itself", () => {
+    // libmp3lame is an external library and can be missing from a build; the native AAC
+    // encoder cannot, so the fallback always exists.
+    expect(AUDIO_EXTRACT_TARGETS.at(-1)).toMatchObject({
+      encoder: "aac",
+      extension: ".m4a",
+      mimeType: "audio/mp4",
+    });
+  });
+
+  it("downmixes anything wider than stereo, and leaves mono as mono", () => {
+    // libmp3lame refuses more than two channels outright, which is most of the 5.1 tracks
+    // that come with real video. `-ac 2` would also pointlessly upmix mono.
+    for (const target of AUDIO_EXTRACT_TARGETS) {
+      const filter = target.encoderArgs[target.encoderArgs.indexOf("-af") + 1];
+      expect(filter).toBe("aformat=channel_layouts=mono|stereo");
+    }
+  });
+
+  it("names a real extension and a mime type that matches it", () => {
+    for (const target of AUDIO_EXTRACT_TARGETS) {
+      expect(target.extension.startsWith(".")).toBe(true);
+      expect(target.mimeType.startsWith("audio/")).toBe(true);
+      expect(target.label.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("buildExtractAudioArgs", () => {
+  const target = AUDIO_EXTRACT_TARGETS[0];
+  const args = buildExtractAudioArgs({
+    inputPath: "/tmp/clip.mp4",
+    outputPath: "/tmp/clip.mp3",
+    target,
+  });
+
+  it("takes exactly one audio stream", () => {
+    // A film with a commentary track should not quietly produce a two-track file, and an
+    // explicit map is also what makes ffmpeg FAIL on a video with no audio at all instead
+    // of writing an empty container.
+    const maps = args.filter((_, i) => args[i - 1] === "-map");
+    expect(maps).toEqual(["0:a:0"]);
+  });
+
+  it("drops video, subtitles and data, which no audio muxer accepts", () => {
+    expect(args).toContain("-vn");
+    expect(args).toContain("-sn");
+    expect(args).toContain("-dn");
+  });
+
+  it("re-encodes with the target's encoder and its quality flags", () => {
+    expect(args[args.indexOf("-c:a") + 1]).toBe("libmp3lame");
+    expect(args).not.toContain("copy");
+    for (const flag of target.encoderArgs) expect(args).toContain(flag);
+  });
+
+  it("keeps the tags the container carried", () => {
+    expect(args[args.indexOf("-map_metadata") + 1]).toBe("0");
+  });
+
+  it("reads the input it was given and writes the output it was given", () => {
+    expect(args[args.indexOf("-i") + 1]).toBe("/tmp/clip.mp4");
+    expect(args.at(-1)).toBe("/tmp/clip.mp3");
+  });
+
+  it("never blocks on stdin or waits for an overwrite prompt", () => {
+    expect(args).toContain("-nostdin");
+    expect(args).toContain("-y");
+  });
+
+  it("uses the fallback encoder when handed the fallback target", () => {
+    const fallback = buildExtractAudioArgs({
+      inputPath: "/tmp/clip.mkv",
+      outputPath: "/tmp/clip.m4a",
+      target: AUDIO_EXTRACT_TARGETS[1],
+    });
+    expect(fallback[fallback.indexOf("-c:a") + 1]).toBe("aac");
+    expect(fallback[fallback.indexOf("-b:a") + 1]).toBe("192k");
+  });
+});
+
+describe("extractedAudioName", () => {
+  it("marks the new file as the audio of the old one and takes the new extension", () => {
+    expect(extractedAudioName("Holiday.mp4", ".mp3")).toBe("Holiday (audio).mp3");
+    expect(extractedAudioName("Holiday.mp4", ".m4a")).toBe("Holiday (audio).m4a");
+  });
+
+  it("keeps a name with dots in it intact", () => {
+    expect(extractedAudioName("s01.e02.final.mkv", ".mp3")).toBe("s01.e02.final (audio).mp3");
+  });
+
+  it("gives a name with no extension one", () => {
+    expect(extractedAudioName("recording", ".mp3")).toBe("recording (audio).mp3");
+  });
+
+  it("does not mistake a dot-file's leading dot for an extension", () => {
+    expect(extractedAudioName(".hidden", ".mp3")).toBe(".hidden (audio).mp3");
+  });
+});
+
+describe("isMissingAudioStreamError", () => {
+  it("recognises the map failure ffmpeg reports for a silent video", () => {
+    expect(
+      isMissingAudioStreamError("Stream map '0:a:0' matches no streams.\nTo ignore this, add …")
+    ).toBe(true);
+  });
+
+  it("recognises the muxer complaining that nothing was written", () => {
+    expect(isMissingAudioStreamError("Output file #0 does not contain any stream")).toBe(true);
+  });
+
+  it("reads whatever case the build printed", () => {
+    expect(isMissingAudioStreamError("STREAM MAP '0:A:0' MATCHES NO STREAMS.")).toBe(true);
+  });
+
+  it("does not swallow a real failure", () => {
+    // A missing encoder has to stay a failure: it is the reason the fallback target is
+    // tried, and a retry on another worker could succeed.
+    expect(isMissingAudioStreamError("Unknown encoder 'libmp3lame'")).toBe(false);
+    expect(isMissingAudioStreamError("Invalid data found when processing input")).toBe(false);
+    expect(isMissingAudioStreamError("")).toBe(false);
   });
 });
 

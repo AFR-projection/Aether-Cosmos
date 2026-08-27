@@ -30,6 +30,16 @@ export const EDIT_MAX_OUTPUT_PIXELS = 40_000_000;
 export const TRIM_MAX_SECONDS = 24 * 60 * 60;
 
 /**
+ * Largest video we will pull out of storage to extract its audio.
+ *
+ * The worker streams the source to a temporary file rather than buffering it, so this
+ * bounds the worker's disk and the time one job can hold a slot for — not its heap. A
+ * ceiling well above any ordinary upload, low enough that a 40 GB master cannot park a
+ * job for an hour.
+ */
+export const EXTRACT_AUDIO_SOURCE_MAX_BYTES = 8 * 1024 * 1024 * 1024;
+
+/**
  * Rasterizing SVG means running librsvg over attacker-authored markup, which is a
  * parser (and historically a network client) we have no reason to expose here —
  * every edit action produces raster output anyway.

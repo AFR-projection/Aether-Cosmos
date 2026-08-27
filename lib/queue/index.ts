@@ -41,6 +41,9 @@ export type JobType =
   | "generate_thumbnail"
   | "compress_image"
   | "trim_media"
+  // Pull the audio track out of a video into a NEW file. Not idempotent by nature — a
+  // second run makes a second file — so the route is what stops a duplicate being sent.
+  | "extract_audio"
   | "recalculate_quota"
   | "deliver_webhook"
   | "cleanup_schedules"

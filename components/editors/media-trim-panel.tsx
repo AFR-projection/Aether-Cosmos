@@ -12,10 +12,14 @@
  * Unlike the image editor this cannot answer synchronously: `PUT /api/files/edit` takes a
  * version snapshot and queues the work, so a successful request means *queued*, and the
  * panel says so rather than pretending the file has already changed.
+ *
+ * A video also gets "Extract audio", which is a different kind of operation living in the
+ * same place: `POST /api/files/extract-audio` re-encodes the soundtrack into a NEW file and
+ * never touches this one, so it is offered whether or not a trim is pending.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, Loader2, Music, Scissors, Undo2 } from "lucide-react";
+import { AudioLines, Check, Loader2, Music, Scissors, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
@@ -40,7 +44,7 @@ interface MediaTrimPanelProps {
    * to stop a backdrop click from discarding it. Pass a STABLE function.
    */
   onDirtyChange?: (dirty: boolean) => void;
-  /** The trim was accepted onto the queue. The caller re-reads the row. */
+  /** A trim, or an audio extraction, was accepted onto the queue. The caller re-reads. */
   onQueued?: () => void;
 }
 
@@ -130,6 +134,10 @@ export default function MediaTrimPanel({
   const [queued, setQueued] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  /** The audio extraction is its own request and its own outcome — see `extractAudio`. */
+  const [extracting, setExtracting] = useState(false);
+  const [audioQueued, setAudioQueued] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
 
   const dirty =
     !queued &&
@@ -222,6 +230,41 @@ export default function MediaTrimPanel({
       setError("The trim couldn't be sent. Check your connection and try again.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /**
+   * Queue the audio extraction.
+   *
+   * A separate route from the trim because it makes a NEW file rather than rewriting this
+   * one — the video is left exactly as it is, so this is offered independently of whether
+   * a trim is pending and never touches the unsaved-changes guard. Offered once: a second
+   * press would produce a second identical file, not a better one.
+   */
+  const extractAudio = async () => {
+    if (extracting || audioQueued) return;
+    setExtracting(true);
+    setAudioError(null);
+    try {
+      const res = await apiFetch<{ queued: boolean }>("/api/files/extract-audio", {
+        method: "POST",
+        body: JSON.stringify({ fileId }),
+      });
+      if (!res.success) {
+        setAudioError(res.error ?? "The audio couldn't be extracted.");
+        return;
+      }
+      setAudioQueued(true);
+      notify({
+        title: "Extracting audio",
+        description: `The soundtrack of ${fileName} will appear as a new file in this folder.`,
+        tone: "success",
+      });
+      onQueued?.();
+    } catch {
+      setAudioError("The request couldn't be sent. Check your connection and try again.");
+    } finally {
+      setExtracting(false);
     }
   };
 
@@ -361,6 +404,44 @@ export default function MediaTrimPanel({
             </>
           )}
         </section>
+
+        {isVideo ? (
+          <section>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Audio track
+            </h3>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2 w-full"
+              disabled={extracting || audioQueued}
+              onClick={extractAudio}
+            >
+              {extracting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : audioQueued ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <AudioLines className="h-3.5 w-3.5" />
+              )}
+              {audioQueued ? "Audio queued" : "Extract audio"}
+            </Button>
+            {audioError ? (
+              <p role="alert" className="mt-2 text-[11px] leading-relaxed text-danger">
+                {audioError}
+              </p>
+            ) : audioQueued ? (
+              <p role="status" className="mt-2 text-[11px] leading-relaxed text-success">
+                Being extracted in the background. Refresh the folder in a moment to see it.
+              </p>
+            ) : (
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                Saves the soundtrack as a new MP3 beside this video and leaves the video
+                alone. A video with no audio track produces nothing.
+              </p>
+            )}
+          </section>
+        ) : null}
 
         <section className="mt-auto space-y-2 border-t border-border/60 pt-4">
           <dl className="space-y-1 text-[11px]">

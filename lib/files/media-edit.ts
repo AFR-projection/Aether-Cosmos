@@ -747,6 +747,126 @@ export function formatClock(seconds: number): string {
     : `${minutes}:${tail}`;
 }
 
+/* ─────────────────────────  Extracting audio from a video  ───────────────────── */
+
+/** One candidate output for an extraction: the encoder to ask for, and the file it makes. */
+export type AudioExtractTarget = {
+  /** Passed to ffmpeg's `-c:a`. */
+  encoder: string;
+  /** Quality and channel-layout flags for this encoder. */
+  encoderArgs: readonly string[];
+  extension: string;
+  mimeType: string;
+  /** Shown to the user once the file exists. */
+  label: string;
+};
+
+/**
+ * Downmix anything wider than stereo, and leave mono alone.
+ *
+ * libmp3lame accepts one or two channels only, so the 5.1 track that comes with a lot of
+ * real video would fail the encode outright. `-ac 2` would fix that and also pointlessly
+ * upmix mono; `aformat` inserts a downmix only where one is needed.
+ */
+const STEREO_OR_MONO = ["-af", "aformat=channel_layouts=mono|stereo"] as const;
+
+/**
+ * The outputs an extraction will try, best first.
+ *
+ * MP3 first because it plays everywhere, including in the app's own audio preview, and
+ * because a re-encode is what makes the result independent of whatever exotic codec the
+ * video carried. AAC in an `.m4a` is the fallback for a build without libmp3lame: the AAC
+ * encoder is part of ffmpeg itself rather than an external library, so it is always there.
+ *
+ * A stream copy was the other option and is deliberately not taken — it is lossless and
+ * instant, but the container has to match the codec, and the honest mapping for a Matroska
+ * video's AC-3 track is an `.mka` no browser will play.
+ */
+export const AUDIO_EXTRACT_TARGETS: readonly AudioExtractTarget[] = [
+  {
+    encoder: "libmp3lame",
+    // -q:a 2 is VBR at roughly 190 kbps: transparent enough for a soundtrack, and smaller
+    // than a fixed high bitrate would be for speech.
+    encoderArgs: [...STEREO_OR_MONO, "-q:a", "2"],
+    extension: ".mp3",
+    mimeType: "audio/mpeg",
+    label: "MP3",
+  },
+  {
+    encoder: "aac",
+    encoderArgs: [...STEREO_OR_MONO, "-b:a", "192k"],
+    extension: ".m4a",
+    mimeType: "audio/mp4",
+    label: "M4A",
+  },
+];
+
+/**
+ * The ffmpeg invocation that pulls the first audio track out of a video.
+ *
+ * `-map 0:a:0` rather than a bare `-vn`: it takes one track (a film with a commentary
+ * track should not silently produce a two-track file) and, more usefully, it *fails* on a
+ * video with no audio at all instead of writing an empty container. `-sn -dn` drop
+ * subtitles and data streams, which no audio muxer will accept.
+ */
+export function buildExtractAudioArgs(input: {
+  inputPath: string;
+  outputPath: string;
+  target: AudioExtractTarget;
+}): string[] {
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-nostdin",
+    "-i",
+    input.inputPath,
+    "-vn",
+    "-sn",
+    "-dn",
+    "-map",
+    "0:a:0",
+    "-c:a",
+    input.target.encoder,
+    ...input.target.encoderArgs,
+    // Title, artist and the rest survive the extraction where the container holds them.
+    "-map_metadata",
+    "0",
+    "-y",
+    input.outputPath,
+  ];
+}
+
+/** `Holiday.mp4` + `.mp3` → `Holiday (audio).mp3`. */
+export function extractedAudioName(videoName: string, extension: string): string {
+  return renameForExtension(copyFileName(videoName, "audio"), extension);
+}
+
+/**
+ * Whether this file has an audio track worth trying to pull out.
+ *
+ * Video only. An audio file's "extraction" is a copy of itself, and every other type is
+ * something ffmpeg would either refuse or, worse, find a stray stream in.
+ */
+export function canExtractAudioFrom(mimeType: string): boolean {
+  return mimeType.toLowerCase().split(";")[0].trim().startsWith("video/");
+}
+
+/**
+ * Whether an ffmpeg failure means "this video has no audio track".
+ *
+ * That is a property of the file, not a fault, so the worker stops rather than retrying
+ * and the second encoder is never tried — it would fail in exactly the same way.
+ */
+export function isMissingAudioStreamError(stderr: string): boolean {
+  const text = stderr.toLowerCase();
+  return (
+    text.includes("matches no streams") ||
+    text.includes("does not contain any stream") ||
+    text.includes("output file #0 does not contain any stream")
+  );
+}
+
 /* ──────────────────────────  Which editor a file gets  ────────────────────── */
 
 /** `"image"` opens the crop/rotate/resize panel; `"trim"` opens the timeline. */
