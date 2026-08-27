@@ -355,7 +355,8 @@ For a single seed, five independent probes, each index-backed and each capped:
 | # | Probe | Query | Cap |
 |---|-------|-------|-----|
 | 1 | shared entities | `memory_mentions` where `entityId IN seed.entityIds`, group by memory, order by shared count desc | 40 |
-| 2 | shared tags | memories sharing ≥1 tag, rare tags first (`df ≤ 5%` or `df ≤ 4`) | 30 || 3 | same project | `projectId = seed.projectId`, keyset order | 20 |
+| 2 | shared tags | memories sharing ≥1 tag, rare tags first (`df ≤ 5%` or `df ≤ 4`) | 30 |
+| 3 | same project | `projectId = seed.projectId`, keyset order | 20 |
 | 4 | FTS / rare terms | `processQuery(title + summary)` from PHASE 1 → `searchVector` match, ranked | 40 |
 | 5 | graph proximity | 1-hop **explicit** neighbours of seed from `memory_links` | 20 |
 
@@ -522,10 +523,10 @@ same pattern as `retrieve.test.ts`):
 `tests/brain-phase2-integration.test.ts`:
 
 ```
-A: "Pengguna lebih suka komunikasi dalam Bahasa Indonesia."
-B: "User meminta jawaban menggunakan Bahasa Indonesia dan gaya santai."
-C: "Server menggunakan PostgreSQL untuk database."
-Q: "Cek identitas pengguna dan preferensi komunikasi."
+A: "User prefers communication in Indonesian."
+B: "User requests answers using Indonesian and a casual style."
+C: "Server uses PostgreSQL for the database."
+Q: "Check user identity and communication preferences."
 ```
 
 Assertions:
@@ -535,7 +536,7 @@ Assertions:
 - `brain_related(A)` does not surface C
 - adding an explicit A→B link flips `origin` to `"explicit"` and leaves the derived row intact
 
-Note on A↔B: they share "bahasa indonesia" and "komunikasi/jawaban" but the semantic gate
+Note on A↔B: they share "indonesian" and "communication/answers" but the semantic gate
 needs ≥2 shared *distinctive* terms. If the gate does not fire on strings this short, the
 honest fix is a documented short-text path — **not** lowering `SEMANTIC_MIN` globally,
 which would hairball every larger brain. I will report the measured similarity rather
@@ -594,4 +595,3 @@ Baseline is measured **before** step 2.1 so the comparison is real.
    your own.
 
 Nothing in PART 5 starts until (1) is answered.
-

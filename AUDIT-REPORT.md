@@ -7,24 +7,24 @@ Version: 0.4.0
 
 ## EXECUTIVE SUMMARY
 
-Second Brain 2.0 memiliki **fondasi intelligence yang solid** tetapi masih **passive** dan **incomplete**. Core algorithms sudah ada (hybrid retrieval, scoring, graph, enrichment) tetapi:
+Second Brain 2.0 has a **solid intelligence foundation** but is still **passive** and **incomplete**. Core algorithms are in place (hybrid retrieval, scoring, graph, enrichment) but:
 
-1. **Query understanding minimal** — lexical matching terlalu literal
-2. **Graph intelligence tidak persistent** — derived edges on-the-fly saja
-3. **Feedback loop belum active** — counters ada tapi tidak applied
-4. **Auto-maintenance tidak ada** — brain tidak self-organizing
+1. **Query understanding is minimal** — lexical matching is too literal
+2. **Graph intelligence is not persistent** — derived edges are on-the-fly only
+3. **Feedback loop is not active** — counters exist but are not applied
+4. **Auto-maintenance does not exist** — the brain is not self-organizing
 
 ---
 
 ## PART 1: RETRIEVAL SYSTEM AUDIT
 
-### ✅ Yang Sudah Ada (SOLID):
+### ✅ What Already Exists (SOLID):
 
 **Hybrid Retrieval Pipeline** (`lib/brain/retrieval/retrieve.ts`):
 - 4 legs: lexical, entity, graph, semantic (optional)
 - Proper abstention when signal unavailable
-- Reciprocal Rank Fusion untuk merge results
-- Tenant isolation ketat (brainId filter di semua query)
+- Reciprocal Rank Fusion to merge results
+- Strict tenant isolation (brainId filter in every query)
 - Per-leg caps (60 lexical, 40 entity, 60 graph)
 - Bounded graph walk (max 2 hops, 200 edges per hop)
 
@@ -34,65 +34,65 @@ Second Brain 2.0 memiliki **fondasi intelligence yang solid** tetapi masih **pas
 - Match signals (75%): lexical, semantic, entity, graph, related
 - Quality signals (25%): importance, confidence, recency, reinforcement
 - Validity multiplier (active=1, stale=0.85, superseded=0.4, retracted=0.15)
-- Explainable: setiap signal contribution tracked
+- Explainable: every signal contribution tracked
 
 **Entity Resolution**:
 - Query words extracted (lowercase, split, stopwords filtered)
-- Entity matching via regex `~*` dengan word boundaries
+- Entity matching via regex `~*` with word boundaries
 - Alias support: `brainEntities.aliases` array matched
 - POSIX pattern: `(^|[^[:alnum:]])(word1|word2)([^[:alnum:]]|$)`
 
-### ❌ Yang MISSING (ROOT CAUSE MASALAH):
+### ❌ What is MISSING (ROOT CAUSE OF THE PROBLEM):
 
-1. **Query Preprocessing MINIMAL**:
+1. **Query Preprocessing is MINIMAL**:
    ```typescript
    // Current:
    query.toLowerCase().split(/[^\p{L}\p{N}]+/u)
      .filter(word => word.length >= 3 && !STOP_WORDS.has(word))
    
    // Problem:
-   "Cek identitas pengguna dan preferensi komunikasi"
-   → ["cek", "identitas", "pengguna", "dan", "preferensi", "komunikasi"]
+   "Check user identity and communication preferences"
+   → ["check", "user", "identity", "and", "communication", "preferences"]
    
-   // Stopwords ("dan") tidak di-filter karena STOP_WORDS incomplete
-   // "Cek" treated as keyword padahal itu imperative verb
-   // Phrase "preferensi komunikasi" dipecah jadi 2 words terpisah
+   // Stopwords ("and") not filtered because STOP_WORDS is incomplete
+   // "Check" treated as a keyword even though it is an imperative verb
+   // Phrase "communication preferences" split into 2 separate words
    ```
 
 2. **No Query Intent Understanding**:
-   - Tidak ada distinction antara:
-     - Content words: "identitas", "preferensi", "komunikasi"
-     - Function words: "cek", "dan"
-     - Imperative verbs: "cek", "tampilkan", "carikan"
-   - Tidak ada phrase detection
-   - Tidak ada term weighting (TF-IDF query side)
+   - No distinction between:
+     - Content words: "identity", "preferences", "communication"
+     - Function words: "check", "and"
+     - Imperative verbs: "check", "show", "find"
+   - No phrase detection
+   - No term weighting (TF-IDF query side)
 
 3. **No Query Expansion**:
-   - Entity aliases matched ONLY di entity leg
-   - Tidak ada lexical expansion (synonyms dari brain vocabulary)
-   - Tidak ada stemming/lemmatization
-   - Query "preferensi komunikasi" tidak match entity "communication preference" via lexical leg
+   - Entity aliases matched ONLY in the entity leg
+   - No lexical expansion (synonyms from brain vocabulary)
+   - No stemming/lemmatization
+   - Query "communication preference" does not match entity "comm pref" via lexical leg
 
-4. **Lexical Leg Terlalu Literal**:
+4. **Lexical Leg is Too Literal**:
    ```typescript
    // Current: ftsMatchOn(memories.searchVector, query)
    // Uses: to_tsquery('simple', query)
    // Problem: "simple" config = no stemming, no language processing
    ```
 
-5. **Entity Leg Return Empty Kalau**:
-   - Query words tidak exact match entity name/alias
-   - "komunikasi" tidak match "communication" (no bilingual matching)
+5. **Entity Leg Returns Empty When**:
+   - Query words do not exactly match entity name/alias
+   - "communication" does not match "komunikasi" (no bilingual matching)
 
-6. **Graph Leg Butuh Seeds**:
-   - Graph walk hanya dari `seedMemoryIds` atau lexical hits
-   - Kalau lexical leg return 0 → no seeds → graph leg abstain
+6. **Graph Leg Requires Seeds**:
+   - Graph walk only from `seedMemoryIds` or lexical hits
+   - If lexical leg returns 0 → no seeds → graph leg abstains
 
 ---
 
 ## PART 2: GRAPH INTELLIGENCE AUDIT
 
-### ✅ Yang Sudah Ada:
+### ✅ What Already Exists:
 
 **Derived Edge Computation** (`lib/brain/graph/relate.ts`):
 - TF-IDF cosine similarity between memories
@@ -118,38 +118,38 @@ Second Brain 2.0 memiliki **fondasi intelligence yang solid** tetapi masih **pas
 - linkType: "relates_to", "contradicts", "supersedes", etc.
 - brainId isolated
 
-### ❌ Yang MISSING (ROOT CAUSE `brain_related` DANGKAL):
+### ❌ What is MISSING (ROOT CAUSE OF SHALLOW `brain_related`):
 
-> **CORRECTION (PHASE 2 audit)**: `brain_related` tidak kosong. `findRelatedMemories()`
-> punya fallback ke `retrieveMemories()` (Step 4), jadi lexical + entity overlap sudah
-> memberi hasil tanpa explicit link. Yang benar-benar hilang: derived edge tidak
-> persistent, tidak ada label origin/confidence/evidence, query fallback lemah
-> (seed title saja), dan scan `memory_links` tanpa LIMIT.
+> **CORRECTION (PHASE 2 audit)**: `brain_related` is not empty. `findRelatedMemories()`
+> has a fallback to `retrieveMemories()` (Step 4), so lexical + entity overlap already
+> produce results without an explicit link. What is truly missing: derived edges are not
+> persistent, there is no label for origin/confidence/evidence, the query fallback is weak
+> (seed title only), and `memory_links` is scanned without a LIMIT.
 
-1. **Derived Edges TIDAK DISIMPAN**:
+1. **Derived Edges are NOT SAVED**:
    ```typescript
    // Current:
    // lib/brain/graph-snapshot.ts calls relateMemories()
    // → computes TF-IDF edges
-   // → returns untuk graph view saja
-   // → TIDAK ditulis ke memory_links
+   // → returns them for the graph view only
+   // → NOT written to memory_links
 
    // Problem:
    // brain_related() → getBrainRelatedMemories()
    // → Step 2/3 reads memory_links (explicit only)
-   // → Step 4 fallback retrieval: hasil ADA, tapi tanpa provenance
+   // → Step 4 fallback retrieval: results EXIST, but no provenance
    ```
 
 2. **No Auto-Linking**:
-   - Memory baru dibuat → enrichment runs → entities extracted
-   - Tapi TIDAK ada job untuk compute derived links
-   - Tidak ada trigger untuk auto-create relationships
+   - A new memory is created → enrichment runs → entities extracted
+   - But there is NO job to compute derived links
+   - No trigger to auto-create relationships
 
 3. **No Derived vs Explicit Distinction**:
-   - `memory_links.linkType` adalah string bebas
-   - Tidak ada field untuk mark "derived" vs "explicit"
-   - Tidak ada confidence/weight field
-   - Tidak ada provenance tracking
+   - `memory_links.linkType` is a free-form string
+   - No field to mark "derived" vs "explicit"
+   - No confidence/weight field
+   - No provenance tracking
 
 4. **Graph Service Limitations**:
    ```typescript
@@ -159,15 +159,15 @@ Second Brain 2.0 memiliki **fondasi intelligence yang solid** tetapi masih **pas
    // 3. Semantic/entity overlap (via retrieval) ✓
    // 4. Shared project ✓
    
-   // Problem: Step 1 & 2 return EMPTY kalau no explicit links
-   // Step 3 & 4 tidak cukup kuat kalau semantic OFF
+   // Problem: Step 1 & 2 return EMPTY when there are no explicit links
+   // Step 3 & 4 are not strong enough when semantic is OFF
    ```
 
 ---
 
 ## PART 3: HEALTH SERVICE AUDIT
 
-### ✅ Yang Sudah Ada:
+### ✅ What Already Exists:
 
 **Comprehensive Metrics**:
 - Structural: orphans, weak links, isolated clusters
@@ -188,14 +188,14 @@ Second Brain 2.0 memiliki **fondasi intelligence yang solid** tetapi masih **pas
 - Fields accessed: `validityState`, `confirmationCount`, `lastAccessedAt`
 - All fields EXIST in schema ✓
 
-### ❌ ROOT CAUSE `brain_health` ERROR:
+### ❌ ROOT CAUSE OF `brain_health` ERROR:
 
-**UPDATE: Error sudah di-fix di tools.ts** (return `null` instead of `undefined`)
+**UPDATE: Error already fixed in tools.ts** (return `null` instead of `undefined`)
 
-Test sekarang PASS. Error bukan dari health-service.ts, tapi dari MCP serialization:
+The test now PASSES. The error was not from health-service.ts, but from MCP serialization:
 ```typescript
 // Before:
-queuedForReview: queued  // null serialized jadi undefined in JSON
+queuedForReview: queued  // null serialized as undefined in JSON
 
 // After:
 queuedForReview: queued ?? null  // explicit null
@@ -204,20 +204,20 @@ queuedForReview: queued ?? null  // explicit null
 **Remaining Issues**:
 
 1. **No Proactive Health Monitoring**:
-   - `brain_health` hanya dipanggil manual
-   - Tidak ada scheduled job
-   - Tidak ada alerts
+   - `brain_health` is only called manually
+   - No scheduled job
+   - No alerts
 
-2. **Review Queue Write-Only**:
+2. **Review Queue is Write-Only**:
    - Findings written to `brain_review_items`
-   - Tapi tidak ada UI/tool untuk resolve
-   - No workflow untuk act on findings
+   - But no UI/tool to resolve them
+   - No workflow to act on findings
 
 ---
 
 ## PART 4: ENRICHMENT AUDIT
 
-### ✅ Yang Sudah Ada (EXCELLENT):
+### ✅ What Already Exists (EXCELLENT):
 
 **Idempotent Enrichment** (`lib/brain/enrich/`):
 - Hash-based: `sha256(title + content + type)`
@@ -239,7 +239,7 @@ queuedForReview: queued ?? null  // explicit null
 - extractedBy: "deterministic-v1"
 - extractionConfidence [0,1]
 
-### ✅ Yang Sudah JALAN:
+### ✅ What Already WORKS:
 
 - Enrichment triggered on memory write ✓
 - Idempotency prevents re-processing ✓
@@ -249,21 +249,21 @@ queuedForReview: queued ?? null  // explicit null
 ### ⚠️ Limitations (BY DESIGN):
 
 1. **No Cross-Memory Analysis**:
-   - Enrichment per-memory saja
-   - Tidak compute relationships dengan memories lain
-   - Tidak trigger auto-linking
+   - Enrichment is per-memory only
+   - Does not compute relationships with other memories
+   - Does not trigger auto-linking
 
-2. **Entity Detection Language-Specific**:
-   - Rules tuned untuk English/Indonesian mix
+2. **Entity Detection is Language-Specific**:
+   - Rules tuned for English/Indonesian mix
    - "communication preference" detected
    - "preferensi komunikasi" detected
-   - Tapi tidak ada bilingual synonym matching
+   - But no bilingual synonym matching
 
 ---
 
 ## PART 5: FEEDBACK LOOP AUDIT
 
-### ✅ Yang Sudah Ada:
+### ✅ What Already Exists:
 
 **Counters on `memories` table**:
 - `recallCount` - total retrievals
@@ -273,7 +273,7 @@ queuedForReview: queued ?? null  // explicit null
 **Event Log** (`brain_retrieval_events`):
 - `(brain_id, memory_id, event_type, score, query_hash, created_at)`
 - Content-free (privacy)
-- Query hash untuk grouping tanpa store query text
+- Query hash for grouping without storing query text
 
 **Scoring Integration**:
 ```typescript
@@ -283,9 +283,9 @@ decay = halfLifeDecay(daysSinceLastRecall, 90)
 reinforcement = raw * decay
 ```
 
-### ❌ Yang MISSING (NOT ACTIVE):
+### ❌ What is MISSING (NOT ACTIVE):
 
-1. **Counters Tidak Di-increment**:
+1. **Counters are Not Incremented**:
    ```bash
    $ grep -r "recallCount\+\+" lib/brain/
    # NO RESULTS
@@ -295,20 +295,20 @@ reinforcement = raw * decay
    ```
 
 2. **No Feedback Recording**:
-   - `brain_recall` tidak record usage
-   - `brain_context` tidak record selection
-   - `brain_read` tidak increment counter
+   - `brain_recall` does not record usage
+   - `brain_context` does not record selection
+   - `brain_read` does not increment counter
 
 3. **Reinforcement Signal Abstains**:
-   - recallCount = 0 untuk semua memories
+   - recallCount = 0 for all memories
    - reinforcementScore() returns null
-   - Weight 0.4 di quality pool TIDAK applied
+   - Weight 0.4 in quality pool NOT applied
 
 ---
 
 ## PART 6: MCP TOOLS AUDIT
 
-### ✅ Tools Yang Ada (23 total):
+### ✅ Tools That Exist (23 total):
 
 **1.0 Surface (14 tools)**:
 - brain_list_brains
@@ -339,7 +339,7 @@ reinforcement = raw * decay
 
 ### ✅ Error Handling:
 
-Pattern di semua tools:
+Pattern in all tools:
 ```typescript
 try {
   const grant = requireGrant(principal, brainId, scope);
@@ -351,12 +351,12 @@ try {
 }
 ```
 
-### ❌ Query Preprocessing ABSENT:
+### ❌ Query Preprocessing is ABSENT:
 
 ```typescript
 // brain_context tool:
 async ({ brainId, task, tokenBudget, ... }) => {
-  // Langsung pass task ke buildBrainContext()
+  // Directly passes task to buildBrainContext()
   const context = await buildBrainContext(db, {
     brainId: grant.brainId,
     task,  // ← NO PREPROCESSING
@@ -364,8 +364,8 @@ async ({ brainId, task, tokenBudget, ... }) => {
   });
 }
 
-// Problem: "Cek identitas pengguna dan preferensi komunikasi"
-// Tidak di-normalize, tidak di-expand, langsung ke retrieval
+// Problem: "Check user identity and communication preferences"
+// Not normalized, not expanded, goes straight to retrieval
 ```
 
 ---
@@ -376,16 +376,16 @@ async ({ brainId, task, tokenBudget, ... }) => {
 
 **Core**:
 - `brains` ✓
-- `memories` (dengan validity_state, confirmation_count, recall_count) ✓
+- `memories` (with validity_state, confirmation_count, recall_count) ✓
 - `memory_versions` ✓
 - `memory_tags`, `memory_tag_map` ✓
 - `brain_projects` ✓
 
 **Graph**:
-- `brain_entities` (dengan aliases array) ✓
+- `brain_entities` (with aliases array) ✓
 - `brain_relationships` (entity→entity) ✓
 - `memory_links` (memory→memory, memory→entity) ✓
-- `memory_mentions` (dengan span positions) ✓
+- `memory_mentions` (with span positions) ✓
 
 **Intelligence**:
 - `brain_graph_metrics` (PageRank, components) ✓
@@ -409,9 +409,9 @@ async ({ brainId, task, tokenBudget, ... }) => {
    - `validatedAt`: timestamp
 
 2. **`memories` lacks**:
-   - `tfidf_vector`: vector (untuk derived edges)
-   - `semantic_vector`: vector (untuk semantic search)
-   - Schema supports text tapi tidak ada vector column
+   - `tfidf_vector`: vector (for derived edges)
+   - `semantic_vector`: vector (for semantic search)
+   - Schema supports text but no vector column
 
 ### ✅ Indexes (GOOD):
 
@@ -427,36 +427,36 @@ async ({ brainId, task, tokenBudget, ... }) => {
 
 ### Critical Gaps:
 
-1. **Query Understanding Layer ABSENT**
+1. **Query Understanding Layer is ABSENT**
    - Impact: Natural language queries fail
    - Fix: Implement preprocessing pipeline
    - Effort: Medium (2-3 days)
 
-2. **Auto-Linking System ABSENT**
+2. **Auto-Linking System is ABSENT**
    - Impact: `brain_related` has no persistent derived graph and no provenance
      (it still returns retrieval-based results — see the Problem C correction)
    - Fix: Background job + derived link storage
    - Effort: Large (5-7 days)
 
-3. **Feedback Loop NOT ACTIVE**
+3. **Feedback Loop is NOT ACTIVE**
    - Impact: No learning from usage
    - Fix: Record retrieval events, apply reinforcement
    - Effort: Small (1-2 days)
 
-4. **Self-Maintenance ABSENT**
-   - Impact: Brain tidak self-organizing
+4. **Self-Maintenance is ABSENT**
+   - Impact: The brain does not self-organize
    - Fix: Scheduled maintenance worker
    - Effort: Large (7-10 days)
 
 ### Non-Critical Gaps:
 
-5. **Semantic Search OFF**
-   - Impact: Limited (3 legs masih jalan)
+5. **Semantic Search is OFF**
+   - Impact: Limited (3 legs still work)
    - Fix: Optional local embeddings
    - Effort: Medium (risky, dependency heavy)
 
-6. **Review Queue Read-Only**
-   - Impact: Warnings tidak actionable
+6. **Review Queue is Read-Only**
+   - Impact: Warnings are not actionable
    - Fix: Resolution workflow + UI
    - Effort: Medium (3-4 days)
 
@@ -469,7 +469,7 @@ async ({ brainId, task, tokenBudget, ... }) => {
 **Status**: ✅ FIXED
 
 **Root Cause**: MCP JSON serialization
-- `null` values serialized jadi `undefined`
+- `null` values serialized as `undefined`
 - Test expected `null`, got `undefined`
 
 **Fix Applied**:
@@ -483,26 +483,26 @@ queuedForReview: queued ?? null  // explicit null
 
 **Root Cause**: Multi-layered
 
-1. **Layer 1: Query Preprocessing Minimal**
+1. **Layer 1: Query Preprocessing is Minimal**
    ```
-   Input: "Cek identitas pengguna dan preferensi komunikasi"
-   Current: ["cek", "identitas", "pengguna", "dan", "preferensi", "komunikasi"]
-   Should be: ["identitas", "pengguna", "preferensi", "komunikasi"]
-              + detected phrase: "preferensi komunikasi"
+   Input: "Check user identity and communication preferences"
+   Current: ["check", "user", "identity", "and", "communication", "preferences"]
+   Should be: ["user", "identity", "communication", "preferences"]
+              + detected phrase: "communication preferences"
               + intent: SEARCH (not imperative)
    ```
 
 2. **Layer 2: Entity Leg Misses**
-   - "preferensi komunikasi" tidak match entity "communication preference"
+   - "communication preferences" does not match entity "comm pref"
    - No bilingual synonym matching
    - Aliases work ONLY if exact match
 
-3. **Layer 3: Lexical Leg Too Literal**
+3. **Layer 3: Lexical Leg is Too Literal**
    - `to_tsquery('simple', query)` = no stemming
-   - "komunikasi" ≠ "communication" in FTS
+   - "communication" ≠ "komunikasi" in FTS
    - Query treated as phrase, not bag-of-words
 
-4. **Layer 4: Graph Leg No Seeds**
+4. **Layer 4: Graph Leg Has No Seeds**
    - Lexical returns 0 → no seeds for graph walk
    - Graph leg abstains
 
@@ -521,7 +521,7 @@ queuedForReview: queued ?? null  // explicit null
 
 **Root Cause**:
 
-1. **Derived Edges Not Persistent**:
+1. **Derived Edges are Not Persistent**:
    - `relateMemories()` computes TF-IDF / tag / entity / project edges
    - Used only in `graph-snapshot.ts` for the UI graph view
    - NOT written to `memory_links`, so nothing else can read them
@@ -548,11 +548,11 @@ queuedForReview: queued ?? null  // explicit null
 
 ### PHASE 1: Fix Query Understanding (HIGH PRIORITY)
 
-**Goal**: "Cek identitas pengguna dan preferensi komunikasi" finds relevant memories
+**Goal**: "Check user identity and communication preferences" finds relevant memories
 
 **Tasks**:
 1. Improve stopword list (bilingual)
-2. Detect imperative verbs, filter
+2. Detect imperative verbs, filter them
 3. Phrase detection (2-3 word collocations)
 4. Term weighting (rare words count more)
 5. Entity alias expansion in lexical leg
@@ -566,7 +566,7 @@ queuedForReview: queued ?? null  // explicit null
 
 ### PHASE 2: Implement Auto-Linking (HIGH PRIORITY)
 
-**Goal**: `brain_related()` tidak kosong, graph intelligence persistent
+**Goal**: `brain_related()` is not empty, graph intelligence is persistent
 
 **Tasks**:
 1. Add fields to `memory_links`:
@@ -590,7 +590,7 @@ queuedForReview: queued ?? null  // explicit null
 
 ### PHASE 3: Activate Feedback Loop (MEDIUM PRIORITY)
 
-**Goal**: Brain learns from usage
+**Goal**: The brain learns from usage
 
 **Tasks**:
 1. Record retrieval in `brain_recall`, `brain_context`
@@ -606,7 +606,7 @@ queuedForReview: queued ?? null  // explicit null
 
 ### PHASE 4: Build Self-Maintenance Worker (LOW PRIORITY)
 
-**Goal**: Brain self-organizing
+**Goal**: The brain self-organizes
 
 **Tasks**:
 1. Scheduled job (hourly)
@@ -619,7 +619,7 @@ queuedForReview: queued ?? null  // explicit null
    - Health check → alert
 3. Policy-driven (observe/suggest/apply modes)
 
-**Impact**: Brain stays healthy without manual intervention
+**Impact**: The brain stays healthy without manual intervention
 
 **Effort**: 7-10 days
 
@@ -661,7 +661,7 @@ queuedForReview: queued ?? null  // explicit null
 - High risk
 - Medium impact
 - Complex policies
-- Requires 1-3 stable first
+- Requires phases 1-3 stable first
 
 ---
 
@@ -685,7 +685,7 @@ queuedForReview: queued ?? null  // explicit null
 
 ### For Query Understanding:
 
-- [ ] "Cek identitas pengguna dan preferensi komunikasi" → candidates > 0
+- [ ] "Check user identity and communication preferences" → candidates > 0
 - [ ] Stopwords properly filtered (ID + EN)
 - [ ] Phrase detection working
 - [ ] Entity alias expansion in lexical
@@ -715,24 +715,24 @@ queuedForReview: queued ?? null  // explicit null
 
 ## CONCLUSION
 
-Second Brain 2.0 memiliki **architecture yang benar** dan **algorithms yang solid**, tapi masih **passive**. 
+Second Brain 2.0 has the **right architecture** and **solid algorithms**, but it is still **passive**. 
 
-**Core intelligence ada**:
+**Core intelligence exists**:
 - Hybrid retrieval ✓
 - Multi-signal scoring ✓
 - Graph algorithms ✓
 - Enrichment ✓
 - Health monitoring ✓
 
-**Yang perlu diaktifkan**:
+**What needs to be activated**:
 - Query understanding ❌
 - Auto-linking ❌
 - Feedback loop ❌
 - Self-maintenance ❌
 
-**Next Step**: Implement PHASE 1 (Query Understanding) untuk fix Problem B.
+**Next Step**: Implement PHASE 1 (Query Understanding) to fix Problem B.
 
-Setelah Phase 1, agent akan melihat improvement signifikan dalam retrieval quality tanpa butuh embeddings.
+After Phase 1, the agent will see significant improvement in retrieval quality without needing embeddings.
 
 ---
 

@@ -10,7 +10,7 @@
 
 ### 1. Query Understanding Layer (`lib/brain/retrieval/query-understanding.ts`)
 
-**New module** dengan pure functions untuk preprocessing natural language queries:
+**New module** with pure functions for preprocessing natural language queries:
 
 #### Core Functions:
 - `normalizeText()` — Unicode normalization, smart quotes, dashes, whitespace
@@ -91,14 +91,14 @@ export const MAX_PHRASES = 8;
 ### Before PHASE 1:
 
 ```
-Query: "Cek identitas pengguna dan preferensi komunikasi"
+Query: "Check user identity and communication preferences"
 
 Processing:
-  queryWords() → ["cek", "identitas", "pengguna", "dan", "preferensi", "komunikasi"]
+  queryWords() → ["check", "user", "identity", "and", "communication", "preferences"]
   
 Problems:
-  ❌ "cek" (imperative) treated as content word
-  ❌ "dan" (stopword) not filtered
+  ❌ "check" (imperative) treated as content word
+  ❌ "and" (stopword) not filtered
   ❌ No phrase detection
   ❌ Too literal for FTS
 
@@ -108,20 +108,20 @@ Result: 0 candidates returned
 ### After PHASE 1:
 
 ```
-Query: "Cek identitas pengguna dan preferensi komunikasi"
+Query: "Check user identity and communication preferences"
 
 Processing:
-  1. Normalize: "cek identitas pengguna dan preferensi komunikasi"
-  2. Tokenize: ["cek", "identitas", "pengguna", "dan", "preferensi", "komunikasi"]
+  1. Normalize: "check user identity and communication preferences"
+  2. Tokenize: ["check", "user", "identity", "and", "communication", "preferences"]
   3. Intent: ACTION (starts with imperative)
-  4. Content words: ["identitas", "pengguna", "preferensi", "komunikasi"]
-  5. Phrases: ["identitas pengguna", "preferensi komunikasi"]
-  6. Enhanced query: "identitas pengguna preferensi komunikasi preferensi komunikasi"
-  7. Entity words: ["identitas", "pengguna", "preferensi", "komunikasi"]
+  4. Content words: ["user", "identity", "communication", "preferences"]
+  5. Phrases: ["user identity", "communication preferences"]
+  6. Enhanced query: "user identity communication preferences communication preferences"
+  7. Entity words: ["user", "identity", "communication", "preferences"]
 
 Improvements:
-  ✅ "cek" filtered out
-  ✅ "dan" filtered out
+  ✅ "check" filtered out
+  ✅ "and" filtered out
   ✅ Phrases detected and boosted
   ✅ Clean query for FTS
   
@@ -137,7 +137,7 @@ Result: Lexical + entity legs now find relevant candidates
 - **After**: Clean query → better FTS matching
 
 ### Entity Leg:
-- **Before**: "dan" treated as potential entity name
+- **Before**: "and" treated as potential entity name
 - **After**: Only content words matched against entities
 
 ### Graph Leg:
@@ -264,7 +264,7 @@ processQuery("cek PostgreSQL configuration untuk production")
 
 ## Conclusion
 
-PHASE 1 successfully implemented **Query Understanding Layer** yang:
+PHASE 1 successfully implemented the **Query Understanding Layer** that:
 - ✅ Fixes natural language retrieval gap
 - ✅ Removes noise (stopwords, imperatives)
 - ✅ Detects phrases (multi-word concepts)
@@ -274,6 +274,6 @@ PHASE 1 successfully implemented **Query Understanding Layer** yang:
 - ✅ No breaking changes
 - ✅ Full test coverage
 
-**Result**: Natural language queries seperti "Cek identitas pengguna dan preferensi komunikasi" sekarang **menemukan candidates** yang relevan, bukan 0 candidates seperti sebelumnya.
+**Result**: Natural language queries like "Check user identity and communication preferences" now **find relevant candidates**, not 0 candidates like before.
 
-Second Brain 2.0 sekarang **lebih pintar** dalam memahami natural language queries tanpa butuh external LLM API.
+Second Brain 2.0 is now **smarter** at understanding natural language queries without needing an external LLM API.
