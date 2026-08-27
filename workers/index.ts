@@ -1,4 +1,8 @@
-import "dotenv/config";
+// Not "dotenv/config": dotenv is a devDependency and the worker image installs with
+// `npm ci --omit=dev`, so that import crashed the container before its first line and
+// restart-looped it through an entire deploy. The loader uses dotenv when it is there
+// and reads .env itself when it is not — see lib/env/load-env.ts.
+import "../lib/env/load-env";
 import { Worker } from "bullmq";
 import { and, eq, inArray, sql as drizzleSql } from "drizzle-orm";
 import sharp from "sharp";

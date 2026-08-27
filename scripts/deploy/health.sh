@@ -52,18 +52,23 @@ check_redis() {
 }
 
 check_worker() {
-  local logs
+  local logs state
   logs="$("${COMPOSE[@]}" logs worker --tail 30 2>/dev/null || true)"
-  if echo "$logs" | grep -qiE "error|ENOTFOUND|ECONNREFUSED|fatal"; then
-    if "${COMPOSE[@]}" ps worker --format '{{.State}}' 2>/dev/null | grep -q running; then
-      status_line 1 "Worker" "running but errors in log"
+  state="$("${COMPOSE[@]}" ps worker --format '{{.State}}' 2>/dev/null | head -n1 || echo "missing")"
+
+  # Signatures, not the bare word "error": a worker that logs "job retried after error"
+  # is working, and failing a whole deploy over that word teaches the operator to ignore
+  # this line. These are the shapes a crash actually takes.
+  if echo "$logs" | grep -qE "Cannot find module|MODULE_NOT_FOUND|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|FATAL|unhandled|[A-Za-z]*Error: "; then
+    if [[ "$state" == "running" ]]; then
+      status_line 1 "Worker" "running but crashing — ${COMPOSE[*]} logs worker --tail 50"
     else
-      status_line 1 "Worker" "not running"
+      status_line 1 "Worker" "$state — ${COMPOSE[*]} logs worker --tail 50"
     fi
-  elif "${COMPOSE[@]}" ps worker --format '{{.State}}' 2>/dev/null | grep -q running; then
+  elif [[ "$state" == "running" ]]; then
     status_line 0 "Worker" "running"
   else
-    status_line 1 "Worker" "not running"
+    status_line 1 "Worker" "$state"
   fi
 }
 
