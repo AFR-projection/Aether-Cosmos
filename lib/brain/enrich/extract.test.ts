@@ -36,8 +36,8 @@ describe("extractEntities", () => {
 
   it("is deterministic", () => {
     const input = {
-      title: "Keputusan storage",
-      content: "Kita pakai PostgreSQL dan Redis. Cloudflare R2 hanya untuk file.",
+      title: "Storage decision",
+      content: "We use PostgreSQL and Redis. Cloudflare R2 only for files.",
     };
     expect(extractEntities(input)).toEqual(extractEntities(input));
   });
@@ -84,25 +84,25 @@ describe("extractEntities", () => {
 
   it("ignores a capitalized word that only starts a sentence", () => {
     const extracted = names({
-      title: "catatan",
-      content: "Sekarang kita mulai implementasi. Nanti kita review lagi.",
+      title: "notes",
+      content: "Right now we start implementation. Later we review it again.",
     });
-    expect(extracted).not.toContain("Sekarang");
-    expect(extracted).not.toContain("Nanti");
+    expect(extracted).not.toContain("Right");
+    expect(extracted).not.toContain("Later");
   });
 
   it("accepts a capitalized word confirmed away from a sentence boundary", () => {
     const extracted = names({
-      title: "catatan",
-      content: "Andi menulis draft itu. Lalu Andi pergi.",
+      title: "notes",
+      content: "Andi wrote that draft. Then Andi left.",
     });
     expect(extracted).toContain("Andi");
   });
 
   it("uses an honorific as a person signal and strips it from the name", () => {
     const result = extractEntities({
-      title: "catatan",
-      content: "Pak Andi memutuskan arsitekturnya. Kemudian Pak Andi pergi.",
+      title: "notes",
+      content: "Pak Andi decided the architecture. Then Pak Andi left.",
     });
     const andi = result.entities.find((entity) => entity.name === "Andi");
     expect(andi).toBeDefined();
@@ -140,11 +140,12 @@ describe("extractEntities", () => {
 
   it("does not turn all-caps emphasis into an entity", () => {
     const extracted = names({
-      title: "aturan",
-      content: "JANGAN membuat fake relationship. PENTING sekali.",
+      title: "rules",
+      content: "DO NOT create fake relationships. IMPORTANT.",
     });
-    expect(extracted).not.toContain("JANGAN");
-    expect(extracted).not.toContain("PENTING");
+    expect(extracted).not.toContain("DO");
+    expect(extracted).not.toContain("NOT");
+    expect(extracted).not.toContain("IMPORTANT");
   });
 
   it("extracts a real acronym", () => {
@@ -194,9 +195,9 @@ describe("extractEntities", () => {
 
   it("keeps every mention offset consistent with the source text", () => {
     const input = {
-      title: "PostgreSQL dan Redis",
-      summary: "Redis hanya cache.",
-      content: "Kita pakai PostgreSQL. Redis dipakai untuk queue, bukan sumber data.",
+      title: "PostgreSQL and Redis",
+      summary: "Redis is only a cache.",
+      content: "We use PostgreSQL. Redis is used for the queue, not as the data source.",
     };
     const result = extractEntities(input);
     expect(result.entities.length).toBeGreaterThan(0);
@@ -212,8 +213,8 @@ describe("extractEntities", () => {
 
   it("never emits two entities claiming the same characters", () => {
     const result = extractEntities({
-      title: "Cloudflare R2 dan Amazon S3",
-      content: "Cloudflare R2 menggantikan Amazon S3 untuk blob. Cloudflare R2 murah.",
+      title: "Cloudflare R2 and Amazon S3",
+      content: "Cloudflare R2 replaced Amazon S3 for blobs. Cloudflare R2 is cheaper.",
     });
     const spans: Record<string, Array<[number, number]>> = {};
     for (const entity of result.entities) {
@@ -230,16 +231,16 @@ describe("extractEntities", () => {
   it("stays bounded on a large document", () => {
     const content = Array.from(
       { length: 400 },
-      (_, index) => `Sistem Alpha${index} memakai PostgreSQL untuk Modul Beta${index}.`
+      (_, index) => `System Alpha${index} uses PostgreSQL for Module Beta${index}.`
     ).join(" ");
-    const result = extractEntities({ title: "besar", content });
+    const result = extractEntities({ title: "large", content });
     expect(result.entities.length).toBeLessThanOrEqual(MAX_ENTITIES_PER_MEMORY);
     expect(result.dropped).toBeGreaterThan(0);
   });
 
   it("caps mentions per entity", () => {
-    const content = Array.from({ length: 50 }, () => "PostgreSQL").join(" lalu ");
-    const result = extractEntities({ title: "ulang", content });
+    const content = Array.from({ length: 50 }, () => "PostgreSQL").join(" then ");
+    const result = extractEntities({ title: "repeated", content });
     const postgres = result.entities.find((entity) => entity.name === "PostgreSQL");
     expect(postgres?.mentions.length).toBeLessThanOrEqual(12);
   });

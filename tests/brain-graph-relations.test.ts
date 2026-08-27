@@ -43,9 +43,9 @@ function degreeOf(edges: DerivedEdge[]): Map<string, number> {
 }
 
 const FILLER = [
-  memory({ id: "f1", title: "Resep rendang", content: "daging santan cabai masak lama" }),
-  memory({ id: "f2", title: "Jadwal olahraga", content: "renang pagi kolam tiket bulanan" }),
-  memory({ id: "f3", title: "Buku bacaan", content: "novel sejarah maritim nusantara" }),
+  memory({ id: "f1", title: "Rendang recipe", content: "beef coconut chili cook long" }),
+  memory({ id: "f2", title: "Exercise schedule", content: "swim morning pool ticket monthly" }),
+  memory({ id: "f3", title: "Reading list", content: "novel history maritime archipelago" }),
 ];
 
 describe("relateMemories — signals that must create an edge", () => {
@@ -53,13 +53,13 @@ describe("relateMemories — signals that must create an edge", () => {
     const { edges } = relateMemories([
       memory({
         id: "a",
-        title: "Infrastruktur VPS produksi",
-        content: "deploy ubuntu lewat ssh ke vps produksi, nginx reverse proxy, docker compose",
+        title: "Production VPS infrastructure",
+        content: "deploy ubuntu via ssh to production vps, nginx reverse proxy, docker compose",
       }),
       memory({
         id: "b",
-        title: "Catatan deploy ubuntu",
-        content: "ssh ke vps, jalankan docker compose, cek nginx sebelum deploy ulang",
+        title: "Ubuntu deploy notes",
+        content: "ssh to vps, run docker compose, check nginx before redeploying",
       }),
       ...FILLER,
     ]);
@@ -73,8 +73,8 @@ describe("relateMemories — signals that must create an edge", () => {
 
   it("links a pair that shares one rare tag, and labels it as a tag relation", () => {
     const { edges } = relateMemories([
-      memory({ id: "a", title: "Identitas pengguna", content: "panggilan bos", tags: ["aldo"] }),
-      memory({ id: "b", title: "Profil profesional", content: "linkedin portofolio", tags: ["aldo"] }),
+      memory({ id: "a", title: "User identity", content: "nickname boss", tags: ["aldo"] }),
+      memory({ id: "b", title: "Professional profile", content: "linkedin portfolio", tags: ["aldo"] }),
       ...FILLER,
     ]);
 
@@ -85,10 +85,10 @@ describe("relateMemories — signals that must create an edge", () => {
 
   it("ranks a shared entity above a shared tag", () => {
     const { edges } = relateMemories([
-      memory({ id: "a", title: "Rapat kickoff", entityIds: ["e-nova"] }),
-      memory({ id: "b", title: "Catatan rilis", entityIds: ["e-nova"] }),
-      memory({ id: "c", title: "Ide fitur", tags: ["rare-tag"] }),
-      memory({ id: "d", title: "Ide lanjutan", tags: ["rare-tag"] }),
+      memory({ id: "a", title: "Kickoff meeting", entityIds: ["e-nova"] }),
+      memory({ id: "b", title: "Release notes", entityIds: ["e-nova"] }),
+      memory({ id: "c", title: "Feature idea", tags: ["rare-tag"] }),
+      memory({ id: "d", title: "Follow-up idea", tags: ["rare-tag"] }),
       ...FILLER,
     ]);
 
@@ -105,13 +105,13 @@ describe("relateMemories — coincidences that must not create an edge", () => {
     const { edges } = relateMemories([
       memory({
         id: "a",
-        title: "Notifikasi telegram untuk harga emas",
-        content: "kirim peringatan ketika harga logam bergerak melewati batas harian",
+        title: "Telegram notification for gold price",
+        content: "send alert when metal price crosses daily threshold",
       }),
       memory({
         id: "b",
-        title: "Grup telegram komunitas fotografi",
-        content: "diskusi lensa manual, cetak album, hunting cahaya senja",
+        title: "Telegram photography community group",
+        content: "discuss manual lens, print album, hunt twilight light",
       }),
       ...FILLER,
     ]);
@@ -123,9 +123,9 @@ describe("relateMemories — coincidences that must not create an edge", () => {
     const common = Array.from({ length: 8 }, (_, index) =>
       memory({
         id: `c${index}`,
-        title: `Catatan ${index}`,
-        content: `isi catatan nomor ${index} tanpa kemiripan apa pun ${"xyz".repeat(index + 1)}`,
-        tags: ["catatan"],
+        title: `Note ${index}`,
+        content: `note content number ${index} without any similarity ${"xyz".repeat(index + 1)}`,
+        tags: ["notes"],
       })
     );
     const { edges } = relateMemories([...common, ...FILLER]);
@@ -134,8 +134,8 @@ describe("relateMemories — coincidences that must not create an edge", () => {
 
   it("does not link two memories on a shared project alone", () => {
     const { edges } = relateMemories([
-      memory({ id: "a", title: "Riset kompetitor", content: "harga paket pesaing luar negeri", projectId: "p1" }),
-      memory({ id: "b", title: "Desain ikon", content: "grid delapan piksel garis tipis", projectId: "p1" }),
+      memory({ id: "a", title: "Competitor research", content: "pricing package overseas rival", projectId: "p1" }),
+      memory({ id: "b", title: "Icon design", content: "grid eight pixel thin line", projectId: "p1" }),
       ...FILLER,
     ]);
 
@@ -143,7 +143,7 @@ describe("relateMemories — coincidences that must not create an edge", () => {
   });
 
   it("never derives an edge for a brain with a single memory", () => {
-    expect(relateMemories([memory({ id: "only", title: "Sendiri" })])).toEqual({
+    expect(relateMemories([memory({ id: "only", title: "Alone" })])).toEqual({
       edges: [],
       candidates: 0,
     });
@@ -155,18 +155,18 @@ describe("relateMemories — shape of the resulting network", () => {
   function hubBrain(spokes: number): RelateMemory[] {
     const hub = memory({
       id: "hub",
-      title: "Pusat pengetahuan",
-      tags: Array.from({ length: spokes }, (_, index) => `tema-${index}`),
+      title: "Knowledge hub",
+      tags: Array.from({ length: spokes }, (_, index) => `theme-${index}`),
     });
     const leaves = Array.from({ length: spokes }, (_, index) =>
       memory({
         id: `spoke-${index}`,
-        title: `Cabang ${index}`,
-        content: `uraian unik ${"q".repeat(index + 2)}`,
-        tags: [`tema-${index}`],
+        title: `Branch ${index}`,
+        content: `unique description ${"q".repeat(index + 2)}`,
+        tags: [`theme-${index}`],
       })
     );
-    return [hub, ...leaves, memory({ id: "orphan", title: "Tidak terhubung", content: "sendirian" })];
+    return [hub, ...leaves, memory({ id: "orphan", title: "Not connected", content: "alone" })];
   }
 
   it("lets a genuine hub exceed the per-node top-K, because the rule is a union", () => {

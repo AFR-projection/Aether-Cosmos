@@ -14,28 +14,28 @@ import { SlashMenu, type SlashItem, type SlashMenuRef } from "./slash-menu";
  */
 
 /* Descriptions are shown to the author, so they follow the rest of the app's copy. The
-   keywords are invisible search aliases, so the Indonesian ones stay alongside the
-   English: both spellings find the block. */
+   keywords are invisible search aliases, kept in English for the same reason: one
+   language throughout, so there is no second spelling to remember or maintain. */
 export const SLASH_ITEMS: SlashItem[] = [
-  { title: "Text", desc: "Plain paragraph", icon: "Type", keywords: ["paragraph", "text", "teks"],
+  { title: "Text", desc: "Plain paragraph", icon: "Type", keywords: ["paragraph", "text", "body"],
     run: (e, r) => e.chain().focus().deleteRange(r).setParagraph().run() },
-  { title: "Heading 1", desc: "Large section title", icon: "Heading1", keywords: ["h1", "judul", "title", "heading"],
+  { title: "Heading 1", desc: "Large section title", icon: "Heading1", keywords: ["h1", "title", "heading"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 1 }).run() },
-  { title: "Heading 2", desc: "Subsection title", icon: "Heading2", keywords: ["h2", "subjudul", "subheading"],
+  { title: "Heading 2", desc: "Subsection title", icon: "Heading2", keywords: ["h2", "subheading", "heading"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 2 }).run() },
   { title: "Heading 3", desc: "Smallest title", icon: "Heading3", keywords: ["h3", "heading"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 3 }).run() },
-  { title: "Bullet List", desc: "Unordered list", icon: "List", keywords: ["ul", "bullet", "list", "daftar"],
+  { title: "Bullet List", desc: "Unordered list", icon: "List", keywords: ["ul", "bullet", "list", "unordered"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleBulletList().run() },
-  { title: "Numbered List", desc: "Ordered list", icon: "ListOrdered", keywords: ["ol", "number", "nomor", "ordered"],
+  { title: "Numbered List", desc: "Ordered list", icon: "ListOrdered", keywords: ["ol", "number", "numbered", "ordered"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleOrderedList().run() },
-  { title: "To-do List", desc: "Task checklist", icon: "ListChecks", keywords: ["todo", "task", "check", "checklist", "tugas"],
+  { title: "To-do List", desc: "Task checklist", icon: "ListChecks", keywords: ["todo", "task", "check", "checklist"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleTaskList().run() },
-  { title: "Quote", desc: "Quoted passage", icon: "Quote", keywords: ["blockquote", "quote", "kutipan"],
+  { title: "Quote", desc: "Quoted passage", icon: "Quote", keywords: ["blockquote", "quote", "citation"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleBlockquote().run() },
-  { title: "Code Block", desc: "Preformatted code", icon: "Code2", keywords: ["code", "kode", "pre"],
+  { title: "Code Block", desc: "Preformatted code", icon: "Code2", keywords: ["code", "snippet", "pre"],
     run: (e, r) => e.chain().focus().deleteRange(r).toggleCodeBlock().run() },
-  { title: "Divider", desc: "Horizontal rule", icon: "Minus", keywords: ["hr", "divider", "rule", "garis"],
+  { title: "Divider", desc: "Horizontal rule", icon: "Minus", keywords: ["hr", "divider", "rule", "separator"],
     run: (e, r) => e.chain().focus().deleteRange(r).setHorizontalRule().run() },
 ];
 

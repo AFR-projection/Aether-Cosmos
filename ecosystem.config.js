@@ -1,4 +1,4 @@
-/** PM2 config — alternative deploy tanpa Docker (see README) */
+/** PM2 config — alternative deploy without Docker (see README) */
 module.exports = {
   apps: [
     {

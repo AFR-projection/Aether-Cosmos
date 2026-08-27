@@ -8,10 +8,10 @@
  *   4. Weight terms (rare words count more)
  *   5. Expand entity aliases
  *
- * Goal: "Cek identitas pengguna dan preferensi komunikasi" should extract:
- *   - Content words: ["identitas", "pengguna", "preferensi", "komunikasi"]
- *   - Phrases: ["preferensi komunikasi"]
- *   - Intent: SEARCH (not imperative action)
+ * Goal: "Check user identity and communication preferences" should extract:
+ *   - Content words: ["user", "identity", "communication", "preferences"]
+ *   - Phrases: ["user identity", "communication preferences"]
+ *   - Intent: ACTION (leading imperative, so the verb is dropped from content words)
  *
  * All pure functions, deterministic, testable.
  */
@@ -132,7 +132,8 @@ export function extractContentWords(words: string[]): string[] {
  * - No stopwords or imperatives in the middle
  * - All words meet MIN_WORD_LENGTH
  *
- * Example: "preferensi komunikasi pengguna" → ["preferensi komunikasi", "komunikasi pengguna"]
+ * Example: "communication preference profile"
+ *   → ["communication preference", "preference profile", "communication preference profile"]
  */
 export function detectPhrases(words: string[]): string[] {
   const phrases: string[] = [];
@@ -187,14 +188,14 @@ export function detectPhrases(words: string[]): string[] {
  * This is the main entry point for query understanding.
  *
  * Example:
- *   Input: "Cek identitas pengguna dan preferensi komunikasi"
+ *   Input: "Check user identity and communication preferences"
  *   Output: {
- *     original: "Cek identitas pengguna dan preferensi komunikasi",
- *     normalized: "cek identitas pengguna dan preferensi komunikasi",
+ *     original: "Check user identity and communication preferences",
+ *     normalized: "check user identity and communication preferences",
  *     intent: "ACTION",
- *     contentWords: ["identitas", "pengguna", "preferensi", "komunikasi"],
- *     phrases: ["identitas pengguna", "preferensi komunikasi"],
- *     allWords: ["cek", "identitas", "pengguna", "dan", "preferensi", "komunikasi"]
+ *     contentWords: ["user", "identity", "communication", "preferences"],
+ *     phrases: ["user identity", "communication preferences"],
+ *     allWords: ["check", "user", "identity", "and", "communication", "preferences"]
  *   }
  */
 export function processQuery(query: string): ProcessedQuery {
@@ -229,9 +230,9 @@ export function processQuery(query: string): ProcessedQuery {
  * - Works with existing FTS (no schema changes needed)
  *
  * Example:
- *   contentWords: ["identitas", "pengguna", "preferensi", "komunikasi"]
- *   phrases: ["preferensi komunikasi"]
- *   → "identitas pengguna preferensi komunikasi preferensi komunikasi"
+ *   contentWords: ["user", "identity", "communication", "preferences"]
+ *   phrases: ["communication preferences"]
+ *   → "user identity communication preferences communication preferences"
  *      (phrase words repeated for boost)
  */
 export function buildEnhancedQuery(processed: ProcessedQuery): string {

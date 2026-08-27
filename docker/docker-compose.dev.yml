@@ -1,5 +1,5 @@
-# Redis lokal untuk development (Windows/Mac/Linux)
-# Jalankan: docker compose -f docker/docker-compose.dev.yml up -d
+# Local Redis for development (Windows/Mac/Linux)
+# Run: docker compose -f docker/docker-compose.dev.yml up -d
 
 services:
   redis:

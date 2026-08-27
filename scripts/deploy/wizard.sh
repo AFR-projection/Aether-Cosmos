@@ -22,7 +22,7 @@ prompt_into() {
 prompt_secret_into() {
   local label=$1
   local -n _out=$2
-  echo "  (input tersembunyi — ketik lalu Enter)" >&2
+  echo "  (input hidden — type it, then press Enter)" >&2
   read -rsp "$label: " _out </dev/tty
   echo >&2
   _out="$(sanitize_env_value "$_out")"
@@ -32,7 +32,7 @@ require_nonempty() {
   local label=$1
   local -n _val=$2
   while [[ -z "$_val" ]]; do
-    warn "$label wajib diisi."
+    warn "$label is required."
     prompt_into "$label" _val
   done
 }
@@ -41,7 +41,7 @@ require_secret_nonempty() {
   local label=$1
   local -n _val=$2
   while [[ -z "$_val" ]]; do
-    warn "$label wajib diisi."
+    warn "$label is required."
     prompt_secret_into "$label" _val
   done
 }
@@ -52,41 +52,41 @@ run_wizard() {
   local public_ip
   public_ip="$(get_public_ip)"
 
-  echo "  Wizard ini menulis .env untukmu. Enter = pakai nilai default."
-  echo "  Secret disembunyikan saat diketik dan tidak pernah ditampilkan lagi."
+  echo "  This wizard writes .env for you. Enter = keep the default value."
+  echo "  Secrets are hidden while typing and never shown again."
   echo
 
-  section "Domain  ·  1 dari 4"
-  echo -e "  IP publik VPS ini: ${BOLD}${public_ip}${NC}"
-  echo -e "  ${DIM}A record domain harus sudah mengarah ke IP di atas.${NC}"
+  section "Domain  ·  1 of 4"
+  echo -e "  Public IP of this VPS: ${BOLD}${public_ip}${NC}"
+  echo -e "  ${DIM}The domain's A record must already point at the IP above.${NC}"
   echo
-  prompt_into "Domain (contoh: aether.example.com)" DEPLOY_DOMAIN
+  prompt_into "Domain (example: aether.example.com)" DEPLOY_DOMAIN
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN#https://}"
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN#http://}"
   DEPLOY_DOMAIN="${DEPLOY_DOMAIN%%/*}"
   require_nonempty "Domain" DEPLOY_DOMAIN
 
-  # Cek DNS di sini, bukan nanti: kalau A record belum mengarah ke VPS, certbot
-  # yang gagal 10 menit kemudian jauh lebih membingungkan daripada peringatan ini.
+  # Check DNS here, not later: if the A record does not point at the VPS yet, a
+  # certbot failure 10 minutes from now is far more confusing than this warning.
   local resolved=""
   resolved="$(getent hosts "$DEPLOY_DOMAIN" 2>/dev/null | awk '{print $1}' | head -n1 || true)"
   if [[ -z "$resolved" ]]; then
-    warn "$DEPLOY_DOMAIN belum resolve — SSL akan gagal sampai DNS jadi"
+    warn "$DEPLOY_DOMAIN does not resolve yet — SSL will fail until DNS propagates"
   elif [[ "$resolved" == "$public_ip" ]]; then
-    ok "DNS sudah benar ($DEPLOY_DOMAIN → $resolved)"
+    ok "DNS is correct ($DEPLOY_DOMAIN → $resolved)"
   else
-    warn "$DEPLOY_DOMAIN mengarah ke $resolved, bukan $public_ip"
+    warn "$DEPLOY_DOMAIN points at $resolved, not $public_ip"
   fi
 
-  prompt_into "Email admin (notifikasi Let's Encrypt)" CERTBOT_EMAIL "admin@${DEPLOY_DOMAIN}"
+  prompt_into "Admin email (Let's Encrypt notifications)" CERTBOT_EMAIL "admin@${DEPLOY_DOMAIN}"
 
-  section "Database  ·  2 dari 4"
-  echo -e "  ${DIM}Ambil connection string dari dashboard Neon — satu baris utuh.${NC}"
+  section "Database  ·  2 of 4"
+  echo -e "  ${DIM}Copy the connection string from the Neon dashboard — one whole line.${NC}"
   echo
   prompt_into "DATABASE_URL" DATABASE_URL
   require_nonempty "DATABASE_URL" DATABASE_URL
 
-  section "Cloudflare R2  ·  3 dari 4"
+  section "Cloudflare R2  ·  3 of 4"
   echo -e "  ${DIM}dash.cloudflare.com → R2 → bucket → Manage API tokens.${NC}"
   echo
   prompt_into "R2 Account ID" R2_ACCOUNT_ID
@@ -95,18 +95,18 @@ run_wizard() {
   require_nonempty "R2 Access Key ID" R2_ACCESS_KEY_ID
   prompt_secret_into "R2 Secret Access Key" R2_SECRET_ACCESS_KEY
   require_secret_nonempty "R2 Secret Access Key" R2_SECRET_ACCESS_KEY
-  # Default hanya untuk install baru. Deployment yang sudah jalan WAJIB
-  # mengetik nama bucket lamanya — nama bucket bagian dari alamat objek.
+  # The default is only for a fresh install. An existing deployment MUST type its
+  # old bucket name — the bucket name is part of every object's address.
   prompt_into "R2 Bucket name" R2_BUCKET_NAME "aether-cosmos"
   prompt_into "R2 Public URL (https://pub-xxx.r2.dev)" R2_PUBLIC_URL
   require_nonempty "R2 Public URL" R2_PUBLIC_URL
 
-  section "Akun admin  ·  4 dari 4"
+  section "Admin account  ·  4 of 4"
   prompt_into "Admin username" MASTER_USERNAME "ByAFR"
-  prompt_secret_into "Admin password (min 10 karakter)" MASTER_PASSWORD
+  prompt_secret_into "Admin password (min 10 characters)" MASTER_PASSWORD
   while [[ ${#MASTER_PASSWORD} -lt 10 ]]; do
-    warn "Password admin minimal 10 karakter."
-    prompt_secret_into "Admin password (min 10 karakter)" MASTER_PASSWORD
+    warn "Admin password must be at least 10 characters."
+    prompt_secret_into "Admin password (min 10 characters)" MASTER_PASSWORD
   done
 
   if command -v openssl >/dev/null 2>&1; then
@@ -122,11 +122,11 @@ run_wizard() {
   REDIS_DISABLED=false
   NODE_ENV=production
 
-  # Ringkasan sebelum menulis. Nilai rahasia hanya dilaporkan panjangnya —
-  # menampilkan ulang isinya bikin secret nongkrong di scrollback dan di log SSH.
+  # Summary before writing. Secret values only report their length — echoing the
+  # contents leaves secrets sitting in the scrollback and in SSH logs.
   echo
   box_top
-  box_row "Konfirmasi" "$BOLD"
+  box_row "Confirm" "$BOLD"
   box_mid
   box_kv "Domain" "$DEPLOY_DOMAIN"
   box_kv "URL" "$NEXT_PUBLIC_APP_URL"
@@ -136,14 +136,14 @@ run_wizard() {
   box_kv "R2 secret" "$(secret_hint "$R2_SECRET_ACCESS_KEY")"
   box_kv "Admin" "$MASTER_USERNAME"
   box_kv "Password" "$(secret_hint "$MASTER_PASSWORD")"
-  box_kv "Secret" "digenerate otomatis (64 hex)" "$DIM"
+  box_kv "Secret" "generated automatically (64 hex)" "$DIM"
   box_bot
   echo
 
   local confirm=""
-  read -rp "  Tulis ke .env dan lanjut deploy? [Y/n] " confirm </dev/tty || true
+  read -rp "  Write .env and continue the deploy? [Y/n] " confirm </dev/tty || true
   case "${confirm,,}" in
-    n|no) die "Dibatalkan — tidak ada yang ditulis. Jalankan ./install.sh --wizard lagi kapan saja." ;;
+    n|no) die "Cancelled — nothing was written. Run ./install.sh --wizard again any time." ;;
   esac
 
   mkdir -p "$ROOT/.deploy"
@@ -170,15 +170,15 @@ ENVEOF
   env_set_line HSTS_ENABLED true
   env_set_line REDIS_URL redis://redis:6379
   env_set_line REDIS_DISABLED false
-  # Batas upload, umur presigned URL, dan lockout login TIDAK ditulis di
-  # sini lagi: semuanya ada di Admin → Settings, tersimpan di database dan
-  # kena efek dalam ~30 detik tanpa redeploy. Menulisnya sebagai env cuma
-  # bikin dua sumber kebenaran untuk angka yang sama.
+  # Upload limits, presigned URL lifetime, and login lockout are NOT written here
+  # any more: they all live in Admin → Settings, are stored in the database, and
+  # take effect within ~30 seconds without a redeploy. Writing them as env vars
+  # only creates two sources of truth for the same number.
 
   echo "# Generated at $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$ENV_FILE"
 
   save_deploy_state
-  ok "File .env dibuat di $ENV_FILE"
+  ok ".env created at $ENV_FILE"
   echo
 }
 

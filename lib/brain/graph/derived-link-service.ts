@@ -178,7 +178,7 @@ export type PruneStats = {
  * own rows have been deleted, so the seed never counts itself and a recompute cannot
  * inflate its neighbours' degrees.
  *
- * "Lebih baik kehilangan hubungan daripada membuat graph menjadi hairball."
+ * "Better to lose a relationship than to turn the graph into a hairball."
  */
 async function pruneForSeed(
   tx: PostgresJsDatabase<typeof schema>,

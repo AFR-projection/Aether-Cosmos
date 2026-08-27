@@ -20,15 +20,15 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       echo "Usage: ./install.sh [--wizard] [--skip-ssl] [--fix-env]"
       echo ""
-      echo "  Default: pakai .env manual (cp .env.example .env → nano .env)"
-      echo "  --wizard   Wizard interaktif (opsional)"
-      echo "  --fix-env    Perbaiki .env rusak (multiline/quote)"
-      echo "  --skip-ssl   Skip SSL (testing saja)"
+      echo "  Default: use a hand-written .env (cp .env.example .env → nano .env)"
+      echo "  --wizard     Interactive wizard (optional)"
+      echo "  --fix-env    Repair a broken .env (multiline/quotes)"
+      echo "  --skip-ssl   Skip SSL (testing only)"
       echo ""
-      echo "  VPS baru dari nol (install Docker, clone, buka .env, deploy):"
+      echo "  Fresh VPS from scratch (install Docker, clone, open .env, deploy):"
       echo "    curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash"
       echo ""
-      echo "  Setelah terinstall semuanya lewat satu perintah: aether help"
+      echo "  Once installed, everything runs through one command: aether help"
       exit 0
       ;;
     *) die "Unknown option: $1" ;;

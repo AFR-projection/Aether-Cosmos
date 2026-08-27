@@ -118,9 +118,9 @@ describe("usableTokenBudget", () => {
 });
 
 describe("truncateToTokens", () => {
-  const long = "Kita memutuskan untuk memakai PostgreSQL sebagai canonical source of truth "
-    + "karena agent harus tetap disposable dan brain harus tetap user-owned. "
-    + "Redis hanya cache, R2 hanya blob storage untuk file, bukan untuk memory.";
+  const long = "We decided to use PostgreSQL as the canonical source of truth "
+    + "because the agent must stay disposable and the brain must stay user-owned. "
+    + "Redis is only a cache, R2 is only blob storage for files, not for memory.";
 
   it("returns the input untouched when it already fits", () => {
     expect(truncateToTokens("short enough", 500)).toBe("short enough");

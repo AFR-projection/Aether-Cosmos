@@ -119,9 +119,9 @@ elapsed_human() {
 secret_hint() {
   local v=${1:-}
   if [[ -z "$v" ]]; then
-    printf 'belum diisi'
+    printf 'not set yet'
   else
-    printf '********** (%d karakter)' "${#v}"
+    printf '********** (%d characters)' "${#v}"
   fi
 }
 
@@ -269,10 +269,10 @@ autofill_env() {
     domain="${url#http*://}"
     domain="${domain%%/*}"
     env_put DEPLOY_DOMAIN "$domain"
-    ok "DEPLOY_DOMAIN diisi dari NEXT_PUBLIC_APP_URL: $domain"
+    ok "DEPLOY_DOMAIN derived from NEXT_PUBLIC_APP_URL: $domain"
   elif [[ -n "$domain" && -z "$url" ]]; then
     env_put NEXT_PUBLIC_APP_URL "https://${domain}"
-    ok "NEXT_PUBLIC_APP_URL diisi dari DEPLOY_DOMAIN: https://${domain}"
+    ok "NEXT_PUBLIC_APP_URL derived from DEPLOY_DOMAIN: https://${domain}"
   fi
 
   # SESSION_SECRET is generated, never typed. Written ONLY when missing, still the
@@ -281,11 +281,11 @@ autofill_env() {
   secret="$(env_get SESSION_SECRET)"
   if [[ -z "$secret" ]] || env_is_placeholder "$secret" || (( ${#secret} < 32 )); then
     if [[ -n "$secret" ]] && ! env_is_placeholder "$secret"; then
-      warn "SESSION_SECRET kurang dari 32 karakter — diganti yang baru."
-      warn "Kalau ini deployment lama: input ulang Gmail App Password (Admin → Email) dan API key embedding."
+      warn "SESSION_SECRET is shorter than 32 characters — replacing it with a new one."
+      warn "If this is an existing deployment: re-enter the Gmail App Password (Admin → Email) and the embedding API key."
     fi
     env_put SESSION_SECRET "$(gen_secret)"
-    ok "SESSION_SECRET digenerate otomatis (64 hex)"
+    ok "SESSION_SECRET generated automatically (64 hex)"
   fi
 
   # One correct answer each for this stack, so a missing line is never worth an error.
@@ -295,7 +295,7 @@ autofill_env() {
     [[ -n "$k" ]] || continue
     [[ -z "$(env_get "$k")" ]] || continue
     env_put "$k" "$v"
-    ok "Default dipakai: ${k}=${v}"
+    ok "Default applied: ${k}=${v}"
   done <<'ENV_DEFAULTS'
 NODE_ENV=production
 COOKIE_SECURE=true
@@ -367,11 +367,11 @@ init_docker() {
     # sub-script is a fresh shell. Warn ONCE and export the flag so children inherit it,
     # instead of printing the same line six times.
     if [[ -z "${_DOCKER_SUDO_WARNED:-}" ]]; then
-      warn "Docker pakai sudo — fix permanen: sudo usermod -aG docker \$USER && newgrp docker"
+      warn "Docker needs sudo — permanent fix: sudo usermod -aG docker \$USER && newgrp docker"
       export _DOCKER_SUDO_WARNED=1
     fi
   else
-    die "Docker tidak bisa diakses. Install: curl -fsSL https://get.docker.com | sh"
+    die "Docker is not reachable. Install: curl -fsSL https://get.docker.com | sh"
   fi
   COMPOSE=("${DOCKER[@]}" compose -f "$COMPOSE_FILE")
 }
@@ -389,7 +389,7 @@ docker_run() {
 #
 # Retrying is only ever right for a network failure. Retrying a type error or an
 # out-of-memory abort just burns two more builds and buries the real message under a
-# wrong one ("hampir selalu jaringan npm" printed three times over a heap limit), so
+# wrong one ("almost always the npm network" printed three times over a heap limit), so
 # the output is read and the failure is named before deciding.
 build_service() {
   local svc=$1 attempt rc buildlog
@@ -403,16 +403,16 @@ build_service() {
     set -e
     if (( rc == 0 )); then
       rm -f "$buildlog"
-      ok "Image $svc siap"
+      ok "Image $svc ready"
       return 0
     fi
 
     if build_log_is_oom "$buildlog"; then
       rm -f "$buildlog"
-      fail "Build $svc kehabisan MEMORI, bukan jaringan — diulang pun hasilnya sama."
-      fail "Lihat 'Reached heap limit' / 'heap out of memory' di output di atas."
-      fail "Cek: free -h    (butuh RAM+swap minimal ~3GB untuk next build)"
-      fail "Tambah swap 2G manual kalau perlu:"
+      fail "Build $svc ran out of MEMORY, not network — retrying gives the same result."
+      fail "Look for 'Reached heap limit' / 'heap out of memory' in the output above."
+      fail "Check: free -h    (next build needs at least ~3GB of RAM+swap)"
+      fail "Add 2G of swap by hand if needed:"
       fail "  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile"
       fail "  sudo mkswap /swapfile && sudo swapon /swapfile"
       return 1
@@ -420,20 +420,20 @@ build_service() {
 
     if ! build_log_is_network "$buildlog"; then
       rm -f "$buildlog"
-      fail "Build $svc gagal BUKAN karena jaringan — mengulang tidak akan menolong."
-      fail "Errornya ada di output di atas (baris yang diawali ERROR / error TS)."
+      fail "Build $svc failed for a reason OTHER than the network — retrying will not help."
+      fail "The error is in the output above (the lines starting with ERROR / error TS)."
       return 1
     fi
 
     if (( attempt < 3 )); then
-      warn "Build $svc gagal karena koneksi (percobaan ${attempt}/3) — ulang..."
+      warn "Build $svc failed on the connection (attempt ${attempt}/3) — retrying..."
       sleep 10
     fi
   done
   rm -f "$buildlog"
-  fail "Build $svc gagal 3x karena koneksi ke registry npm."
-  fail "ECONNRESET / ETIMEDOUT / network aborted itu jaringan, bukan kodenya."
-  fail "Ulangi saja — layer yang sudah jadi dipakai lagi, jadi makin cepat."
+  fail "Build $svc failed 3 times on the connection to the npm registry."
+  fail "ECONNRESET / ETIMEDOUT / network aborted is the network, not the code."
+  fail "Just run it again — finished layers are reused, so it gets faster each time."
   return 1
 }
 
@@ -451,7 +451,7 @@ build_all_images() {
   local svc
   ensure_build_memory
   for svc in app worker setup; do
-    build_service "$svc" || die "Dibatalkan di build $svc"
+    build_service "$svc" || die "Cancelled during the $svc build"
   done
 }
 
@@ -469,34 +469,34 @@ ensure_build_memory() {
   [[ -n "$mem_mb" ]] || return 0
 
   if (( mem_mb + swap_mb >= 3500 )); then
-    ok "Memori cukup untuk build (RAM ${mem_mb}MB + swap ${swap_mb}MB)"
+    ok "Enough memory for the build (RAM ${mem_mb}MB + swap ${swap_mb}MB)"
     return 0
   fi
 
   if (( swap_mb > 0 )); then
-    warn "RAM ${mem_mb}MB + swap ${swap_mb}MB — build jalan tapi agak lambat"
+    warn "RAM ${mem_mb}MB + swap ${swap_mb}MB — the build will run, just slowly"
     return 0
   fi
 
   if [[ -n "${AETHER_NO_SWAP:-}" ]]; then
-    warn "RAM ${mem_mb}MB tanpa swap, AETHER_NO_SWAP diset — build bisa kehabisan memori"
+    warn "RAM ${mem_mb}MB with no swap and AETHER_NO_SWAP set — the build may run out of memory"
     return 0
   fi
 
   if [[ -e /swapfile ]]; then
-    warn "/swapfile ada tapi tidak aktif. Aktifkan: sudo swapon /swapfile"
+    warn "/swapfile exists but is not active. Enable it: sudo swapon /swapfile"
     return 0
   fi
 
   disk_mb="$(df -Pm / 2>/dev/null | awk 'NR==2 {print $4}')"
   if [[ -z "$disk_mb" ]] || (( disk_mb < 4096 )); then
-    warn "RAM ${mem_mb}MB tanpa swap dan disk sisa ${disk_mb:-?}MB — tidak bikin swap"
+    warn "RAM ${mem_mb}MB with no swap and only ${disk_mb:-?}MB of disk left — not creating swap"
     return 0
   fi
 
-  warn "RAM ${mem_mb}MB tanpa swap sama sekali — next build gampang kehabisan memori."
-  log "Bikin /swapfile 2G (sekali saja, permanen di /etc/fstab)"
-  log "Hapus kapan saja: sudo swapoff /swapfile && sudo rm /swapfile"
+  warn "RAM ${mem_mb}MB with no swap at all — next build runs out of memory easily."
+  log "Creating a 2G /swapfile (once, made permanent in /etc/fstab)"
+  log "Remove it any time: sudo swapoff /swapfile && sudo rm /swapfile"
   # fallocate is instant but fails on filesystems that cannot do unwritten extents
   # (btrfs, some overlay setups) — dd always works, it is only slower.
   if as_root fallocate -l 2G /swapfile 2>/dev/null \
@@ -505,13 +505,13 @@ ensure_build_memory() {
     if as_root mkswap /swapfile >/dev/null 2>&1 && as_root swapon /swapfile 2>/dev/null; then
       grep -q '^/swapfile' /etc/fstab 2>/dev/null \
         || printf '/swapfile none swap sw 0 0\n' | as_root tee -a /etc/fstab >/dev/null
-      ok "Swap 2G aktif — build punya ruang sekarang"
+      ok "2G of swap active — the build has room now"
     else
       as_root rm -f /swapfile
-      warn "swapon gagal — lanjut tanpa swap"
+      warn "swapon failed — continuing without swap"
     fi
   else
-    warn "Gagal bikin swapfile — lanjut tanpa swap"
+    warn "Could not create the swapfile — continuing without swap"
   fi
 }
 
@@ -519,7 +519,7 @@ ensure_docker() {
   need_cmd docker
   init_docker
   if ! "${DOCKER[@]}" compose version >/dev/null 2>&1; then
-    die "Docker Compose tidak tersedia"
+    die "Docker Compose is not available"
   fi
   ok "Docker & Compose ready"
 }
@@ -529,15 +529,15 @@ require_env_file() {
     return 0
   fi
   echo
-  echo "File .env belum ada. Buat manual (disarankan):"
+  echo ".env does not exist yet. Write it by hand (recommended):"
   echo
   echo "  cp .env.example .env"
-  echo "  nano .env          # isi DATABASE_URL, R2, domain, dll."
+  echo "  nano .env          # fill in DATABASE_URL, R2, domain, etc."
   echo "  ./install.sh"
   echo
-  echo "Wizard interaktif (opsional): ./install.sh --wizard"
+  echo "Interactive wizard (optional): ./install.sh --wizard"
   echo
-  die "Buat .env dulu lalu jalankan ulang ./install.sh"
+  die "Create .env first, then run ./install.sh again"
 }
 
 port_free() {

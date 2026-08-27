@@ -27,7 +27,7 @@ validate_domain_format() {
   fi
   DEPLOY_DOMAIN="$d"
   if [[ -z "$d" ]]; then
-    check_mark 1 "DEPLOY_DOMAIN kosong — set di .env atau NEXT_PUBLIC_APP_URL"
+    check_mark 1 "DEPLOY_DOMAIN is empty — set it in .env, or set NEXT_PUBLIC_APP_URL"
     return
   fi
   if [[ "$d" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$ ]]; then
@@ -40,15 +40,15 @@ validate_domain_format() {
 validate_database_url() {
   log "Checking DATABASE_URL..."
   if [[ -z "${DATABASE_URL:-}" ]]; then
-    check_mark 1 "DATABASE_URL kosong"
+    check_mark 1 "DATABASE_URL is empty"
     return
   fi
   if [[ ! "$DATABASE_URL" =~ ^postgres(ql)?:// ]]; then
-    check_mark 1 "DATABASE_URL harus postgresql://..."
+    check_mark 1 "DATABASE_URL must start with postgresql://..."
     return
   fi
   if [[ "$DATABASE_URL" == *'>' ]] || [[ "$DATABASE_URL" != *'sslmode='* ]]; then
-    check_mark 1 "DATABASE_URL TERPOTONG — paste 1 baris penuh dari Neon (akhir: sslmode=require)"
+    check_mark 1 "DATABASE_URL IS TRUNCATED — paste the full single line from Neon (it ends with sslmode=require)"
     return
   fi
   check_mark 0 "DATABASE_URL format OK"
@@ -60,12 +60,12 @@ validate_database_url() {
   else
     local vps_ip
     vps_ip="$(get_public_ip)"
-    check_warn 1 "Database live test skip/gagal — lanjut deploy (cek Neon IP Allow: ${vps_ip})"
+    check_warn 1 "Database live test skipped/failed — continuing deploy (check Neon IP Allow: ${vps_ip})"
   fi
 }
 
 validate_no_placeholders() {
-  log "Checking nilai contoh yang belum diganti..."
+  log "Checking for example values that were never replaced..."
   local bad=0 v
   for v in DATABASE_URL SESSION_SECRET MASTER_PASSWORD \
            R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_PUBLIC_URL \
@@ -73,14 +73,14 @@ validate_no_placeholders() {
     # Key name only — the value may be a live credential and this output ends up in
     # scrollback, SSH logs, and screen shares.
     if env_is_placeholder "${!v:-}"; then
-      fail "$v masih nilai contoh dari .env.example — ganti dengan punya sendiri"
+      fail "$v is still the example value from .env.example — replace it with your own"
       bad=1
     fi
   done
   if [[ $bad -eq 1 ]]; then
     VALIDATION_FAILED=1
   else
-    ok "Tidak ada nilai contoh yang tertinggal"
+    ok "No leftover example values"
   fi
 }
 
@@ -91,7 +91,7 @@ validate_r2() {
   for v in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET_NAME R2_PUBLIC_URL; do
     if [[ -z "${!v:-}" ]]; then
       missing=1
-      fail "$v kosong"
+      fail "$v is empty"
     fi
   done
   [[ $missing -eq 1 ]] && { VALIDATION_FAILED=1; return; }
@@ -107,7 +107,7 @@ validate_r2() {
     actual="${!key:-}"
     actual="${#actual}"
     if [[ "$actual" != "$expect" ]]; then
-      check_warn 1 "$key panjangnya $actual karakter, biasanya $expect — pastikan tidak tertukar/terpotong"
+      check_warn 1 "$key is $actual characters, usually $expect — make sure it is not swapped or truncated"
     fi
   done
 
@@ -120,7 +120,7 @@ validate_r2() {
     amazon/aws-cli:2.15.0 s3 ls "s3://${R2_BUCKET_NAME}" --endpoint-url "$endpoint" >/dev/null 2>&1; then
     ok "R2 bucket accessible"
   else
-    check_warn 1 "R2 live test skip/gagal — lanjut deploy (cek credential di Cloudflare)"
+    check_warn 1 "R2 live test skipped/failed — continuing deploy (check the credentials in Cloudflare)"
   fi
 }
 
@@ -129,7 +129,7 @@ validate_app_url() {
   if [[ "${NEXT_PUBLIC_APP_URL:-}" == https://* ]]; then
     check_mark 0 "HTTPS URL: $NEXT_PUBLIC_APP_URL"
   else
-    check_mark 1 "Production wajib HTTPS — NEXT_PUBLIC_APP_URL=https://domain.com"
+    check_mark 1 "Production requires HTTPS — NEXT_PUBLIC_APP_URL=https://domain.com"
   fi
 }
 
@@ -139,13 +139,13 @@ validate_dns() {
   server_ip="$(get_public_ip)"
   ip="$(getent ahostsv4 "$DEPLOY_DOMAIN" 2>/dev/null | awk '{print $1; exit}' || dig +short "$DEPLOY_DOMAIN" 2>/dev/null | head -n1 || true)"
   if [[ -z "$ip" ]]; then
-    warn "DNS belum resolve — pastikan A record $DEPLOY_DOMAIN → $server_ip"
+    warn "DNS does not resolve yet — make sure the A record is $DEPLOY_DOMAIN → $server_ip"
     return
   fi
   if [[ "$ip" == "$server_ip" ]]; then
     ok "DNS OK: $DEPLOY_DOMAIN → $ip"
   else
-    warn "DNS $DEPLOY_DOMAIN → $ip (VPS IP: $server_ip) — SSL mungkin gagal jika tidak match"
+    warn "DNS $DEPLOY_DOMAIN → $ip (VPS IP: $server_ip) — SSL may fail if these do not match"
   fi
 }
 
@@ -154,7 +154,7 @@ validate_session_secret() {
   if [[ ${#SESSION_SECRET} -ge 32 ]]; then
     check_mark 0 "SESSION_SECRET length OK"
   else
-    check_mark 1 "SESSION_SECRET terlalu pendek (min 32 char)"
+    check_mark 1 "SESSION_SECRET is too short (min 32 chars)"
   fi
 }
 
@@ -164,7 +164,7 @@ validate_required_env() {
   for v in MASTER_USERNAME MASTER_PASSWORD CERTBOT_EMAIL; do
     if [[ -z "${!v:-}" ]]; then
       missing=1
-      fail "$v kosong"
+      fail "$v is empty"
     fi
   done
   [[ $missing -eq 0 ]] && ok "Admin & SSL email OK" || VALIDATION_FAILED=1
@@ -178,7 +178,7 @@ validate_ports() {
   if [[ $ok80 -eq 1 && $ok443 -eq 1 ]]; then
     check_mark 0 "Port 80 & 443 available"
   else
-    warn "Port 80/443 in use — akan di-stop sementara untuk SSL setup"
+    warn "Port 80/443 in use — they will be stopped temporarily for SSL setup"
   fi
 }
 
@@ -186,7 +186,7 @@ run_validate() {
   echo
   log "Pre-flight validation"
   echo
-  [[ -f "$ENV_FILE" ]] || die "File .env tidak ada. cp .env.example .env lalu isi manual."
+  [[ -f "$ENV_FILE" ]] || die ".env does not exist. Run cp .env.example .env, then fill it in by hand."
   normalize_env_file
   load_env
   validate_no_placeholders
@@ -200,10 +200,10 @@ run_validate() {
   validate_ports
   echo
   if [[ $VALIDATION_FAILED -ne 0 ]]; then
-    die "Validasi gagal — perbaiki .env (nano .env) lalu ./install.sh"
+    die "Validation failed — fix .env (nano .env), then run ./install.sh"
   fi
-  ok "Validasi lulus — lanjut deploy"
-  [[ $VALIDATION_WARN -ne 0 ]] && warn "Ada peringatan di atas — deploy tetap jalan"
+  ok "Validation passed — continuing the deploy"
+  [[ $VALIDATION_WARN -ne 0 ]] && warn "There are warnings above — the deploy continues anyway"
   echo
 }
 

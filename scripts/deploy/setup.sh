@@ -193,11 +193,11 @@ next_steps() {
   echo "    cd $DIR"
   if [[ ! -f "$DIR/.env" ]]; then
     echo "    cp .env.example .env"
-    echo "    nano .env                  # isi DATABASE_URL, R2, domain, admin"
+    echo "    nano .env                  # fill in DATABASE_URL, R2, domain, admin"
     echo "    ./install.sh"
   else
-    echo "    nano .env                  # cek isinya"
-    echo "    ./install.sh               # atau: aether update kalau sudah pernah jalan"
+    echo "    nano .env                  # check the contents"
+    echo "    ./install.sh               # or: aether update, if it has run before"
   fi
   printf "${DIM}%s${NC}\n" "$RULE"
   echo
@@ -210,7 +210,7 @@ if [[ -n "${AETHER_NO_INSTALL:-}" ]]; then
 fi
 
 if [[ ! -r /dev/tty ]]; then
-  warn "Tidak ada terminal di sini, jadi .env tidak bisa dibuka untuk diedit"
+  warn "No terminal available here, so .env cannot be opened for editing"
   next_steps
   exit 0
 fi
@@ -243,9 +243,9 @@ fi
 if [[ ! -f "$DIR/.env" ]]; then
   as_user cp "$DIR/.env.example" "$DIR/.env"
   as_user chmod 600 "$DIR/.env"
-  ok ".env dibuat dari .env.example"
+  ok ".env created from .env.example"
 else
-  ok ".env sudah ada — dibuka untuk dicek"
+  ok ".env already exists — opening it for review"
 fi
 
 # ${EDITOR} if the operator has one, otherwise nano. Installed on demand: an image
@@ -257,34 +257,34 @@ if ! command -v "${EDITOR_CMD%% *}" >/dev/null 2>&1; then
 fi
 
 echo
-echo -e "  ${BOLD}Isi 7 baris ini di .env${NC} — sisanya sudah benar apa adanya:"
+echo -e "  ${BOLD}Fill in these 7 lines in .env${NC} — the rest is already correct as-is:"
 echo
-echo -e "    ${BOLD}DEPLOY_DOMAIN${NC}          domain yang A record-nya sudah ke ${BOLD}${PUBLIC_IP}${NC}"
-echo -e "    ${BOLD}NEXT_PUBLIC_APP_URL${NC}    https://<domain yang sama>"
-echo -e "    ${BOLD}CERTBOT_EMAIL${NC}          email kamu (buat notifikasi SSL kedaluwarsa)"
-echo -e "    ${BOLD}DATABASE_URL${NC}           connection string Neon, 1 baris penuh ${DIM}(…sslmode=require)${NC}"
+echo -e "    ${BOLD}DEPLOY_DOMAIN${NC}          the domain whose A record already points to ${BOLD}${PUBLIC_IP}${NC}"
+echo -e "    ${BOLD}NEXT_PUBLIC_APP_URL${NC}    https://<the same domain>"
+echo -e "    ${BOLD}CERTBOT_EMAIL${NC}          your email (for SSL expiry notifications)"
+echo -e "    ${BOLD}DATABASE_URL${NC}           the Neon connection string, one full line ${DIM}(…sslmode=require)${NC}"
 echo -e "    ${BOLD}R2_*${NC}                   Account ID, Access Key ID, Secret, bucket, public URL"
-echo -e "    ${BOLD}MASTER_USERNAME${NC}        username admin"
-echo -e "    ${BOLD}MASTER_PASSWORD${NC}        password admin, min 10 karakter"
+echo -e "    ${BOLD}MASTER_USERNAME${NC}        admin username"
+echo -e "    ${BOLD}MASTER_PASSWORD${NC}        admin password, min 10 characters"
 echo
-echo -e "  ${DIM}SESSION_SECRET digenerate otomatis, biarkan saja.${NC}"
-echo -e "  ${DIM}Semua nilai tetap di $DIR/.env pada mesin ini, tidak dikirim ke mana pun.${NC}"
+echo -e "  ${DIM}SESSION_SECRET is generated automatically — leave it alone.${NC}"
+echo -e "  ${DIM}Every value stays in $DIR/.env on this machine and is never sent anywhere.${NC}"
 if [[ "$EDITOR_CMD" == "nano" ]]; then
   echo
-  echo -e "  ${DIM}Di nano: edit → ${BOLD}Ctrl+O${NC}${DIM} Enter untuk simpan → ${BOLD}Ctrl+X${NC}${DIM} untuk keluar.${NC}"
+  echo -e "  ${DIM}In nano: edit → ${BOLD}Ctrl+O${NC}${DIM} Enter to save → ${BOLD}Ctrl+X${NC}${DIM} to exit.${NC}"
 fi
 echo
 
-read -rp "  Enter untuk buka .env di ${EDITOR_CMD} (Ctrl+C untuk batal) " _ </dev/tty || true
+read -rp "  Enter to open .env in ${EDITOR_CMD} (Ctrl+C to cancel) " _ </dev/tty || true
 
 # stdin is the curl pipe under `curl … | bash`, so the editor must be handed the real
 # terminal or it exits immediately. TERM can be unset in a non-login shell; nano
 # refuses to start without one.
 as_user env TERM="${TERM:-xterm}" "$EDITOR_CMD" "$DIR/.env" </dev/tty >/dev/tty 2>&1 || \
-  warn "Editor keluar dengan error — isi .env dicek ulang oleh install.sh"
+  warn "Editor exited with an error — install.sh will re-check the contents of .env"
 
 echo
-ok ".env disimpan — lanjut deploy"
+ok ".env saved — continuing the deploy"
 
 set +e
 bash "$DIR/install.sh"
@@ -293,7 +293,7 @@ set -e
 
 if [[ $INSTALL_STATUS -ne 0 ]]; then
   echo
-  fail "Deploy berhenti. Perbaiki .env lalu jalankan ulang — tidak perlu setup dari awal:"
+  fail "Deploy stopped. Fix .env and run it again — no need to start setup from scratch:"
   echo "    cd $DIR && nano .env && ./install.sh"
 fi
 
