@@ -333,15 +333,15 @@ function FilesEmptyState({ trash, empty }: { trash: boolean; empty?: FileGridEmp
       ? "No files match your search"
       : filterActive
         ? "Nothing of this type here"
-        : "No files yet";
+        : "No files";
   const description = trash
-    ? "Files you delete will show up here."
+    ? "Files you delete show up here."
     : searching
       ? `Nothing found for “${searchQuery}”. Try fewer words, or clear the search.`
       : filterActive
         ? "Pick All to see everything in this folder again."
         : readOnly
-          ? "Nothing has been added to this folder yet."
+          ? "This folder is empty."
           : "Drop files anywhere on this page to upload, or use Upload in the toolbar.";
 
   // With folders listed above, a full-height panel pushes them off screen — a single

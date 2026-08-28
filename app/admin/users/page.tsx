@@ -792,10 +792,10 @@ export default function AdminUsersPage() {
         ) : filtered.length === 0 ? (
           <AdminEmpty
             icon={Users}
-            title={users.length === 0 ? "No accounts yet" : "Nothing matches that filter"}
+            title={users.length === 0 ? "No accounts" : "Nothing matches that filter"}
             body={
               users.length === 0
-                ? "Create the first account and it will appear here with its quota, presence and session count."
+                ? "Accounts show here with quota, presence, and session count."
                 : "Try a different name or email, or clear the tile filter above."
             }
             action={

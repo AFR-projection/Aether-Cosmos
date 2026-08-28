@@ -952,6 +952,9 @@ body {
 
 /* ── Toolbar ── */
 .note-toolbar-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   padding: 6px 16px 8px;

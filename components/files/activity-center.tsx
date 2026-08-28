@@ -47,7 +47,7 @@ const FILTER_LABEL: Record<FilterKey, string> = {
 
 function formatRelativeTime(ts: number): string {
   const diff = Date.now() - ts;
-  if (diff < 60_000) return "just now";
+  if (diff < 60_000) return "now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -684,7 +684,7 @@ function PanelContent({
               <Activity className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
             </span>
             <p className="text-sm font-medium text-foreground">
-              {search || filter !== "all" ? "Nothing matches that filter" : "No activity yet"}
+              {search || filter !== "all" ? "Nothing matches that filter" : "No activity"}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {search || filter !== "all"

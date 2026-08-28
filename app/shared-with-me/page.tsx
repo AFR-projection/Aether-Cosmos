@@ -284,7 +284,7 @@ export default function SharedWithMePage() {
             ) : shared.length === 0 ? (
               <EmptyState
                 icon={Inbox}
-                title="Nothing shared with you yet"
+                title="Nothing shared with you"
                 description="When a teammate shares a folder, the invitation shows up above. Accepted folders then live here."
                 action={
                   <Button asChild variant="secondary">

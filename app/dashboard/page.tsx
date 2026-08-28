@@ -280,7 +280,7 @@ function RecentFilesPanel({ files }: { files: FileItem[] }) {
           })}
         </div>
       ) : (
-        <EmptyPanel icon={Cloud} title="Nothing here yet" description="Upload your first file to start building your workspace." actionLabel="Go to files" />
+        <EmptyPanel icon={Cloud} title="No recent files" description="Files you upload appear here." actionLabel="Go to files" />
       )}
     </section>
   );
@@ -316,7 +316,7 @@ function ActivityPanel({ items }: { items: ActivityItem[] }) {
           })}
         </ol>
       ) : (
-        <EmptyPanel icon={Sparkles} title="Your activity will appear here" description="Uploads, downloads, and file changes become a readable timeline." />
+        <EmptyPanel icon={Sparkles} title="No activity" description="Uploads, downloads, and changes show here." />
       )}
     </section>
   );

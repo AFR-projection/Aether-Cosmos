@@ -186,7 +186,7 @@ export default function BrainOverviewPage() {
                   </ol>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    Nothing yet. Every write and every agent read shows up here.
+                    No activity. Writes and agent reads appear here.
                   </p>
                 )}
               </BrainPanel>

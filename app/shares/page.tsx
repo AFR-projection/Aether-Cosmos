@@ -159,7 +159,7 @@ export default function SharesPage() {
           <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/5 border border-accent/10">
             <Share2 className="h-10 w-10 text-accent-ink/40" />
           </div>
-          <p className="text-lg font-semibold">No shared links yet</p>
+          <p className="text-lg font-semibold">No shared links</p>
           <p className="mt-1 text-sm text-muted-foreground/70">Share files from the file browser</p>
         </motion.div>
       ) : (
@@ -283,8 +283,8 @@ export default function SharesPage() {
                       ) : !accessLogs || accessLogs.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                           <Globe className="h-8 w-8 mb-2 opacity-30" />
-                          <p className="text-sm font-medium">No access data yet</p>
-                          <p className="text-xs text-muted-foreground/60 mt-1">Access logs will appear here when someone opens this link</p>
+                          <p className="text-sm font-medium">No access data</p>
+                          <p className="text-xs text-muted-foreground/60 mt-1">Opens show here</p>
                         </div>
                       ) : (
                         <div className="space-y-2">

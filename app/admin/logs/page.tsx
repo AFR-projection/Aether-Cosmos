@@ -69,7 +69,7 @@ function useNow(intervalMs = 30_000): number {
 
 function formatRelativeTime(dateStr: string, now: number): string {
   const diffSec = Math.floor((now - new Date(dateStr).getTime()) / 1000);
-  if (diffSec < 5) return "just now";
+  if (diffSec < 5) return "now";
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin}m ago`;
@@ -491,7 +491,7 @@ function AdminLogsContent() {
         ) : filtered.length === 0 ? (
           <AdminEmpty
             icon={ScrollText}
-            title={rows.length === 0 ? "Nothing logged yet" : "Nothing in this area"}
+            title={rows.length === 0 ? "No logs" : "Nothing in this area"}
             body={
               rows.length === 0
                 ? "Sign-ins, uploads, shares and account changes all land here the moment they happen."

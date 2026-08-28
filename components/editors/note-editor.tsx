@@ -511,7 +511,12 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
           "note-editor-shell relative flex w-full max-w-4xl flex-col overflow-hidden",
           // dvh, not vh: on a phone the mobile browser's own chrome is part of vh, so the
           // footer sat below the fold on exactly the screens with least room to spare.
-          "min-h-[82dvh] focus-visible:outline-none"
+          "min-h-[82dvh] focus-visible:outline-none",
+          // …and a ceiling to match, minus the scrim's own padding at each breakpoint.
+          // Without it the panel grew with the note, the scrim became the scroller, and
+          // the toolbar and footer travelled up out of sight. Capped here, the column
+          // below is the only thing that scrolls and the chrome stays put.
+          "max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] lg:max-h-[calc(100dvh-5rem)]"
         )}
       >
         {/* Chrome */}
@@ -660,8 +665,10 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
 
         {/* Body */}
         <div className="relative flex min-h-0 flex-1">
-          {/* Editor area */}
-          <div className="min-w-0 flex-1 overflow-y-auto px-8 py-6 sm:px-12 sm:py-8">
+          {/* Editor area — the note is the only scroller in the panel. `overscroll-contain`
+              stops a flick past the last line from handing the scroll to the scrim and
+              dragging the whole editor around. */}
+          <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain px-8 py-6 sm:px-12 sm:py-8">
             <EditorContent editor={editor} />
           </div>
 
@@ -687,7 +694,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
                     <Hash aria-hidden className="h-3 w-3" /> Outline
                   </p>
                   {outline.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No headings yet</p>
+                    <p className="text-xs text-muted-foreground">No headings</p>
                   ) : (
                     <ul className="space-y-0.5">
                       {outline.map((h, i) => (
@@ -735,7 +742,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
                 : lastSavedAt
                   ? `Saved at ${formatClock(lastSavedAt)}`
                   : loaded
-                    ? "No changes yet"
+                    ? "No changes"
                     : "Loading note…"}
           </span>
           <span className="hidden text-xs text-muted-foreground sm:inline">
@@ -836,7 +843,7 @@ function SaveButton({
       aria-busy={state === "saving"}
       title={
         state === "locked"
-          ? "This note hasn't loaded yet, so it can't be saved"
+          ? "This note is still loading, so it can't be saved"
           : `Save (${isMac ? "⌘" : "Ctrl+"}S)`
       }
     >

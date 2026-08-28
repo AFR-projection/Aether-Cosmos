@@ -325,8 +325,8 @@ export default function AdminOverviewPage() {
           ) : (
             <AdminEmpty
               icon={Database}
-              title="No files yet"
-              body="Once accounts start uploading, this splits the pool by file category."
+              title="No files"
+              body="Uploads split the pool by file category here."
             />
           )}
         </AdminPanel>
@@ -370,8 +370,8 @@ export default function AdminOverviewPage() {
           ) : (
             <AdminEmpty
               icon={Users}
-              title="No accounts yet"
-              body="The first account to store anything shows up here."
+              title="No accounts"
+              body="Accounts that store data rank here by bytes used."
             />
           )}
         </AdminPanel>
@@ -417,8 +417,8 @@ export default function AdminOverviewPage() {
             <div className="p-4">
               <AdminEmpty
                 icon={Activity}
-                title="Nothing logged yet"
-                body="Sign-ins, uploads and administrative changes all land here."
+                title="No logs"
+                body="Sign-ins, uploads and administrative changes land here."
               />
             </div>
           )}

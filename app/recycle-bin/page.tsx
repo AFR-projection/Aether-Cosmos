@@ -21,7 +21,7 @@ type TrashItem = TrashFile | TrashFolder;
 
 function getRelativeTime(ms: number): { label: string; color: string } {
   const mins = Math.floor(ms / 60000);
-  if (mins < 1) return { label: "Just now", color: "text-red-500" };
+  if (mins < 1) return { label: "Now", color: "text-red-500" };
   if (mins < 60) return { label: `${mins}m ago`, color: "text-red-400" };
 
   const hours = Math.floor(mins / 60);
@@ -361,7 +361,7 @@ export default function RecycleBinPage() {
             <Trash2 className="h-10 w-10 text-accent-ink/40" />
           </div>
           <p className="text-lg font-semibold">Recycle bin is empty</p>
-          <p className="mt-1 text-sm text-muted-foreground/70">Deleted files and folders will appear here</p>
+          <p className="mt-1 text-sm text-muted-foreground/70">Deleted files and folders show here</p>
         </motion.div>
       ) : (
         <div className="space-y-6">

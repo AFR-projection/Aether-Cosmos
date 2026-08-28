@@ -218,7 +218,7 @@ export function MemoryLinksPanel({
           <LinkGroup
             heading="Related to"
             hint="Connections this memory declares."
-            empty="Nothing linked yet. Use Add link to connect a related memory or an entity from the graph."
+            empty="No links. Use Add link to connect a related memory or an entity from the graph."
             links={relatedTo}
             onRemove={handleRemove}
             removingId={removingId}
@@ -226,7 +226,7 @@ export function MemoryLinksPanel({
           <LinkGroup
             heading="Referenced by"
             hint="Memories that point at this one."
-            empty="No other memory references this yet."
+            empty="No other memory references this."
             links={referencedBy}
           />
         </div>

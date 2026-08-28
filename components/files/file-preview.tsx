@@ -344,7 +344,7 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
         <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
           {file.isNote
             ? "Open this note in the editor to read it."
-            : `${previewKindLabel(previewKind)} files cannot be shown inline yet. Download it to open it locally.`}
+            : `${previewKindLabel(previewKind)} files cannot be shown inline. Download it to open it locally.`}
         </p>
         {!file.isNote && (
           <Button className="mt-4" onClick={handleDownload}>

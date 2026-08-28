@@ -141,7 +141,7 @@ export default function BrainActivityPage() {
             <span className="brain-empty__icon">
               <ScrollText className="h-5 w-5" aria-hidden="true" />
             </span>
-            <p className="brain-empty__title">Nothing recorded yet</p>
+            <p className="brain-empty__title">No activity recorded</p>
             <p className="brain-empty__body">
               Once you or an agent writes to this brain, it shows up here — append-only, newest
               first.

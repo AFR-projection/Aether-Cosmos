@@ -107,7 +107,7 @@ export function FileVersionsPanel({
 
       {!loading && versions.length === 0 && !error && (
         <p className="text-xs text-muted-foreground">
-          No previous versions yet — they appear once this file is replaced.
+          No previous versions. Versions appear when this file is replaced.
         </p>
       )}
 

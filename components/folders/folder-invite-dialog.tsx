@@ -176,8 +176,8 @@ export function FolderInviteDialog({ folderId, folderName, onClose }: FolderInvi
         ) : members.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
             {canManage
-              ? "Nobody else yet — invite someone by username above."
-              : "Nobody else has been given access to this folder."}
+              ? "No other members. Invite someone by username above."
+              : "Nobody else has access to this folder."}
           </p>
         ) : (
           <ul className="max-h-56 space-y-1.5 overflow-y-auto">

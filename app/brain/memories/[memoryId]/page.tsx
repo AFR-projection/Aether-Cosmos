@@ -223,7 +223,7 @@ export default function MemoryDetailPage() {
                 </ol>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  No earlier versions yet. Every edit to the title, content or summary saves one.
+                  No earlier versions. Every edit to the title, content or summary saves one.
                 </p>
               )}
             </BrainPanel>

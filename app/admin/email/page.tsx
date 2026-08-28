@@ -94,9 +94,9 @@ function useNow(intervalMs = 30_000): number {
  * explicit anti-pattern in this project's design system.
  */
 const SENDER_STATUS: Record<MailStatus, { label: string; tone: Tone; icon: typeof CircleCheck }> = {
-  ok: { label: "Verified & ready", tone: "success", icon: CircleCheck },
+  ok: { label: "Verified", tone: "success", icon: CircleCheck },
   error: { label: "Login failed", tone: "danger", icon: CircleX },
-  unverified: { label: "Not verified yet", tone: "muted", icon: CircleDashed },
+  unverified: { label: "Not verified", tone: "muted", icon: CircleDashed },
 };
 
 export default function EmailSettings() {
@@ -312,7 +312,7 @@ export default function EmailSettings() {
           <AdminEmpty
             icon={Mail}
             title="No sender configured"
-            body="Without a verified Gmail sender the app cannot deliver one-time codes, so sign-in and 2FA will fail. Add one to bring the gateway up."
+            body="Without a verified Gmail sender the app cannot deliver one-time codes, so sign-in and 2FA fail. Add one to bring the gateway up."
             action={
               <Button
                 size="sm"
@@ -323,7 +323,7 @@ export default function EmailSettings() {
                 }}
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                Add the first sender
+                Add sender
               </Button>
             }
           />
@@ -743,7 +743,7 @@ function EmailActivityLog() {
         <Skeleton className="h-3 w-full" rows={5} />
       ) : !data || data.length === 0 ? (
         <p className="adm-sub py-4 text-center">
-          Nothing yet. Sends, verifications, and OTP events will appear here as they happen.
+          No email events. Sends, verifications, and OTP events show here.
         </p>
       ) : (
         <div className="adm-log" role="log" aria-label="Recent email activity">

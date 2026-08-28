@@ -95,7 +95,7 @@ export default function InvitationsPage() {
           <div>
             <p className="font-medium text-foreground/80">No pending invitations</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              When someone invites you to a folder, it will appear here.
+              Invitations from other users show here.
             </p>
           </div>
         </div>

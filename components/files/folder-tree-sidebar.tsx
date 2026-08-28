@@ -415,7 +415,7 @@ export function FolderTreeSidebar({
             />
           ))}
           {rows.length === 0 && !loading && (
-            <p className="px-2 py-2.5 text-xs text-muted-foreground">No folders here yet.</p>
+            <p className="px-2 py-2.5 text-xs text-muted-foreground">No folders here.</p>
           )}
           {truncated && (
             <p className="px-2 py-2.5 text-xs text-muted-foreground">

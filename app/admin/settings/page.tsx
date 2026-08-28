@@ -162,7 +162,7 @@ const SETTING_SECTIONS: Section[] = [
     icon: Gauge,
     fields: [
       { key: "rateLimitPerMinute", label: "Rate Limit", description: "API requests per minute per user. Upload endpoints get 5× this value.", type: "number", unit: "req/min", min: 10, max: 1000 },
-      { key: "loginMaxAttempts", label: "Failed Logins per Account", description: "Wrong passwords before the account itself is locked for the window below. The floor is 3: a lower value locks an account on the first typo, which turns the lockout into a denial-of-service anyone can trigger with just a username.", type: "number", unit: "attempts", min: 3, max: 50 },
+      { key: "loginMaxAttempts", label: "Failed Logins per Account", description: "Wrong passwords before the account itself is locked for the window below. The floor is 3: a lower value locks an account on the first typo, which turns the lockout into a denial-of-service anyone can trigger with a username.", type: "number", unit: "attempts", min: 3, max: 50 },
       { key: "loginIpMaxAttempts", label: "Failed Logins per IP", description: "Failed attempts from one IP address before it is throttled. Keep this well above the per-account number so a shared office address is not locked out by one forgetful person.", type: "number", unit: "attempts", min: 5, max: 500 },
       { key: "loginLockoutMinutes", label: "Lockout Window", description: "How long a locked account or throttled IP has to wait. This is also the window the failed attempts are counted over, and the number quoted to the user in the message they see.", type: "number", unit: "minutes", min: 1, max: 1440 },
     ],
@@ -533,9 +533,9 @@ function SettingsField({
 function formatAgo(iso: string, now: number): string {
   if (now === 0) return "recently";
   const diff = now - new Date(iso).getTime();
-  if (!Number.isFinite(diff) || diff < 0) return "just now";
+  if (!Number.isFinite(diff) || diff < 0) return "now";
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
+  if (mins < 1) return "now";
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ago`;
@@ -555,7 +555,7 @@ function CleanupStatus({ cleanup, now }: { cleanup?: CleanupState | null; now: n
   if (!lastRunAt) {
     return (
       <Note icon={AlertCircle} tone="warning" className="mt-4">
-        No cleanup has run yet — the first sweep happens within ~20 minutes of server start.
+        No cleanup has run. The first sweep happens within 20 minutes of server start.
       </Note>
     );
   }

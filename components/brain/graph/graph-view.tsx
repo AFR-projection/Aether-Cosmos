@@ -435,7 +435,7 @@ export function GraphView({
         {view.count === 0 ? (
           <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-muted-foreground">
             {model.nodes.length === 0
-              ? "This brain has no entities or memories to graph yet."
+              ? "This brain has no entities or memories to graph."
               : localMode && focalIndex < 0
                 ? "Pick a node to centre the local graph on, or switch back to Global."
                 : "No node matches the current filter."}

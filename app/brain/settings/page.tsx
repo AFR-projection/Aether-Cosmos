@@ -181,7 +181,7 @@ export default function BrainSettingsPage() {
               the knowledge graph. No credentials are included.
             </p>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Import is not built yet, so treat this as a backup rather than a migration path.
+              Export only. Use this for backups; import is not available.
             </p>
             <Button
               variant="secondary"

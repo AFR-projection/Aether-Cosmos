@@ -64,7 +64,7 @@ export default function BrainProjectsPage() {
   async function handleDelete(project: BrainProject) {
     const confirmed = await askConfirm({
       title: `Delete "${project.name}"?`,
-      message: `Its ${project.memoryCount} memor${project.memoryCount === 1 ? "y" : "ies"} are kept — they simply stop belonging to a project.`,
+      message: `Its ${project.memoryCount} memor${project.memoryCount === 1 ? "y" : "ies"} are kept — they stop belonging to a project.`,
       confirmText: "Delete project",
       danger: true,
     });
@@ -215,9 +215,9 @@ export default function BrainProjectsPage() {
               <span className="brain-empty__icon">
                 <FolderKanban className="h-5 w-5" aria-hidden="true" />
               </span>
-              <p className="brain-empty__title">No projects yet</p>
+              <p className="brain-empty__title">No projects</p>
               <p className="brain-empty__body">
-                A project groups the memories of one piece of work, so an agent can load just that
+                A project groups the memories of one piece of work, so an agent can load that
                 context.
               </p>
               <Button size="sm" className="mt-1" onClick={() => setCreating(true)}>

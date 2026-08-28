@@ -257,7 +257,7 @@ export default function MediaTrimPanel({
       setAudioQueued(true);
       notify({
         title: "Extracting audio",
-        description: `The soundtrack of ${fileName} will appear as a new file in this folder.`,
+        description: `The soundtrack of ${fileName} lands as a new file in this folder.`,
         tone: "success",
       });
       onQueued?.();

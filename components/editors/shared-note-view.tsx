@@ -276,7 +276,7 @@ export function SharedNoteView({ token, content, canEdit }: SharedNoteViewProps)
                   ? `Unsaved · press ${isMac ? "⌘S" : "Ctrl+S"}`
                   : lastSavedAt
                     ? `Saved at ${formatClock(lastSavedAt)}`
-                    : "No changes yet"}
+                    : "No changes"}
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-medium text-accent-ink">
               <Pencil aria-hidden className="h-3 w-3" /> Editable

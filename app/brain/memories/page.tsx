@@ -202,12 +202,12 @@ export default function BrainMemoriesPage() {
                 <BrainIcon className="h-5 w-5" aria-hidden="true" />
               </span>
               <p className="brain-empty__title">
-                {hasFilters ? "Nothing matches those filters" : "No memories yet"}
+                {hasFilters ? "Nothing matches those filters" : "No memories"}
               </p>
               <p className="brain-empty__body">
                 {hasFilters
                   ? "Try a different search term, or clear the filters."
-                  : "Write the first thing this brain should remember permanently."}
+                  : "Write something this brain should remember permanently."}
               </p>
               {hasFilters ? (
                 <Button size="sm" variant="secondary" className="mt-1" onClick={clearFilters}>
