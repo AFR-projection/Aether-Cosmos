@@ -95,7 +95,7 @@ export function CommandPalette() {
                       onClick={() => { router.push(item.href); setOpen(false); }}
                     >
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-                        <item.icon className="h-4 w-4 text-accent" />
+                        <item.icon className="h-4 w-4 text-accent-ink" />
                       </div>
                       <div className="flex-1 text-left">
                         <p className="font-medium">{item.label}</p>
@@ -123,7 +123,7 @@ export function CommandPalette() {
                       onClick={() => { router.push(`/files?select=${file.id}`); setOpen(false); }}
                     >
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-                        <FileText className="h-4 w-4 text-accent" />
+                        <FileText className="h-4 w-4 text-accent-ink" />
                       </div>
                       <span className="truncate font-medium">{file.name}</span>
                     </motion.button>

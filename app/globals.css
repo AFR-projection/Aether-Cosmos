@@ -15,17 +15,53 @@
   --chrome-highlight: rgba(15, 17, 27, 0.05);
   --border: rgba(0, 0, 0, 0.07);
   --border-light: rgba(0, 0, 0, 0.04);
-  --muted-foreground: #6b7280;
+  /* Secondary text. Nudged a shade below Tailwind's gray-500 (#6b7280): that
+     stock value is 4.39:1 on --muted, which is the ground it sits on most often
+     inside panels and table rows. This clears 4.5:1 on every light surface. */
+  --muted-foreground: #676f7b;
   --muted: #f3f4f6;
-  --accent: #6366f1;
+  /* Brand indigo, at the darkest shade that still reads as the same colour:
+     white-on-accent buttons need 4.5:1 and Tailwind's indigo-500 (#6366f1)
+     lands at 4.47. Tints (color-mix at 10–20%) are indistinguishable. */
+  --accent: #575bf0;
   --accent-light: #8b8ff5;
   --accent-dark: #4f46e5;
-  --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
-  --accent-glow: 0 0 24px rgba(99, 102, 241, 0.25);
+  --accent-gradient: linear-gradient(135deg, #575bf0, #8b5cf6);
+  --accent-glow: 0 0 24px rgba(87, 91, 240, 0.25);
   --success: #22c55e;
   --warning: #f59e0b;
   --danger: #ef4444;
   --info: #3b82f6;
+
+  /* ── Ink variants ──
+     The vivid tokens above are tuned to be seen as *fills*: dots, meters, 12%
+     tints. As text on a light ground they are not readable — measured against
+     the darkest light surface (#f0f2f8), --warning lands at 1.92:1 and --success
+     at 2.04:1, where AA wants 4.5:1.
+
+     So each one gets an ink twin: same hue and saturation, darkened to exactly
+     clear 4.5:1 against every light ground in this file. Fills keep the vivid
+     token, text takes the ink. --accent is the exception — it had to be darkened
+     in place, because white-on-accent buttons need the same 4.5:1 — so its ink
+     is just an alias. In dark mode the vivid tokens already clear 4.5:1
+     (--warning is 11.6:1 on --background), so every ink twin aliases them and
+     nothing shifts. */
+  --accent-ink: var(--accent);
+  --success-ink: #167f3d;
+  --warning-ink: #9a6306;
+  --danger-ink: #dc1313;
+  --info-ink: #0d64f4;
+
+  /* Text and glyphs *on top of* a solid semantic fill. White works in light
+     mode, where the fills are dark; in dark mode the fills are the light end of
+     the ramp (--accent is #818cf8), so white on them measures 2.98:1 and the
+     legible choice is the page's own ground colour. One token, so a filled
+     button never has to know which theme it is in. */
+  --on-accent: #ffffff;
+  --on-danger: #ffffff;
+  /* --warning and --success are the light end of the ramp in *both* themes, so
+     their fills always want dark glyphs — no per-theme override below. */
+  --on-warning: #0f1117;
 
   /* Transparency checkerboard behind images and SVGs. Deliberately neutral:
      the pattern must read as "nothing here", not as a surface colour. */
@@ -68,13 +104,24 @@
     --muted: #1e2030;
     --accent: #818cf8;
     --accent-light: #a5b4fc;
-    --accent-dark: #6366f1;
+    /* Hover still darkens, but only as far as near-black glyphs stay legible
+       on it: indigo-500 measured 4.35:1 against --on-accent. */
+    --accent-dark: #6d75f4;
     --accent-gradient: linear-gradient(135deg, #818cf8, #a78bfa);
     --accent-glow: 0 0 24px rgba(129, 140, 248, 0.2);
     --success: #4ade80;
     --warning: #fbbf24;
     --danger: #f87171;
     --info: #60a5fa;
+    /* Dark mode already clears AA with the vivid tokens, so the inks alias them. */
+    --accent-ink: #818cf8;
+    --success-ink: #4ade80;
+    --warning-ink: #fbbf24;
+    --danger-ink: #f87171;
+    --info-ink: #60a5fa;
+    /* Filled buttons flip to dark glyphs here — see --on-accent above. */
+    --on-accent: #0b0d14;
+    --on-danger: #0b0d14;
     --checker-a: #14161f;
     --checker-b: #1e212c;
     --viewer-stage: #07080d;
@@ -103,13 +150,24 @@ html[data-theme="dark"] {
   --muted: #1e2030;
   --accent: #818cf8;
   --accent-light: #a5b4fc;
-  --accent-dark: #6366f1;
+  /* Hover still darkens, but only as far as near-black glyphs stay legible
+     on it: indigo-500 measured 4.35:1 against --on-accent. */
+  --accent-dark: #6d75f4;
   --accent-gradient: linear-gradient(135deg, #818cf8, #a78bfa);
   --accent-glow: 0 0 24px rgba(129, 140, 248, 0.2);
   --success: #4ade80;
   --warning: #fbbf24;
   --danger: #f87171;
   --info: #60a5fa;
+  /* Dark mode already clears AA with the vivid tokens, so the inks alias them. */
+  --accent-ink: #818cf8;
+  --success-ink: #4ade80;
+  --warning-ink: #fbbf24;
+  --danger-ink: #f87171;
+  --info-ink: #60a5fa;
+  /* Filled buttons flip to dark glyphs here — see --on-accent above. */
+  --on-accent: #0b0d14;
+  --on-danger: #0b0d14;
   --checker-a: #14161f;
   --checker-b: #1e212c;
   --viewer-stage: #07080d;
@@ -137,13 +195,24 @@ html[data-theme="dark"] {
   --muted: #1e2030;
   --accent: #818cf8;
   --accent-light: #a5b4fc;
-  --accent-dark: #6366f1;
+  /* Hover still darkens, but only as far as near-black glyphs stay legible
+     on it: indigo-500 measured 4.35:1 against --on-accent. */
+  --accent-dark: #6d75f4;
   --accent-gradient: linear-gradient(135deg, #818cf8, #a78bfa);
   --accent-glow: 0 0 24px rgba(129, 140, 248, 0.2);
   --success: #4ade80;
   --warning: #fbbf24;
   --danger: #f87171;
   --info: #60a5fa;
+  /* Dark mode already clears AA with the vivid tokens, so the inks alias them. */
+  --accent-ink: #818cf8;
+  --success-ink: #4ade80;
+  --warning-ink: #fbbf24;
+  --danger-ink: #f87171;
+  --info-ink: #60a5fa;
+  /* Filled buttons flip to dark glyphs here — see --on-accent above. */
+  --on-accent: #0b0d14;
+  --on-danger: #0b0d14;
   --checker-a: #14161f;
   --checker-b: #1e212c;
   --viewer-stage: #07080d;
@@ -173,10 +242,30 @@ html[data-theme="dark"] {
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-info: var(--info);
+  --color-accent-ink: var(--accent-ink);
+  --color-success-ink: var(--success-ink);
+  --color-warning-ink: var(--warning-ink);
+  --color-danger-ink: var(--danger-ink);
+  --color-info-ink: var(--info-ink);
+  --color-on-accent: var(--on-accent);
+  --color-on-danger: var(--on-danger);
+  --color-on-warning: var(--on-warning);
   --color-viewer-stage: var(--viewer-stage);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+/* ── Semantic colour: fill vs ink ─────────────────────────────────────────
+   `--success` and `--warning` are tuned as *fills*: at 10–16% in a color-mix
+   they make the right tint, and behind white text they make the right chip.
+   As light-mode ink on a near-white page they measure 2.04:1 and 1.92:1,
+   where WCAG AA wants 4.5:1. The `-ink` twins above are the same hues taken
+   down to a passing luminance; dark mode already passes, so there they alias
+   straight back to the vivid tokens and nothing shifts.
+
+   The rule, everywhere in this file and in every component: semantic colour
+   as *text or icon* uses `-ink` (`text-danger-ink`, `var(--danger-ink)`);
+   as *fill or border* it stays vivid (`bg-danger`, `border-danger/30`). */
 
 body {
   background: var(--background);
@@ -850,11 +939,11 @@ body {
 }
 .note-action-btn--active {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .note-action-btn--close:hover {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 .note-action-btn:focus-visible {
   outline: 2px solid var(--accent);
@@ -900,7 +989,7 @@ body {
 }
 .note-tbtn--active {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .note-tbtn--disabled {
   /* Faint enough to read as unavailable, still legible: at 0.3 the glyph
@@ -1005,6 +1094,19 @@ body {
     min-height: 34px;
     padding: 4px 10px;
   }
+  /* Header actions and the menu rows they open: same reasoning, same fix. */
+  .note-action-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  .note-confirm-btn {
+    min-height: 2.75rem;
+  }
+  .note-outline-item,
+  .note-export-item,
+  .note-slash-item {
+    min-height: 2.75rem;
+  }
 }
 
 /* ── Outline sidebar ── */
@@ -1086,17 +1188,17 @@ body {
 }
 .note-save-btn[data-state="saving"] {
   background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
   cursor: progress;
 }
 .note-save-btn[data-state="clean"] {
   background: transparent;
-  color: var(--success);
+  color: var(--success-ink);
   cursor: default;
 }
 .note-save-btn[data-state="error"] {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: var(--danger);
+  color: var(--danger-ink);
   border-color: color-mix(in srgb, var(--danger) 32%, transparent);
 }
 .note-save-btn[data-state="locked"] {
@@ -1157,10 +1259,10 @@ body {
   flex-shrink: 0;
 }
 .note-banner[data-tone="warning"] .note-banner__icon {
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 .note-banner[data-tone="danger"] .note-banner__icon {
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 .note-banner-btn {
   flex-shrink: 0;
@@ -1265,7 +1367,7 @@ body {
   background: color-mix(in srgb, var(--accent) 88%, #fff);
 }
 .note-confirm-btn--danger {
-  color: var(--danger);
+  color: var(--danger-ink);
   border-color: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 .note-confirm-btn--danger:hover {
@@ -1308,6 +1410,10 @@ body {
 .note-export-item:hover {
   background: var(--surface-hover);
   color: var(--foreground);
+}
+.note-export-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ── Slash command menu ── */
@@ -1361,7 +1467,7 @@ body {
 .note-slash-icon--active {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* ── Note prose typography ── */
@@ -1405,7 +1511,7 @@ body {
 }
 .note-prose code:not(pre code) {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
   border-radius: 5px;
   padding: 1px 5px;
   font-size: 0.875em;
@@ -1443,14 +1549,17 @@ body {
   line-height: 1.7;
 }
 .note-prose a {
-  color: var(--accent);
+  color: var(--accent-ink);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
   text-underline-offset: 3px;
   transition: color 150ms ease;
 }
+/* Hover pulls the link toward the page's own ink rather than to a fixed lighter
+   indigo: in light mode that darkens (and lifts contrast above the resting 4.8:1),
+   in dark mode it brightens. One declaration, correct in both themes. */
 .note-prose a:hover {
-  color: var(--accent-light);
+  color: color-mix(in srgb, var(--accent-ink) 78%, var(--foreground));
 }
 
 /* Slash-command popup: reduced-motion friendly (no animation) */
@@ -2249,6 +2358,7 @@ body {
   color: var(--auth-subtle);
   font-size: 0.74rem;
   cursor: pointer;
+  transition: color 160ms ease;
 }
 
 .auth-secondary-link:hover {
@@ -2582,7 +2692,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin: 0 0 0.75rem;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.67rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -2634,7 +2744,7 @@ body {
 .dashboard-refresh svg {
   width: 0.9rem;
   height: 0.9rem;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .dashboard-open-files {
@@ -2882,7 +2992,7 @@ body {
   flex: 0 0 auto;
   border-radius: 0.75rem;
   background: var(--dashboard-accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .dashboard-panel__icon {
@@ -2908,7 +3018,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.72rem;
   font-weight: 620;
   text-decoration: none;
@@ -3003,13 +3113,13 @@ body {
 .dashboard-file-row__icon {
   width: 2.1rem;
   height: 2.1rem;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
-.dashboard-file-row__icon[data-kind="image"] { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); }
-.dashboard-file-row__icon[data-kind="video"] { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); }
-.dashboard-file-row__icon[data-kind="audio"] { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
-.dashboard-file-row__icon[data-kind="archive"] { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.dashboard-file-row__icon[data-kind="image"] { color: var(--info-ink); background: color-mix(in srgb, var(--info) 12%, transparent); }
+.dashboard-file-row__icon[data-kind="video"] { color: var(--warning-ink); background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.dashboard-file-row__icon[data-kind="audio"] { color: var(--success-ink); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.dashboard-file-row__icon[data-kind="archive"] { color: var(--warning-ink); background: color-mix(in srgb, var(--warning) 12%, transparent); }
 
 .dashboard-file-row__content {
   display: grid;
@@ -3052,7 +3162,7 @@ body {
 }
 
 .dashboard-file-row:hover .dashboard-file-row__arrow {
-  color: var(--accent);
+  color: var(--accent-ink);
   transform: translate(1px, -1px);
 }
 
@@ -3153,7 +3263,7 @@ body {
 }
 
 .dashboard-system__metrics span { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--dashboard-muted); font-size: 0.65rem; }
-.dashboard-system__metrics span svg { width: 0.82rem; height: 0.82rem; color: var(--accent); }
+.dashboard-system__metrics span svg { width: 0.82rem; height: 0.82rem; color: var(--accent-ink); }
 .dashboard-system__metrics strong { color: var(--foreground); font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 0.83rem; }
 
 .dashboard-error {
@@ -3165,7 +3275,7 @@ body {
   padding: 1.5rem;
 }
 
-.dashboard-error > span { display: grid; place-items: center; flex: 0 0 auto; width: 2.6rem; height: 2.6rem; border-radius: 0.9rem; background: color-mix(in srgb, var(--danger) 13%, transparent); color: var(--danger); }
+.dashboard-error > span { display: grid; place-items: center; flex: 0 0 auto; width: 2.6rem; height: 2.6rem; border-radius: 0.9rem; background: color-mix(in srgb, var(--danger) 13%, transparent); color: var(--danger-ink); }
 .dashboard-error > span svg { width: 1.2rem; height: 1.2rem; }
 .dashboard-error h1 { margin: 0; color: var(--foreground); font-size: 1.1rem; }
 .dashboard-error p { margin: 0.45rem 0 1rem; color: var(--dashboard-muted); font-size: 0.82rem; line-height: 1.55; }
@@ -3256,7 +3366,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.64rem;
   font-weight: 700;
   letter-spacing: 0.16em;
@@ -3334,7 +3444,7 @@ body {
   box-shadow: var(--brain-inset), var(--shadow-sm);
 }
 
-.brain-rail__link[aria-current="page"] svg { color: var(--accent); }
+.brain-rail__link[aria-current="page"] svg { color: var(--accent-ink); }
 
 .brain-rail__link:focus-visible {
   outline: 2px solid var(--accent);
@@ -3363,13 +3473,18 @@ body {
 /* ── Tones ──
    Tailwind utilities live in a cascade layer, so the unlayered .brain-* rules
    here always win a border/background fight. Tone overrides therefore go through
-   an attribute rather than a utility class. */
-[data-tone] { --tone: var(--muted-foreground); }
-[data-tone="success"] { --tone: var(--success); }
-[data-tone="warning"] { --tone: var(--warning); }
-[data-tone="danger"] { --tone: var(--danger); }
-[data-tone="info"] { --tone: var(--info); }
-[data-tone="accent"] { --tone: var(--accent); }
+   an attribute rather than a utility class.
+
+   Two variables per tone, because one colour cannot do both jobs: --tone is the
+   vivid fill (dots, 5-30% tints, borders) and --tone-ink is the AA-safe text
+   colour. Tinted callouts sit at ~5% over the page, so their label is effectively
+   dark text on a light ground and needs the ink. */
+[data-tone] { --tone: var(--muted-foreground); --tone-ink: var(--muted-foreground); }
+[data-tone="success"] { --tone: var(--success); --tone-ink: var(--success-ink); }
+[data-tone="warning"] { --tone: var(--warning); --tone-ink: var(--warning-ink); }
+[data-tone="danger"] { --tone: var(--danger); --tone-ink: var(--danger-ink); }
+[data-tone="info"] { --tone: var(--info); --tone-ink: var(--info-ink); }
+[data-tone="accent"] { --tone: var(--accent); --tone-ink: var(--accent-ink); }
 
 .brain-metric {
   display: grid;
@@ -3394,7 +3509,7 @@ body {
 .brain-metric > span:first-child svg {
   width: 0.82rem;
   height: 0.82rem;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .brain-metric strong {
@@ -3556,7 +3671,7 @@ body {
 .brain-chip--on {
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
   background: var(--brain-accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .brain-chip--mono {
@@ -3569,7 +3684,7 @@ body {
 .brain-chip[data-tone] {
   border-color: color-mix(in srgb, var(--tone) 32%, transparent);
   background: color-mix(in srgb, var(--tone) 12%, transparent);
-  color: var(--tone);
+  color: var(--tone-ink);
 }
 /* ── Activity ticks ───────────────────────────────────────────────────────
    A bucketed bar strip drawn from the audit trail the page already fetches.
@@ -3584,7 +3699,7 @@ body {
   align-items: flex-end;
   gap: 2px;
   height: 1.6rem;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .brain-ticks > i {
@@ -3710,7 +3825,7 @@ body {
   padding: 0.05rem 0.3rem;
   border-radius: 0.3rem;
   background: color-mix(in srgb, var(--warning) 16%, transparent);
-  color: var(--warning);
+  color: var(--warning-ink);
   font-size: 0.58rem;
   font-weight: 650;
   letter-spacing: 0.04em;
@@ -3883,7 +3998,7 @@ body {
   border-radius: 0.95rem;
   border: 1px solid var(--brain-rim);
   background: var(--brain-accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .brain-empty__title { color: var(--foreground); font-size: 0.88rem; font-weight: 600; }
@@ -3904,6 +4019,12 @@ body {
   .brain-title { letter-spacing: -0.035em; }
   .brain-seg { width: 100%; }
   .brain-seg__btn { flex: 1 1 0; }
+}
+
+/* Touch targets — pointer type rather than viewport width, matching the console. */
+@media (pointer: coarse) {
+  .brain-seg__btn { min-height: 2.5rem; }
+  .brain-rail__link { min-height: 2.75rem; }
 }
 
 /* ── lite mode / reduced motion ──
@@ -3964,7 +4085,11 @@ body {
   z-index: -1;
   top: -7rem;
   left: 40%;
-  width: 30rem;
+  /* Capped at the container: centred on 40% and 30rem wide, the orb reached
+     past the right edge below ~500px and dragged a horizontal scrollbar with
+     it. Overflow to the left is unreachable in LTR, which is why the other
+     pages' right-anchored orbs need no cap. */
+  width: min(30rem, 100%);
   height: 20rem;
   transform: translateX(-50%);
   border-radius: 999px;
@@ -3978,7 +4103,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-family: var(--adm-mono);
   font-size: 0.62rem;
   font-weight: 600;
@@ -4018,7 +4143,7 @@ body {
   border: 1px solid color-mix(in srgb, var(--tone, var(--success)) 28%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--tone, var(--success)) 10%, transparent);
-  color: var(--tone, var(--success));
+  color: var(--tone-ink, var(--success-ink));
   font-size: 0.66rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -4135,7 +4260,7 @@ body {
   border-radius: 0.65rem;
   border: 1px solid color-mix(in srgb, var(--tone, var(--accent)) 24%, transparent);
   background: color-mix(in srgb, var(--tone, var(--accent)) 11%, transparent);
-  color: var(--tone, var(--accent));
+  color: var(--tone-ink, var(--accent-ink));
 }
 
 .adm-panel__badge svg { width: 0.95rem; height: 0.95rem; }
@@ -4217,7 +4342,7 @@ body {
 .adm-metric__label svg {
   width: 0.8rem;
   height: 0.8rem;
-  color: var(--tone, var(--accent));
+  color: var(--tone-ink, var(--accent-ink));
 }
 
 .adm-metric__value {
@@ -4295,7 +4420,7 @@ button.adm-metric[aria-pressed="true"]::before { width: 3px; }
 .adm-chip[data-tone] {
   border-color: color-mix(in srgb, var(--tone) 30%, transparent);
   background: color-mix(in srgb, var(--tone) 11%, transparent);
-  color: var(--tone);
+  color: var(--tone-ink);
 }
 
 /* ── Status dot ──
@@ -4452,7 +4577,14 @@ button.adm-metric[aria-pressed="true"]::before { width: 3px; }
 }
 
 /* Only the linked variant reacts to the pointer — a static tile that lit up on
-   hover would promise a click that never happens. */
+   hover would promise a click that never happens. A bare <button> inherits
+   `cursor: default` from the UA sheet, so say it here rather than relying on
+   the element type. */
+a.adm-tile,
+button.adm-tile {
+  cursor: pointer;
+}
+
 a.adm-tile:hover,
 button.adm-tile:hover {
   border-color: color-mix(in srgb, var(--tone, var(--accent)) 32%, transparent);
@@ -4473,7 +4605,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.6rem;
   background: color-mix(in srgb, var(--tone, var(--accent)) 12%, transparent);
-  color: var(--tone, var(--accent));
+  color: var(--tone-ink, var(--accent-ink));
 }
 
 .adm-tile__icon svg { width: 1rem; height: 1rem; }
@@ -4521,9 +4653,14 @@ button.adm-tile:focus-visible {
   transition: border-color 160ms ease, background 160ms ease;
 }
 
+/* The input's own outline is suppressed (the wrapper is the visible control), so
+   the wrapper has to carry a real focus ring — a border tint alone is too weak
+   to satisfy 2.4.7, and every other .adm-* control uses this same outline. */
 .adm-search:focus-within {
   border-color: color-mix(in srgb, var(--accent) 42%, transparent);
   background: var(--surface);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 .adm-search svg {
@@ -4626,7 +4763,7 @@ button.adm-tile:focus-visible {
 .adm-filter[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--tone, var(--accent)) 40%, transparent);
   background: color-mix(in srgb, var(--tone, var(--accent)) 12%, transparent);
-  color: var(--tone, var(--accent));
+  color: var(--tone-ink, var(--accent-ink));
 }
 
 .adm-filter:focus-visible {
@@ -4810,7 +4947,7 @@ button.adm-tile:focus-visible {
   border: 1px solid var(--adm-rim);
   border-radius: 0.9rem;
   background: var(--adm-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .adm-empty__title {
@@ -4869,7 +5006,7 @@ button.adm-tile:focus-visible {
   word-break: break-word;
 }
 
-.adm-log__line[data-tone] { color: var(--tone); }
+.adm-log__line[data-tone] { color: var(--tone-ink); }
 
 .adm-code {
   margin: 0;
@@ -4957,7 +5094,7 @@ button.adm-tile:focus-visible {
   height: 0.9rem;
   flex-shrink: 0;
   margin-top: 0.1rem;
-  color: var(--tone, var(--info));
+  color: var(--tone-ink, var(--info-ink));
 }
 
 .adm-note strong { color: var(--foreground); font-weight: 600; }
@@ -5002,7 +5139,7 @@ button.adm-tile:focus-visible {
 .adm-iconbtn[data-tone]:hover {
   border-color: color-mix(in srgb, var(--tone) 32%, transparent);
   background: color-mix(in srgb, var(--tone) 11%, transparent);
-  color: var(--tone);
+  color: var(--tone-ink);
 }
 
 .adm-iconbtn:focus-visible {
@@ -5024,7 +5161,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.7rem;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.78rem;
   font-weight: 650;
   text-transform: uppercase;
@@ -5044,7 +5181,7 @@ button.adm-tile:focus-visible {
 
 .adm-avatar--master {
   background: color-mix(in srgb, var(--warning) 16%, transparent);
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 
 /* ── Responsive ──
@@ -5062,6 +5199,37 @@ button.adm-tile:focus-visible {
   .adm-metric__value { font-size: 1.15rem; }
   a.adm-tile,
   button.adm-tile { min-height: 2.75rem; }
+}
+
+/* ── Touch targets ──
+   The block above keys off viewport width, which is the right signal for layout
+   reflow but the wrong one for fingertips: a touch tablet at 900px got none of
+   it, and a narrow desktop window got all of it for a mouse. Pointer type is the
+   honest signal, so hit areas are sized here and density stays above.
+
+   The switch keeps its canonical 38×22px look and gains an invisible ::before
+   that reaches 44px — growing the track itself would just make it read as a
+   different component. */
+@media (pointer: coarse) {
+  .adm-iconbtn { width: 2.75rem; height: 2.75rem; }
+  .adm-select,
+  .adm-search { min-height: 2.75rem; }
+  .adm-filter,
+  .adm-seg__btn { min-height: 2.5rem; }
+  .adm-rail__link,
+  .adm-check { min-height: 2.75rem; }
+  a.adm-tile,
+  button.adm-tile { min-height: 2.75rem; }
+
+  .adm-switch::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 2.75rem);
+    height: 2.75rem;
+    transform: translate(-50%, -50%);
+  }
 }
 
 /* ── lite mode / reduced motion ──
@@ -5143,7 +5311,7 @@ button.adm-tile:focus-visible {
   align-items: center;
   gap: 0.5rem;
   margin: 0 0 0.7rem;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.67rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -5208,7 +5376,7 @@ button.adm-tile:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.shr-tally__item[data-tone="accent"] .shr-tally__value { color: var(--accent); }
+.shr-tally__item[data-tone="accent"] .shr-tally__value { color: var(--accent-ink); }
 
 .shr-tally__label {
   display: block;
@@ -5256,7 +5424,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.7rem;
   background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .shr-panel__icon svg { width: 1.05rem; height: 1.05rem; }
@@ -5292,7 +5460,7 @@ button.adm-tile:focus-visible {
   padding: 0.12rem 0.5rem;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.7rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
@@ -5311,7 +5479,13 @@ button.adm-tile:focus-visible {
   transition: border-color 150ms ease;
 }
 
-.shr-search:focus-within { border-color: var(--shr-rim); }
+/* Same reasoning as .adm-search: the input's outline is suppressed, so the
+   wrapper carries the focus ring rather than only tinting its border. */
+.shr-search:focus-within {
+  border-color: var(--shr-rim);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
 .shr-search > svg { width: 0.85rem; height: 0.85rem; color: var(--shr-muted); flex-shrink: 0; }
 
 .shr-search input {
@@ -5368,7 +5542,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .shr-invite__icon svg { width: 1.15rem; height: 1.15rem; }
@@ -5427,7 +5601,7 @@ button.adm-tile:focus-visible {
 .shr-role[data-role="edit"] {
   border-color: var(--shr-rim);
   background: var(--shr-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* ── Inline note ── */
@@ -5445,8 +5619,8 @@ button.adm-tile:focus-visible {
   line-height: 1.5;
 }
 
-.shr-note[data-tone="danger"] { --tone: var(--danger); }
-.shr-note > svg { width: 0.95rem; height: 0.95rem; flex-shrink: 0; margin-top: 0.12rem; color: var(--tone, var(--info)); }
+.shr-note[data-tone="danger"] { --tone: var(--danger); --tone-ink: var(--danger-ink); }
+.shr-note > svg { width: 0.95rem; height: 0.95rem; flex-shrink: 0; margin-top: 0.12rem; color: var(--tone-ink, var(--info-ink)); }
 
 /* ── Folder grid ──
    auto-fill rather than fixed column counts, so the cards reflow with the
@@ -5490,7 +5664,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .shr-card__icon svg { width: 1.15rem; height: 1.15rem; }
@@ -5514,7 +5688,7 @@ button.adm-tile:focus-visible {
   transition: color 160ms ease;
 }
 
-.shr-card:hover .shr-card__go { color: var(--accent); }
+.shr-card:hover .shr-card__go { color: var(--accent-ink); }
 
 .shr-card__meta {
   display: flex;
@@ -5535,7 +5709,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.45rem;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.66rem;
   font-weight: 650;
   text-transform: uppercase;
@@ -5589,6 +5763,14 @@ button.adm-tile:focus-visible {
   .shr-invite { flex-wrap: wrap; }
   .shr-invite__actions { width: 100%; }
   .shr-invite__actions > button { flex: 1; min-height: 2.75rem; }
+  .shr-card { min-height: 2.75rem; }
+}
+
+/* Touch targets — pointer type rather than viewport width, matching the console. */
+@media (pointer: coarse) {
+  .shr-search,
+  .shr-search input,
+  .shr-select { min-height: 2.75rem; }
   .shr-card { min-height: 2.75rem; }
 }
 
@@ -5649,7 +5831,7 @@ button.adm-tile:focus-visible {
   align-items: center;
   gap: 0.5rem;
   margin: 0 0 0.7rem;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.67rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -5704,7 +5886,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.95rem;
   font-weight: 650;
   text-transform: uppercase;
@@ -5736,7 +5918,7 @@ button.adm-tile:focus-visible {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.07em;
@@ -5807,7 +5989,7 @@ button.adm-tile:focus-visible {
 .set-nav__item[data-active="true"] {
   border-color: var(--set-rim);
   background: var(--set-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 620;
 }
 
@@ -5886,7 +6068,7 @@ button.adm-tile:focus-visible {
   flex-shrink: 0;
   border-radius: 0.72rem;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .set-panel__icon svg { width: 1.05rem; height: 1.05rem; }
@@ -6030,7 +6212,7 @@ button.adm-tile:focus-visible {
 .set-choice__item[data-active="true"] {
   border-color: var(--set-rim);
   background: var(--set-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .set-choice__item:focus-visible {
@@ -6094,6 +6276,11 @@ button.adm-tile:focus-visible {
   .set-id { width: 100%; }
   .set-panel__head { padding: 0.9rem 1rem; }
   .set-panel__body { padding: 1rem; }
+}
+
+/* Touch targets — pointer type rather than viewport width, matching the console. */
+@media (pointer: coarse) {
+  .set-nav__item { min-height: 2.75rem; }
 }
 
 .lite .set-page::before { display: none; }

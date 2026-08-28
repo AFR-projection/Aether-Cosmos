@@ -33,7 +33,7 @@ export default function MaintenancePage() {
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{message}</p>
         <Link
           href="/login"
-          className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-accent hover:underline"
+          className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-accent-ink hover:underline"
         >
           <Cloud className="h-4 w-4" /> Back to sign in
         </Link>

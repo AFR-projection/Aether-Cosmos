@@ -52,7 +52,7 @@ function Section({
     <section className="border-b border-border/40 px-4 py-4 last:border-b-0">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          <Icon className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+          <Icon className="h-3.5 w-3.5 text-accent-ink" aria-hidden="true" />
           {title}
         </h3>
         {action}
@@ -79,7 +79,7 @@ function Toggle({
       className={cn(
         "rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
         pressed
-          ? "border-accent/40 bg-accent/10 text-accent"
+          ? "border-accent/40 bg-accent/10 text-accent-ink"
           : "border-border/60 bg-surface text-muted-foreground hover:border-accent/30 hover:text-foreground"
       )}
     >
@@ -127,7 +127,7 @@ function Chip({
       className={cn(
         "max-w-full truncate rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors",
         active
-          ? "border-accent/50 bg-accent/15 text-accent"
+          ? "border-accent/50 bg-accent/15 text-accent-ink"
           : "border-border/50 bg-surface text-muted-foreground hover:border-accent/30 hover:text-foreground"
       )}
       title={token}
@@ -274,9 +274,9 @@ export function GraphControls({
           className="h-9 text-xs"
         />
         <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-          Prefix with <code className="text-accent">type:</code>{" "}
-          <code className="text-accent">kind:</code> <code className="text-accent">tag:</code>{" "}
-          <code className="text-accent">project:</code>, or <code className="text-accent">-</code>{" "}
+          Prefix with <code className="text-accent-ink">type:</code>{" "}
+          <code className="text-accent-ink">kind:</code> <code className="text-accent-ink">tag:</code>{" "}
+          <code className="text-accent-ink">project:</code>, or <code className="text-accent-ink">-</code>{" "}
           to exclude.
         </p>
         <div className="mt-3 flex flex-wrap gap-1">
@@ -301,7 +301,7 @@ export function GraphControls({
             <button
               type="button"
               onClick={onRestoreHidden}
-              className="shrink-0 text-[11px] font-medium text-accent transition-colors hover:text-foreground"
+              className="shrink-0 text-[11px] font-medium text-accent-ink transition-colors hover:text-foreground"
             >
               Restore
             </button>
@@ -338,7 +338,7 @@ export function GraphControls({
           explain. Say so instead of letting it look broken.
         */}
         {allTiersOff ? (
-          <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-warning/25 bg-warning/5 px-2 py-1.5 text-[10px] leading-relaxed text-warning">
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-warning/25 bg-warning/5 px-2 py-1.5 text-[10px] leading-relaxed text-warning-ink">
             <span>Every tier is off, so no edges are drawn.</span>
             <button
               type="button"
@@ -417,7 +417,7 @@ export function GraphControls({
                   type="button"
                   onClick={() => onGroupsChange(groups.filter((item) => item.id !== rule.id))}
                   aria-label={`Remove group ${index + 1}`}
-                  className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+                  className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger-ink"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
@@ -582,12 +582,12 @@ export function GraphControls({
         <Stat label="Loaded" value={`${model.nodes.length} / ${model.edges.length}`} />
         <div className="flex items-center justify-between gap-2">
           <span>Physics</span>
-          <span className={workerActive ? "text-success" : "text-warning"}>
+          <span className={workerActive ? "text-success-ink" : "text-warning-ink"}>
             {workerActive ? "worker thread" : "main thread"}
           </span>
         </div>
         {model.truncated.nodes || model.truncated.edges ? (
-          <p className="rounded-lg border border-warning/25 bg-warning/5 px-2 py-1.5 text-[10px] leading-relaxed text-warning">
+          <p className="rounded-lg border border-warning/25 bg-warning/5 px-2 py-1.5 text-[10px] leading-relaxed text-warning-ink">
             Snapshot truncated at the server limit — narrow the filter or lower the node limit to
             see a complete subgraph.
           </p>
@@ -610,12 +610,12 @@ export function GraphControls({
             <Stat
               label="Dropped (endpoint truncated)"
               value={model.edgeStats.dropped}
-              tone={model.edgeStats.dropped > 0 ? "text-warning" : undefined}
+              tone={model.edgeStats.dropped > 0 ? "text-warning-ink" : undefined}
             />
             <Stat
               label="Refused (dangling / self)"
               value={model.invalidEdges}
-              tone={model.invalidEdges > 0 ? "text-warning" : undefined}
+              tone={model.invalidEdges > 0 ? "text-warning-ink" : undefined}
             />
           </div>
         ) : null}

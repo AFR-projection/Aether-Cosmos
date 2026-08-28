@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "lint:contrast": "node scripts/check-contrast.mjs",
     "test": "vitest run",
     "test:api-keys": "tsx scripts/test-api-key-flow.ts",
     "test:brain": "tsx scripts/test-brain-mcp-flow.ts",

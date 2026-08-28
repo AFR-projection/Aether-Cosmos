@@ -35,10 +35,10 @@ export function BrainSelector({
         aria-haspopup="listbox"
         className="flex items-center gap-2 rounded-xl border border-border/60 bg-surface px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-accent/30 hover:bg-surface-hover"
       >
-        <BrainIcon className="h-4 w-4 text-accent" aria-hidden="true" />
+        <BrainIcon className="h-4 w-4 text-accent-ink" aria-hidden="true" />
         <span className="max-w-[12rem] truncate">{brain.name}</span>
         {brain.status === "archived" && (
-          <span className="rounded-md bg-warning/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-warning">
+          <span className="rounded-md bg-warning/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-warning-ink">
             archived
           </span>
         )}
@@ -81,7 +81,7 @@ export function BrainSelector({
                   <span className="flex items-center gap-2 text-sm font-medium text-foreground">
                     {option.name}
                     {option.isDefault && (
-                      <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-accent">
+                      <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-accent-ink">
                         default
                       </span>
                     )}

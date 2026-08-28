@@ -87,7 +87,7 @@ function CopyButton({
       }}
     >
       {copied ? (
-        <Check className="h-4 w-4 text-success" aria-hidden="true" />
+        <Check className="h-4 w-4 text-success-ink" aria-hidden="true" />
       ) : (
         <Copy className="h-4 w-4" aria-hidden="true" />
       )}
@@ -279,7 +279,7 @@ export default function BrainAgentsPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Radio className="h-4 w-4 text-accent" aria-hidden="true" />
+                <Radio className="h-4 w-4 text-accent-ink" aria-hidden="true" />
                 Live fleet
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">

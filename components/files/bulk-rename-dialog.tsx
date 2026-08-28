@@ -192,7 +192,7 @@ export function BulkRenameDialog({ files, onCancel, onConfirm }: BulkRenameDialo
         <p className="mb-2 text-xs font-medium text-muted-foreground">
           Preview · {changed.length} of {files.length} will change
           {blocked > 0 && (
-            <span className="text-danger">
+            <span className="text-danger-ink">
               {" "}
               · {blocked} skipped, name would be empty
             </span>
@@ -205,14 +205,14 @@ export function BulkRenameDialog({ files, onCancel, onConfirm }: BulkRenameDialo
               <ArrowRight
                 className={cn(
                   "h-3 w-3 shrink-0",
-                  p.emptied ? "text-danger" : p.willChange ? "text-accent" : "text-muted-foreground"
+                  p.emptied ? "text-danger-ink" : p.willChange ? "text-accent-ink" : "text-muted-foreground"
                 )}
                 aria-hidden="true"
               />
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate font-medium",
-                  p.emptied ? "text-danger" : p.willChange ? "text-foreground" : "text-muted-foreground"
+                  p.emptied ? "text-danger-ink" : p.willChange ? "text-foreground" : "text-muted-foreground"
                 )}
               >
                 {p.to}

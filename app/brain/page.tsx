@@ -113,7 +113,7 @@ export default function BrainOverviewPage() {
               action={
                 <Link
                   href="/brain/memories"
-                  className="text-xs font-medium text-accent hover:underline"
+                  className="text-xs font-medium text-accent-ink hover:underline"
                 >
                   View all
                 </Link>
@@ -148,7 +148,7 @@ export default function BrainOverviewPage() {
                 action={
                   <Link
                     href="/brain/activity"
-                    className="text-xs font-medium text-accent hover:underline"
+                    className="text-xs font-medium text-accent-ink hover:underline"
                   >
                     Full log
                   </Link>
@@ -161,7 +161,7 @@ export default function BrainOverviewPage() {
                         <span
                           className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg ${
                             entry.principalType === "agent"
-                              ? "bg-accent/10 text-accent"
+                              ? "bg-accent/10 text-accent-ink"
                               : "bg-muted/40 text-muted-foreground"
                           }`}
                           aria-hidden="true"

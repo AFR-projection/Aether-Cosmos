@@ -199,13 +199,13 @@ export default function UserDetailPage({
             <span className={cn("h-1.5 w-1.5 rounded-full", user.status === "active" ? "bg-emerald-500" : "bg-red-500")} />
             {user.status}
           </span>
-          <span className="rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent uppercase">
+          <span className="rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent-ink uppercase">
             {user.role}
           </span>
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 rounded-lg text-muted-foreground/60 hover:text-accent hover:bg-accent/10"
+            className="h-9 w-9 rounded-lg text-muted-foreground/60 hover:text-accent-ink hover:bg-accent/10"
             title={editing ? "Cancel edit" : "Edit User"}
             onClick={() => {
               if (editing) {
@@ -338,7 +338,7 @@ export default function UserDetailPage({
                 {files.slice(0, 20).map((file) => (
                   <div key={file.id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-accent/5">
                     <div className="flex items-center gap-2 min-w-0">
-                      <FileText className="h-4 w-4 shrink-0 text-accent" />
+                      <FileText className="h-4 w-4 shrink-0 text-accent-ink" />
                       <span className="truncate text-sm">{file.name}</span>
                       {file.isFavorite && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                     </div>
@@ -376,7 +376,7 @@ export default function UserDetailPage({
                   return (
                     <div key={log.id} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent/5">
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-                        <Icon className="h-3.5 w-3.5 text-accent" />
+                        <Icon className="h-3.5 w-3.5 text-accent-ink" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <span className="text-sm capitalize">{log.action.replace(/_/g, " ")}</span>
@@ -450,7 +450,7 @@ export default function UserDetailPage({
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-                        <Icon className="h-4 w-4 text-accent" />
+                        <Icon className="h-4 w-4 text-accent-ink" />
                       </div>
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
@@ -612,7 +612,7 @@ export default function UserDetailPage({
                 </label>
 
                 {pwMsg && pwMsg.type === "error" && (
-                  <p className="flex items-center gap-2 text-sm text-danger">
+                  <p className="flex items-center gap-2 text-sm text-danger-ink">
                     <AlertCircle className="h-4 w-4" /> {pwMsg.text}
                   </p>
                 )}

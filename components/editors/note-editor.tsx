@@ -683,7 +683,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
                 )}
               >
                 <div className="h-full w-[220px] overflow-y-auto p-4">
-                  <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-accent">
+                  <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-accent-ink">
                     <Hash aria-hidden className="h-3 w-3" /> Outline
                   </p>
                   {outline.length === 0 ? (
@@ -767,7 +767,7 @@ export function NoteEditor({ file, onClose }: NoteEditorProps) {
                 aria-describedby={`${titleId}-confirm-body`}
               >
                 <p className="note-confirm__title" id={`${titleId}-confirm`}>
-                  <AlertTriangle aria-hidden className="h-4 w-4 text-warning" />
+                  <AlertTriangle aria-hidden className="h-4 w-4 text-warning-ink" />
                   You have unsaved changes
                 </p>
                 <p className="note-confirm__body" id={`${titleId}-confirm-body`}>

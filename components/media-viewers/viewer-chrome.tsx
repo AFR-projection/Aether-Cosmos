@@ -11,11 +11,11 @@ import { cn } from "@/lib/utils";
 
 const TONE = {
   neutral: "text-muted-foreground",
-  accent: "text-accent",
-  success: "text-success",
-  warning: "text-warning",
-  danger: "text-danger",
-  info: "text-info",
+  accent: "text-accent-ink",
+  success: "text-success-ink",
+  warning: "text-warning-ink",
+  danger: "text-danger-ink",
+  info: "text-info-ink",
 } as const;
 
 export type ViewerTone = keyof typeof TONE;

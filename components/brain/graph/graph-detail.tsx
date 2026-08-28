@@ -191,7 +191,7 @@ export function GraphDetail({
         {href ? (
           <Link
             href={href}
-            className="flex items-center gap-1 text-[11px] font-medium text-accent transition-opacity hover:opacity-80"
+            className="flex items-center gap-1 text-[11px] font-medium text-accent-ink transition-opacity hover:opacity-80"
           >
             Open memory
             <ArrowUpRight className="h-3 w-3" aria-hidden="true" />

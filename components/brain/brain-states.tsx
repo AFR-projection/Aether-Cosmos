@@ -31,7 +31,7 @@ export function BrainErrorState({
       className="rounded-[1.35rem] border border-danger/25 bg-danger/5 p-6 text-sm text-foreground"
     >
       <p className="flex items-center gap-2 font-medium">
-        <TriangleAlert className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+        <TriangleAlert className="h-4 w-4 shrink-0 text-danger-ink" aria-hidden="true" />
         {message}
       </p>
       {onRetry && (
@@ -63,7 +63,7 @@ export function BrainPanel({
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
           <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-accent/25 bg-accent/10">
-            <Icon className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+            <Icon className="h-3.5 w-3.5 text-accent-ink" aria-hidden="true" />
           </span>
           <span className="truncate">{title}</span>
         </h2>

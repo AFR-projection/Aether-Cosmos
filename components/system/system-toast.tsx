@@ -31,31 +31,31 @@ const toneStyles: Record<
   info: {
     icon: Info,
     ring: "border-info/25",
-    accent: "text-info",
+    accent: "text-info-ink",
     bar: "from-info to-info/60",
   },
   success: {
     icon: CheckCircle2,
     ring: "border-success/25",
-    accent: "text-success",
+    accent: "text-success-ink",
     bar: "from-success to-success/60",
   },
   warning: {
     icon: AlertTriangle,
     ring: "border-warning/30",
-    accent: "text-warning",
+    accent: "text-warning-ink",
     bar: "from-warning to-warning/60",
   },
   error: {
     icon: XCircle,
     ring: "border-danger/30",
-    accent: "text-danger",
+    accent: "text-danger-ink",
     bar: "from-danger to-danger/60",
   },
   system: {
     icon: Sparkles,
     ring: "border-accent/25",
-    accent: "text-accent",
+    accent: "text-accent-ink",
     bar: "from-accent to-accent-light",
   },
 };

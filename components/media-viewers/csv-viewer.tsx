@@ -166,7 +166,7 @@ export function CsvViewer({ src, fileName }: CsvViewerProps) {
           onClick={() => void handleCopy()}
         >
           {copied ? (
-            <Check className="h-4 w-4 text-success" aria-hidden="true" />
+            <Check className="h-4 w-4 text-success-ink" aria-hidden="true" />
           ) : (
             <Copy className="h-4 w-4" aria-hidden="true" />
           )}

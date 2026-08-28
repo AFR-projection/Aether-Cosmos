@@ -391,10 +391,10 @@ export function TextViewer({
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/30 bg-muted/20 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <FileText className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden="true" />
+          <FileText className="h-3.5 w-3.5 shrink-0 text-accent-ink" aria-hidden="true" />
           <Badge tone="accent">{language}</Badge>
           <span className="shrink-0">{lineLabel} lines</span>
-          <span className={cn("shrink-0", draftOverLimit && editing && "text-danger")}>
+          <span className={cn("shrink-0", draftOverLimit && editing && "text-danger-ink")}>
             {sizeLabel}
           </span>
           {!editing && loaded.truncated && (
@@ -430,7 +430,7 @@ export function TextViewer({
             title="Copy contents"
           >
             {copied ? (
-              <Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+              <Check className="h-3.5 w-3.5 text-success-ink" aria-hidden="true" />
             ) : (
               <Copy className="h-3.5 w-3.5" aria-hidden="true" />
             )}
@@ -470,7 +470,7 @@ export function TextViewer({
       </div>
 
       {showSizeWarning && (
-        <div className="flex items-start gap-2 border-b border-warning/10 bg-warning/5 px-4 py-1.5 text-xs text-warning">
+        <div className="flex items-start gap-2 border-b border-warning/10 bg-warning/5 px-4 py-1.5 text-xs text-warning-ink">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
           <span>
             This file is {formatKb(loaded.totalBytes)}.
@@ -486,7 +486,7 @@ export function TextViewer({
       {saveError && (
         <div
           role="alert"
-          className="flex items-start gap-2 border-b border-danger/15 bg-danger/5 px-4 py-1.5 text-xs text-danger"
+          className="flex items-start gap-2 border-b border-danger/15 bg-danger/5 px-4 py-1.5 text-xs text-danger-ink"
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
           <span>{saveError}</span>
@@ -494,7 +494,7 @@ export function TextViewer({
       )}
 
       {confirmDiscard && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/15 bg-warning/5 px-4 py-2 text-xs text-warning">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/15 bg-warning/5 px-4 py-2 text-xs text-warning-ink">
           <span>This file has unsaved changes.</span>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => setConfirmDiscard(false)}>

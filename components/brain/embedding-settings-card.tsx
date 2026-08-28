@@ -161,7 +161,7 @@ export function EmbeddingSettingsCard() {
           Loading provider settings…
         </div>
       ) : configQuery.isError ? (
-        <p className="text-sm text-danger">
+        <p className="text-sm text-danger-ink">
           {configQuery.error instanceof Error
             ? configQuery.error.message
             : "Could not load embedding settings"}

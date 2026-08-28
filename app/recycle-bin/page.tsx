@@ -358,7 +358,7 @@ export default function RecycleBinPage() {
           className="flex flex-col items-center justify-center py-24 text-muted-foreground"
         >
           <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/5 border border-accent/10">
-            <Trash2 className="h-10 w-10 text-accent/40" />
+            <Trash2 className="h-10 w-10 text-accent-ink/40" />
           </div>
           <p className="text-lg font-semibold">Recycle bin is empty</p>
           <p className="mt-1 text-sm text-muted-foreground/70">Deleted files and folders will appear here</p>
@@ -417,7 +417,7 @@ export default function RecycleBinPage() {
                               className={cn(
                                 "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all",
                                 isSelected
-                                  ? "border-accent bg-accent text-white"
+                                  ? "border-accent bg-accent text-on-accent"
                                   : "border-border/60 text-transparent hover:border-accent/50 group-hover/item:border-accent/30"
                               )}
                             >
@@ -442,7 +442,7 @@ export default function RecycleBinPage() {
                               <div className="flex items-center gap-2">
                                 <p className="text-sm font-semibold truncate">{item.name}</p>
                                 {item._type === "file" && item.isNote && (
-                                  <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[9px] font-medium text-accent">Note</span>
+                                  <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[9px] font-medium text-accent-ink">Note</span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground/60">
@@ -487,7 +487,7 @@ export default function RecycleBinPage() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-9 gap-1.5 text-danger hover:bg-danger/10"
+                                className="h-9 gap-1.5 text-danger-ink hover:bg-danger/10"
                                 disabled={actionLoading === item.id}
                                 onClick={() => setConfirmDelete(item.id)}
                               >
@@ -578,7 +578,7 @@ function ConfirmModal({
             "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl",
             danger ? "bg-danger/10" : "bg-accent/10"
           )}>
-            <Icon className={cn("h-6 w-6", danger ? "text-danger" : "text-accent")} />
+            <Icon className={cn("h-6 w-6", danger ? "text-danger-ink" : "text-accent-ink")} />
           </div>
           <div>
             <h3 className="text-lg font-semibold">{title}</h3>

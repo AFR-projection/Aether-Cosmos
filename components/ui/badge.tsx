@@ -10,11 +10,11 @@ const badgeVariants = cva(
     variants: {
       tone: {
         neutral: "border-border bg-muted text-muted-foreground",
-        accent: "border-accent/25 bg-accent/10 text-accent",
-        success: "border-success/25 bg-success/10 text-success",
-        warning: "border-warning/25 bg-warning/10 text-warning",
-        danger: "border-danger/25 bg-danger/10 text-danger",
-        info: "border-info/25 bg-info/10 text-info",
+        accent: "border-accent/25 bg-accent/10 text-accent-ink",
+        success: "border-success/25 bg-success/10 text-success-ink",
+        warning: "border-warning/25 bg-warning/10 text-warning-ink",
+        danger: "border-danger/25 bg-danger/10 text-danger-ink",
+        info: "border-info/25 bg-info/10 text-info-ink",
       },
       /* Both sizes sit at the 12px floor — the step between them is padding, not
          type size, so a badge never shrinks its label below what the rest of the

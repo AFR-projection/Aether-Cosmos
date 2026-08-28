@@ -11,7 +11,8 @@
 
 import { db } from "../db";
 import { eq, and, sql, count } from "drizzle-orm";
-import { brains, memories, users, mailSenders } from "../db/schema";
+import { brains, memories, mailSenders } from "../db/schema";
+import { getRedis } from "../cache/redis";
 
 export type HealthStatus = "healthy" | "degraded" | "critical";
 
@@ -35,7 +36,7 @@ export type HealthReport = {
 export async function checkDatabase(): Promise<HealthCheckResult> {
   const start = Date.now();
   try {
-    const result = await db.execute(sql`SELECT 1 as ok`);
+    await db.execute(sql`SELECT 1 as ok`);
     const latency = Date.now() - start;
 
     if (latency > 5000) {
@@ -67,6 +68,10 @@ export async function checkDatabase(): Promise<HealthCheckResult> {
 
 /**
  * Redis connectivity (if not disabled).
+ *
+ * Uses the app's shared ioredis client so this check exercises the same
+ * connection the rest of the platform relies on. The client is a singleton —
+ * never disconnect it here.
  */
 export async function checkRedis(): Promise<HealthCheckResult> {
   if (process.env.REDIS_DISABLED === "true") {
@@ -78,16 +83,24 @@ export async function checkRedis(): Promise<HealthCheckResult> {
     };
   }
 
-  try {
-    const { createClient } = await import("redis");
-    const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-    const client = createClient({ url: redisUrl });
+  const client = getRedis();
+  if (!client) {
+    return {
+      name: "redis",
+      status: "critical",
+      message: "Redis client unavailable (connection previously failed)",
+      timestamp: new Date(),
+    };
+  }
 
-    await client.connect();
+  try {
+    if (client.status !== "ready") {
+      await client.connect();
+    }
+
     const start = Date.now();
     await client.ping();
     const latency = Date.now() - start;
-    await client.disconnect();
 
     if (latency > 1000) {
       return {
@@ -292,7 +305,7 @@ export async function checkSystemResources(): Promise<HealthCheckResult> {
       details: { freeMemMB, totalMemMB, usedPercent },
       timestamp: new Date(),
     };
-  } catch (error) {
+  } catch {
     return {
       name: "resources",
       status: "healthy",

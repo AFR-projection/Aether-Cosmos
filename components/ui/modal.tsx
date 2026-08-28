@@ -37,10 +37,10 @@ const SIZE = {
 
 const TONE = {
   neutral: "bg-muted text-muted-foreground",
-  accent: "bg-accent/10 text-accent",
-  success: "bg-success/10 text-success",
-  warning: "bg-warning/10 text-warning",
-  danger: "bg-danger/10 text-danger",
+  accent: "bg-accent/10 text-accent-ink",
+  success: "bg-success/10 text-success-ink",
+  warning: "bg-warning/10 text-warning-ink",
+  danger: "bg-danger/10 text-danger-ink",
 } as const;
 
 const FOCUSABLE = [

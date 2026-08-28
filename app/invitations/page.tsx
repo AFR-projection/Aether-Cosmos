@@ -50,7 +50,7 @@ export default function InvitationsPage() {
   if (isLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-accent" />
+        <Loader2 className="h-6 w-6 animate-spin text-accent-ink" />
       </div>
     );
   }
@@ -63,7 +63,7 @@ export default function InvitationsPage() {
         <button
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="text-sm text-accent underline underline-offset-2 hover:opacity-80"
+          className="text-sm text-accent-ink underline underline-offset-2 hover:opacity-80"
         >
           Try again
         </button>
@@ -78,7 +78,7 @@ export default function InvitationsPage() {
       <header className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/10">
-            <Mail className="h-4 w-4 text-accent" />
+            <Mail className="h-4 w-4 text-accent-ink" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Folder Invitations</h1>
         </div>
@@ -115,7 +115,7 @@ export default function InvitationsPage() {
                 )}
               >
                 <div className="mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent/20 to-accent/5">
-                  <FolderOpen className="h-6 w-6 text-accent" />
+                  <FolderOpen className="h-6 w-6 text-accent-ink" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start gap-2 mb-1">
@@ -126,7 +126,7 @@ export default function InvitationsPage() {
                       className={cn(
                         "flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold",
                         inv.role === "edit"
-                          ? "bg-accent/10 text-accent"
+                          ? "bg-accent/10 text-accent-ink"
                           : "bg-muted text-muted-foreground"
                       )}
                     >

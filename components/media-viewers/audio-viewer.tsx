@@ -140,7 +140,7 @@ export function AudioViewer({ src, fileName }: AudioViewerProps) {
 
       <div className="w-full max-w-md rounded-2xl border border-border/60 bg-background/40 p-6">
         <div className="flex items-center gap-3">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-accent/10 text-accent-ink">
             {loading ? <Spinner size="sm" /> : <Music className="h-5 w-5" aria-hidden="true" />}
           </span>
           <div className="min-w-0">

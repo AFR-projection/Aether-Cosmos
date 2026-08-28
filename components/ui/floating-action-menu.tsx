@@ -248,9 +248,9 @@ export function FloatingActionMenu({
                     className={cn(
                       "flex min-h-10 w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-sm font-medium transition-colors focus-visible:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
                       item.danger
-                        ? "text-danger hover:bg-danger/10"
+                        ? "text-danger-ink hover:bg-danger/10"
                         : item.checked
-                          ? "text-accent hover:bg-accent/10"
+                          ? "text-accent-ink hover:bg-accent/10"
                           : "text-foreground hover:bg-accent/10"
                     )}
                   >

@@ -84,7 +84,7 @@ export function ConfirmDialog({
             <div className="flex items-start justify-between gap-3 border-b border-border/40 px-6 py-4">
               <div className="flex items-center gap-3">
                 {options.danger && (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-danger/10 text-danger">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-danger/10 text-danger-ink">
                     <AlertTriangle className="h-4 w-4" />
                   </div>
                 )}

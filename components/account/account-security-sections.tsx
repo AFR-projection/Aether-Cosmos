@@ -152,7 +152,7 @@ export function PasswordSection() {
           animate={{ opacity: 1, y: 0 }}
           className={cn(
             "rounded-lg px-4 py-2 text-sm",
-            message.type === "success" ? "bg-emerald-500/10 text-emerald-400" : "bg-danger/10 text-danger"
+            message.type === "success" ? "bg-emerald-500/10 text-emerald-400" : "bg-danger/10 text-danger-ink"
           )}
         >
           {message.type === "success" && <Check className="mb-0.5 mr-1.5 inline h-3.5 w-3.5" />}
@@ -298,7 +298,7 @@ export function TwoFactorSection({ enabled: initiallyEnabled }: { enabled: boole
           </div>
           <a
             href={setup.otpauthUrl}
-            className="block text-xs text-accent hover:underline break-all"
+            className="block text-xs text-accent-ink hover:underline break-all"
           >
             Open otpauth link
           </a>
@@ -515,7 +515,7 @@ export function StepCodeSection() {
             "rounded-lg px-4 py-2 text-sm",
             message.type === "success"
               ? "bg-emerald-500/10 text-emerald-400"
-              : "bg-danger/10 text-danger"
+              : "bg-danger/10 text-danger-ink"
           )}
         >
           {message.type === "success" && <Check className="mb-0.5 mr-1.5 inline h-3.5 w-3.5" />}
@@ -596,7 +596,7 @@ export function StepCodeSection() {
 
       {mode === "remove" && (
         <div className="space-y-3 rounded-xl border border-danger/25 bg-danger/[0.04] p-4">
-          <p className="text-sm font-medium text-danger">Remove your 2-Step Code?</p>
+          <p className="text-sm font-medium text-danger-ink">Remove your 2-Step Code?</p>
           <p className="text-xs text-muted-foreground">
             Sign-in will drop back to password and authenticator only.
           </p>

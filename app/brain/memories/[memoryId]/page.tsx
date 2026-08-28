@@ -243,7 +243,7 @@ export default function MemoryDetailPage() {
                 </Detail>
                 <Detail label="Project">
                   {project ? (
-                    <Link href="/brain/projects" className="text-accent hover:underline">
+                    <Link href="/brain/projects" className="text-accent-ink hover:underline">
                       {project.name}
                     </Link>
                   ) : (

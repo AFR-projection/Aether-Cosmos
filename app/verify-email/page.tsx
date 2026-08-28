@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   ExternalLink,
   CheckCircle2,
+  Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -118,7 +119,7 @@ function VerifyEmailContent() {
         <div className="rounded-2xl border border-border/60 bg-surface/70 px-8 py-10 shadow-xl backdrop-blur-2xl">
           <div className="mb-8 text-center">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent shadow-lg shadow-accent/20">
-              <Mail className="h-8 w-8 text-white" />
+              <Mail className="h-8 w-8 text-on-accent" />
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-gradient">Verify your email</h1>
             <p className="mt-2 text-sm text-muted-foreground/80">
@@ -191,7 +192,7 @@ function VerifyEmailContent() {
                 size="sm"
                 onClick={handleResend}
                 disabled={waitTimer > 0 || resending}
-                className="h-auto px-1.5 py-0.5 text-accent hover:text-accent/80"
+                className="h-auto px-1.5 py-0.5 text-accent-ink hover:text-foreground"
               >
                 {resending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -265,9 +266,12 @@ function VerifyEmailContent() {
                   </div>
                 </li>
               </ol>
-              <p className="mt-3 rounded-lg bg-amber-100/70 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-100/90">
-                💡 Found it in Spam? Open the email and tap{" "}
-                <strong>&ldquo;Not spam&rdquo;</strong> so future codes reach your inbox.
+              <p className="mt-3 flex gap-2 rounded-lg bg-amber-100/70 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-100/90">
+                <Lightbulb aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Found it in Spam? Open the email and tap{" "}
+                  <strong>&ldquo;Not spam&rdquo;</strong> so future codes reach your inbox.
+                </span>
               </p>
             </motion.div>
           )}

@@ -76,7 +76,7 @@ export function LeaveSharedFolderButton({
         size="sm"
         onClick={() => void leave()}
         disabled={leaving}
-        className="h-9 gap-1.5 px-2.5 text-muted-foreground hover:text-danger"
+        className="h-9 gap-1.5 px-2.5 text-muted-foreground hover:text-danger-ink"
         title="Leave shared folder"
         // The label collapses below `sm`, so without this the button is icon-only
         // there and a screen reader announces nothing but "button".

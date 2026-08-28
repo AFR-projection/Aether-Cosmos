@@ -82,7 +82,7 @@ function LinkRow({
         {link.targetType === "memory" ? (
           <Link
             href={`/brain/memories/${link.nodeId}`}
-            className="block truncate text-xs font-medium text-foreground hover:text-accent hover:underline"
+            className="block truncate text-xs font-medium text-foreground hover:text-accent-ink hover:underline"
           >
             {link.label}
           </Link>
@@ -205,7 +205,7 @@ export function MemoryLinksPanel({
           Links could not be loaded.{" "}
           <button
             type="button"
-            className="text-accent hover:underline"
+            className="text-accent-ink hover:underline"
             onClick={() => void links.refetch()}
           >
             Try again
@@ -375,7 +375,7 @@ function AddLinkForm({
             className={cn(
               "rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
               mode === option
-                ? "bg-accent/10 text-accent"
+                ? "bg-accent/10 text-accent-ink"
                 : "text-muted-foreground hover:bg-accent/5 hover:text-foreground"
             )}
           >
@@ -474,7 +474,7 @@ function AddLinkForm({
             placeholder="e.g., supersedes, mentions, implements"
             className={cn(typeError && "border-danger")}
           />
-          {typeError && <p className="mt-1 text-xs text-danger">{typeError}</p>}
+          {typeError && <p className="mt-1 text-xs text-danger-ink">{typeError}</p>}
         </div>
       )}
 

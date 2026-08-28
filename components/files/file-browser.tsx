@@ -166,11 +166,11 @@ const ROLE_BADGE: Record<BrowserCaps["role"], { label: string; className: string
   owner: null,
   view: {
     label: "View only",
-    className: "border-warning/25 bg-warning/10 text-warning",
+    className: "border-warning/25 bg-warning/10 text-warning-ink",
   },
   edit: {
     label: "Can edit",
-    className: "border-success/25 bg-success/10 text-success",
+    className: "border-success/25 bg-success/10 text-success-ink",
   },
 };
 
@@ -1506,8 +1506,8 @@ export function FileBrowser({
         <div className="absolute inset-0 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/5 backdrop-blur-sm">
           <div className="text-center">
             <div className="mb-2 flex items-center justify-center gap-3">
-              <Upload aria-hidden className="h-10 w-10 text-accent" />
-              <FolderUp aria-hidden className="h-10 w-10 text-accent/60" />
+              <Upload aria-hidden className="h-10 w-10 text-accent-ink" />
+              <FolderUp aria-hidden className="h-10 w-10 text-accent-ink/60" />
             </div>
             <p className="text-lg font-medium">Drop files or folders to upload</p>
             <p className="mt-1 text-sm text-muted-foreground">Files and folder structures will be preserved</p>
@@ -1523,7 +1523,7 @@ export function FileBrowser({
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
             animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
-            className="mb-4 flex items-center gap-2.5 rounded-xl border border-danger/25 bg-danger/10 px-4 py-2.5 text-sm text-danger"
+            className="mb-4 flex items-center gap-2.5 rounded-xl border border-danger/25 bg-danger/10 px-4 py-2.5 text-sm text-danger-ink"
           >
             <AlertCircle aria-hidden className="h-4 w-4 shrink-0" />
             {error}
@@ -1562,7 +1562,7 @@ export function FileBrowser({
 
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-accent/20 bg-accent/10">
-              <HeadingIcon aria-hidden className="h-5 w-5 text-accent" />
+              <HeadingIcon aria-hidden className="h-5 w-5 text-accent-ink" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -1757,7 +1757,7 @@ export function FileBrowser({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className={cn(CONTROL_H, "cursor-pointer gap-1.5 border border-accent/25 bg-accent/5 px-2.5 text-accent hover:bg-accent/10")}
+                    className={cn(CONTROL_H, "cursor-pointer gap-1.5 border border-accent/25 bg-accent/5 px-2.5 text-accent-ink hover:bg-accent/10")}
                     onClick={pasteHere}
                     title={`Paste ${clipboard.count} item${clipboard.count !== 1 ? "s" : ""} (${clipboard.mode === "cut" ? "move" : "copy"})`}
                   >
@@ -1882,7 +1882,7 @@ export function FileBrowser({
                     className={cn(
                       "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
                       active
-                        ? "border-accent/40 bg-accent/12 text-accent"
+                        ? "border-accent/40 bg-accent/12 text-accent-ink"
                         : "border-transparent bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
@@ -2144,7 +2144,7 @@ function DragPreview({
       <Icon aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="truncate text-sm font-medium text-foreground">{label}</span>
       {count > 1 && (
-        <span className="shrink-0 rounded-md bg-accent px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-white">
+        <span className="shrink-0 rounded-md bg-accent px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-on-accent">
           {count}
         </span>
       )}

@@ -140,7 +140,7 @@ function SidebarInner({
       {/* Logo */}
       <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border/50 px-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent glow-accent">
-          <Cloud className="h-5 w-5 text-white" />
+          <Cloud className="h-5 w-5 text-on-accent" />
         </div>
         {!isMobile ? (
           <motion.div
@@ -195,7 +195,7 @@ function SidebarInner({
                 onClick={handleNav}
                 className={cn(
                   "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 min-h-[40px]",
-                  active ? "text-accent" : "text-muted-foreground hover:text-foreground"
+                  active ? "text-accent-ink" : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 {active && (
@@ -205,7 +205,7 @@ function SidebarInner({
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
-                <Icon className={cn("relative z-10 h-4 w-4 shrink-0", active && "text-accent")} />
+                <Icon className={cn("relative z-10 h-4 w-4 shrink-0", active && "text-accent-ink")} />
                 {showLabels && <span className="relative z-10">{label}</span>}
                 {active && showLabels && (
                   <motion.div
@@ -230,7 +230,7 @@ function SidebarInner({
               onClick={handleNav}
               className={cn(
                 "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 min-h-[40px]",
-                pathname === "/settings" ? "text-accent" : "text-muted-foreground hover:text-foreground"
+                pathname === "/settings" ? "text-accent-ink" : "text-muted-foreground hover:text-foreground"
               )}
             >
               {pathname === "/settings" && (
@@ -240,7 +240,7 @@ function SidebarInner({
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <Settings className={cn("relative z-10 h-4 w-4 shrink-0", pathname === "/settings" && "text-accent")} />
+              <Settings className={cn("relative z-10 h-4 w-4 shrink-0", pathname === "/settings" && "text-accent-ink")} />
               {showLabels && <span className="relative z-10">Settings</span>}
             </Link>
           </motion.div>
@@ -257,7 +257,7 @@ function SidebarInner({
               onClick={handleNav}
               className={cn(
                 "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 min-h-[40px]",
-                pathname.startsWith("/admin") ? "text-accent" : "text-muted-foreground hover:text-foreground"
+                pathname.startsWith("/admin") ? "text-accent-ink" : "text-muted-foreground hover:text-foreground"
               )}
             >
               {pathname.startsWith("/admin") && (
@@ -267,7 +267,7 @@ function SidebarInner({
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <Shield className={cn("relative z-10 h-4 w-4 shrink-0", pathname.startsWith("/admin") && "text-accent")} />
+              <Shield className={cn("relative z-10 h-4 w-4 shrink-0", pathname.startsWith("/admin") && "text-accent-ink")} />
               {showLabels && <span className="relative z-10">Admin</span>}
             </Link>
           </motion.div>
@@ -345,7 +345,7 @@ function SidebarInner({
           <Button
             variant="ghost"
             size="sm"
-            className="ml-auto h-9 gap-1.5 rounded-lg text-muted-foreground hover:text-danger hover:bg-danger/10"
+            className="ml-auto h-9 gap-1.5 rounded-lg text-muted-foreground hover:text-danger-ink hover:bg-danger/10"
             onClick={handleLogout}
             disabled={loggingOut}
           >

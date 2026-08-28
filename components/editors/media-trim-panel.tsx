@@ -345,7 +345,7 @@ export default function MediaTrimPanel({
           </div>
 
           {container === null ? (
-            <p className="mt-2 rounded-lg border border-warning/25 bg-warning/5 px-2.5 py-2 text-[11px] leading-relaxed text-warning">
+            <p className="mt-2 rounded-lg border border-warning/25 bg-warning/5 px-2.5 py-2 text-[11px] leading-relaxed text-warning-ink">
               A trim copies the streams into the same kind of container, and this format has
               none to copy into. Convert it first, then trim the copy.
             </p>
@@ -427,11 +427,11 @@ export default function MediaTrimPanel({
               {audioQueued ? "Audio queued" : "Extract audio"}
             </Button>
             {audioError ? (
-              <p role="alert" className="mt-2 text-[11px] leading-relaxed text-danger">
+              <p role="alert" className="mt-2 text-[11px] leading-relaxed text-danger-ink">
                 {audioError}
               </p>
             ) : audioQueued ? (
-              <p role="status" className="mt-2 text-[11px] leading-relaxed text-success">
+              <p role="status" className="mt-2 text-[11px] leading-relaxed text-success-ink">
                 Being extracted in the background. Refresh the folder in a moment to see it.
               </p>
             ) : (
@@ -460,16 +460,16 @@ export default function MediaTrimPanel({
           </dl>
 
           {error ? (
-            <p role="alert" className="text-[11px] leading-relaxed text-danger">
+            <p role="alert" className="text-[11px] leading-relaxed text-danger-ink">
               {error}
             </p>
           ) : queued ? (
-            <p role="status" className="text-[11px] leading-relaxed text-success">
+            <p role="status" className="text-[11px] leading-relaxed text-success-ink">
               The cut is running in the background. Reopen the preview in a moment to see the
               result.
             </p>
           ) : dirty && invalid ? (
-            <p role="status" className="text-[11px] leading-relaxed text-warning">
+            <p role="status" className="text-[11px] leading-relaxed text-warning-ink">
               {invalid}
             </p>
           ) : null}

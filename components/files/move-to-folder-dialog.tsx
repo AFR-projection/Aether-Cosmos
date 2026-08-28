@@ -97,7 +97,7 @@ export function MoveToFolderDialog({
           {/* Says why "Move here" is refused, rather than leaving a dead button. */}
           <p className="min-w-0 truncate text-xs text-muted-foreground">
             {destinationBlocked ? (
-              <span className="text-warning">Already in {current.name}</span>
+              <span className="text-warning-ink">Already in {current.name}</span>
             ) : (
               <>
                 Into <span className="font-medium text-foreground">{current.name}</span>
@@ -158,7 +158,7 @@ export function MoveToFolderDialog({
           </div>
         ) : error ? (
           <div className="flex h-32 flex-col items-center justify-center px-6 text-center">
-            <TriangleAlert className="h-7 w-7 text-danger" aria-hidden="true" />
+            <TriangleAlert className="h-7 w-7 text-danger-ink" aria-hidden="true" />
             <p className="mt-2 text-xs font-medium" role="alert">
               {error}
             </p>
@@ -201,7 +201,7 @@ export function MoveToFolderDialog({
                     )}
                   >
                     <FolderIcon
-                      className={cn("h-4 w-4 shrink-0", isSource ? "text-muted-foreground" : "text-accent")}
+                      className={cn("h-4 w-4 shrink-0", isSource ? "text-muted-foreground" : "text-accent-ink")}
                       aria-hidden="true"
                     />
                     <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>

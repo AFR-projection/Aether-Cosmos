@@ -154,8 +154,8 @@ export function FolderInviteDialog({ folderId, folderName, onClose }: FolderInvi
           role="status"
           className={
             notice.tone === "success"
-              ? "mt-3 flex items-start gap-1.5 text-xs text-success"
-              : "mt-3 flex items-start gap-1.5 text-xs text-danger"
+              ? "mt-3 flex items-start gap-1.5 text-xs text-success-ink"
+              : "mt-3 flex items-start gap-1.5 text-xs text-danger-ink"
           }
         >
           {notice.tone === "success" && (
@@ -199,7 +199,7 @@ export function FolderInviteDialog({ folderId, folderName, onClose }: FolderInvi
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="shrink-0 text-danger hover:bg-danger/10 hover:text-danger"
+                      className="shrink-0 text-danger-ink hover:bg-danger/10 hover:text-danger-ink"
                       aria-label={`Remove ${m.username}`}
                       disabled={busy}
                       onClick={() => void handleRemove(m)}

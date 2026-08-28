@@ -74,7 +74,7 @@ export function UserSecurityPanel({ userId }: { userId: string }) {
   if (query.isLoading) return <div className="h-32 skeleton rounded-xl" />;
   if (query.isError || !query.data) {
     return (
-      <p className="text-sm text-danger" role="alert">
+      <p className="text-sm text-danger-ink" role="alert">
         Could not load security status.
       </p>
     );
@@ -132,7 +132,7 @@ export function UserSecurityPanel({ userId }: { userId: string }) {
             "rounded-xl px-3 py-2 text-xs",
             message.type === "success"
               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-              : "bg-danger/10 text-danger"
+              : "bg-danger/10 text-danger-ink"
           )}
         >
           {message.text}

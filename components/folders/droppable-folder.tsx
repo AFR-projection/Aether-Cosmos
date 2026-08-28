@@ -24,7 +24,7 @@ export function DroppableFolder({ folder }: DroppableFolderProps) {
           : "border-border bg-surface hover:bg-surface-hover"
       )}
     >
-      <FolderPlus className="h-4 w-4 text-accent" />
+      <FolderPlus className="h-4 w-4 text-accent-ink" />
       <span className="truncate">{folder.name}</span>
     </a>
   );

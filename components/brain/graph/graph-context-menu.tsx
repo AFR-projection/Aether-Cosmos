@@ -186,9 +186,9 @@ export function GraphContextMenu({
             onClick={() => run(index)}
             className={cn(
               "flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors",
-              item.danger ? "text-danger" : "text-foreground",
+              item.danger ? "text-danger-ink" : "text-foreground",
               index === active &&
-                (item.danger ? "bg-danger/10" : "bg-accent/10 text-accent")
+                (item.danger ? "bg-danger/10" : "bg-accent/10 text-accent-ink")
             )}
           >
             <item.icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

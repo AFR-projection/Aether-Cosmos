@@ -587,7 +587,7 @@ function AdminLogsContent() {
                     <dd>
                       <Link
                         href={`/admin/users/${log.userId}`}
-                        className="font-medium text-accent hover:underline"
+                        className="font-medium text-accent-ink hover:underline"
                       >
                         {log.username}
                       </Link>

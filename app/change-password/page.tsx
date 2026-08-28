@@ -68,7 +68,7 @@ export default function ChangePasswordPage() {
         className="w-full max-w-md rounded-2xl border border-border/60 bg-surface/80 p-8 shadow-xl backdrop-blur-xl"
       >
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-accent">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-accent-ink">
             <KeyRound className="h-7 w-7" />
           </div>
           <h1 className="text-2xl font-bold">Change your password</h1>

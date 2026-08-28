@@ -667,7 +667,7 @@ export default function ImageEditPanel({
               variant="secondary"
               size="sm"
               aria-pressed={flipHorizontal}
-              className={cn(flipHorizontal && "border-accent/40 bg-accent/10 text-accent")}
+              className={cn(flipHorizontal && "border-accent/40 bg-accent/10 text-accent-ink")}
               onClick={() => flipBy("horizontal")}
             >
               <FlipHorizontal className="h-3.5 w-3.5" />
@@ -677,7 +677,7 @@ export default function ImageEditPanel({
               variant="secondary"
               size="sm"
               aria-pressed={flipVertical}
-              className={cn(flipVertical && "border-accent/40 bg-accent/10 text-accent")}
+              className={cn(flipVertical && "border-accent/40 bg-accent/10 text-accent-ink")}
               onClick={() => flipBy("vertical")}
             >
               <FlipVertical className="h-3.5 w-3.5" />
@@ -711,7 +711,7 @@ export default function ImageEditPanel({
                 className={cn(
                   "h-8 rounded-lg border text-xs font-medium transition-colors",
                   option.id === aspectId
-                    ? "border-accent/40 bg-accent/10 text-accent"
+                    ? "border-accent/40 bg-accent/10 text-accent-ink"
                     : "border-border/60 bg-surface text-muted-foreground hover:border-accent/30 hover:text-foreground"
                 )}
               >
@@ -750,7 +750,7 @@ export default function ImageEditPanel({
                   className={cn(
                     "h-8 rounded-lg border text-xs font-medium transition-colors disabled:opacity-40",
                     resizeTarget === preset
-                      ? "border-accent/40 bg-accent/10 text-accent"
+                      ? "border-accent/40 bg-accent/10 text-accent-ink"
                       : "border-border/60 bg-surface text-muted-foreground enabled:hover:border-accent/30 enabled:hover:text-foreground"
                   )}
                   title={upscale ? "Larger than the current crop" : `Longest edge ${preset} px`}
@@ -766,7 +766,7 @@ export default function ImageEditPanel({
               className={cn(
                 "col-span-2 h-8 rounded-lg border text-xs font-medium transition-colors",
                 resizeTarget === null
-                  ? "border-accent/40 bg-accent/10 text-accent"
+                  ? "border-accent/40 bg-accent/10 text-accent-ink"
                   : "border-border/60 bg-surface text-muted-foreground hover:border-accent/30 hover:text-foreground"
               )}
             >
@@ -815,7 +815,7 @@ export default function ImageEditPanel({
                   className={cn(
                     "h-8 rounded-lg border text-xs font-medium transition-colors disabled:opacity-40",
                     active
-                      ? "border-accent/40 bg-accent/10 text-accent"
+                      ? "border-accent/40 bg-accent/10 text-accent-ink"
                       : "border-border/60 bg-surface text-muted-foreground enabled:hover:border-accent/30 enabled:hover:text-foreground"
                   )}
                   title={own ? "Already this format" : option.note}
@@ -831,7 +831,7 @@ export default function ImageEditPanel({
               className={cn(
                 "col-span-2 h-8 rounded-lg border text-xs font-medium transition-colors",
                 convertTo === null
-                  ? "border-accent/40 bg-accent/10 text-accent"
+                  ? "border-accent/40 bg-accent/10 text-accent-ink"
                   : "border-border/60 bg-surface text-muted-foreground hover:border-accent/30 hover:text-foreground"
               )}
             >
@@ -915,11 +915,11 @@ export default function ImageEditPanel({
           </dl>
 
           {error ? (
-            <p role="alert" className="text-[11px] leading-relaxed text-danger">
+            <p role="alert" className="text-[11px] leading-relaxed text-danger-ink">
               {error}
             </p>
           ) : dirty && plan && !plan.ok ? (
-            <p role="status" className="text-[11px] leading-relaxed text-warning">
+            <p role="status" className="text-[11px] leading-relaxed text-warning-ink">
               {plan.reason}
             </p>
           ) : null}

@@ -322,7 +322,7 @@ function SessionDurationPicker({ value, onChange }: { value: number; onChange: (
       )}
 
       <p className="adm-field__hint inline-flex items-start gap-1.5">
-        <Clock className="mt-px h-3.5 w-3.5 shrink-0 text-accent" aria-hidden="true" />
+        <Clock className="mt-px h-3.5 w-3.5 shrink-0 text-accent-ink" aria-hidden="true" />
         <span>
           Users are signed out{" "}
           <span className="font-semibold text-foreground">{formatSessionDuration(value)}</span>

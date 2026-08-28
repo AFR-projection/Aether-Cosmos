@@ -26,8 +26,8 @@ function speedLabel(bytesPerSec: number): string {
 /** Status is carried by an icon *and* by wording, never by colour alone. */
 function StatusIcon({ status }: { status: DownloadItem["status"] }) {
   if (status === "active") return <Spinner size="sm" />;
-  if (status === "done") return <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />;
-  if (status === "error") return <XCircle className="h-4 w-4 text-danger" aria-hidden="true" />;
+  if (status === "done") return <CheckCircle2 className="h-4 w-4 text-success-ink" aria-hidden="true" />;
+  if (status === "error") return <XCircle className="h-4 w-4 text-danger-ink" aria-hidden="true" />;
   return <X className="h-4 w-4 text-muted-foreground" aria-hidden="true" />;
 }
 
@@ -91,7 +91,7 @@ function DownloadRow({ item }: { item: DownloadItem }) {
       )}
 
       {item.status === "error" && item.error && (
-        <p className="mt-1 text-xs text-danger">{item.error}</p>
+        <p className="mt-1 text-xs text-danger-ink">{item.error}</p>
       )}
     </li>
   );
@@ -180,13 +180,13 @@ export function DownloadsWidget() {
         )}
       >
         <Download
-          className={cn("h-5 w-5", activeCount > 0 ? "text-accent" : "text-muted-foreground")}
+          className={cn("h-5 w-5", activeCount > 0 ? "text-accent-ink" : "text-muted-foreground")}
           aria-hidden="true"
         />
         {activeCount > 0 && (
           <span
             aria-hidden="true"
-            className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-white"
+            className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-on-accent"
           >
             {activeCount}
           </span>

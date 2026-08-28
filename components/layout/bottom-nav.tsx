@@ -56,7 +56,7 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
             aria-haspopup="dialog"
             aria-expanded={sheetOpen}
           >
-            <span className="flex h-12 w-12 -translate-y-3 items-center justify-center rounded-2xl bg-accent text-white shadow-lg shadow-accent/30">
+            <span className="flex h-12 w-12 -translate-y-3 items-center justify-center rounded-2xl bg-accent text-on-accent shadow-lg shadow-accent/30">
               <Plus aria-hidden className="h-6 w-6" />
             </span>
           </button>
@@ -103,7 +103,7 @@ function TabButton({
       aria-current={active ? "page" : undefined}
       className={cn(
         "tap relative flex flex-1 flex-col items-center justify-center gap-0.5",
-        active ? "text-accent" : "text-muted-foreground"
+        active ? "text-accent-ink" : "text-muted-foreground"
       )}
     >
       {active && (

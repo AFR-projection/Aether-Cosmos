@@ -159,9 +159,9 @@ function ArchiveRows({ nodes, depth, collapsed, onToggle, onOpen }: RowsProps) {
                   <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                 )}
                 {open ? (
-                  <FolderOpen className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                  <FolderOpen className="h-4 w-4 shrink-0 text-warning-ink" aria-hidden="true" />
                 ) : (
-                  <Folder className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                  <Folder className="h-4 w-4 shrink-0 text-warning-ink" aria-hidden="true" />
                 )}
                 <span className="truncate font-medium">{node.name}</span>
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground">

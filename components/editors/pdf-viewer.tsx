@@ -93,7 +93,7 @@ export function PdfViewer({ fileId, previewUrl }: PdfViewerProps) {
             </p>
           }
           error={
-            <p className="p-8 text-sm text-danger" role="alert">
+            <p className="p-8 text-sm text-danger-ink" role="alert">
               Couldn&apos;t load this PDF.
             </p>
           }

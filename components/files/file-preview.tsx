@@ -281,7 +281,7 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
       return (
         <div className="flex h-full flex-col items-center justify-center bg-surface px-4 text-center">
           <span className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-warning/10 ring-1 ring-warning/20">
-            <Lock className="h-7 w-7 text-warning" aria-hidden="true" />
+            <Lock className="h-7 w-7 text-warning-ink" aria-hidden="true" />
           </span>
           <p className="text-sm font-semibold text-foreground">This file is encrypted</p>
           <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
@@ -317,7 +317,7 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
               </Button>
             </div>
             {unlockError && (
-              <p role="alert" className="flex items-center justify-center gap-1.5 text-xs text-danger">
+              <p role="alert" className="flex items-center justify-center gap-1.5 text-xs text-danger-ink">
                 <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 {unlockError}
               </p>
@@ -502,7 +502,7 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
               >
                 {isEncrypted && (
                   <>
-                    <Lock className="h-3 w-3 shrink-0 text-warning" aria-hidden="true" />
+                    <Lock className="h-3 w-3 shrink-0 text-warning-ink" aria-hidden="true" />
                     <span className="sr-only">Encrypted.</span>
                   </>
                 )}
@@ -521,7 +521,7 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
                 size="icon"
                 aria-label={editKind === "image" ? "Edit this image" : "Trim this clip"}
                 aria-pressed={inEditor}
-                className={cn(inEditor && "text-accent")}
+                className={cn(inEditor && "text-accent-ink")}
                 onClick={toggleEditing}
               >
                 <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
@@ -590,7 +590,7 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
             aria-labelledby={unsavedTitleId}
             className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-warning/20 bg-warning/5 px-4 py-3"
           >
-            <p id={unsavedTitleId} className="text-xs text-warning">
+            <p id={unsavedTitleId} className="text-xs text-warning-ink">
               {unsavedPrompt === "editor"
                 ? "This edit hasn't been saved. Leaving the editor discards it."
                 : "This file has unsaved changes. Closing the preview discards them."}

@@ -411,8 +411,8 @@ function HoverInfoCard({ file }: { file: FileRecord }) {
           </div>
           {(file.isFavorite || file.encrypted) && (
             <div className="flex items-center gap-2 pt-0.5">
-              {file.isFavorite && <span className="flex items-center gap-1 text-warning"><Star className="h-3 w-3 fill-current" />Favorite</span>}
-              {file.encrypted && <span className="flex items-center gap-1 text-accent"><Lock className="h-3 w-3" />Encrypted</span>}
+              {file.isFavorite && <span className="flex items-center gap-1 text-warning-ink"><Star className="h-3 w-3 fill-current" />Favorite</span>}
+              {file.encrypted && <span className="flex items-center gap-1 text-accent-ink"><Lock className="h-3 w-3" />Encrypted</span>}
             </div>
           )}
         </div>
@@ -611,7 +611,7 @@ export function FileGrid({
         >
           <div className={cn(
             "flex h-4 w-4 items-center justify-center rounded-[4px] border transition-colors",
-            allSelected ? "border-accent bg-accent text-white" : "border-border/60 hover:border-accent/60"
+            allSelected ? "border-accent bg-accent text-on-accent" : "border-border/60 hover:border-accent/60"
           )}>
             {allSelected && <Check aria-hidden className="h-3 w-3" />}
           </div>
@@ -787,7 +787,7 @@ const GridCard = memo(function GridCard({
           sr-only text: an icon in a coloured circle says nothing out loud. */}
       {file.isFavorite && (
         <div className="absolute -top-1.5 -right-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-warning shadow-md ring-2 ring-background">
-          <Star className="h-2.5 w-2.5 fill-white text-white" aria-hidden="true" />
+          <Star className="h-2.5 w-2.5 fill-on-warning text-on-warning" aria-hidden="true" />
           <span className="sr-only">Favorite</span>
         </div>
       )}
@@ -798,7 +798,7 @@ const GridCard = memo(function GridCard({
             file.isFavorite ? "-right-1.5 translate-x-[-20px]" : "-right-1.5"
           )}
         >
-          <Lock className="h-2.5 w-2.5 text-white" aria-hidden="true" />
+          <Lock className="h-2.5 w-2.5 text-on-accent" aria-hidden="true" />
           <span className="sr-only">Encrypted with AES-256</span>
         </div>
       )}
@@ -816,7 +816,7 @@ const GridCard = memo(function GridCard({
           "after:absolute after:-inset-2 after:content-['']",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background",
           selected
-            ? "bg-accent text-white shadow-md"
+            ? "bg-accent text-on-accent shadow-md"
             : "bg-black/35 backdrop-blur-sm text-transparent border border-white/25 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
         )}
         aria-label={`Select ${file.name}`}
@@ -854,7 +854,7 @@ const GridCard = memo(function GridCard({
         <div className="mt-1 flex items-center justify-between">
           <span className="font-mono text-xs text-muted-foreground">{formatBytes(file.sizeBytes)}</span>
           {file.isNote
-            ? <span className="rounded bg-accent/12 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-accent">Note</span>
+            ? <span className="rounded bg-accent/12 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-accent-ink">Note</span>
             : <span className="text-xs text-muted-foreground">{formatDate(file.updatedAt, "short")}</span>
           }
         </div>
@@ -930,7 +930,7 @@ const ListRow = memo(function ListRow({
       >
         <div className={cn(
           "flex h-4 w-4 items-center justify-center rounded-[4px] border transition-colors",
-          selected ? "border-accent bg-accent text-white" : "border-border/50 text-transparent hover:border-accent/50"
+          selected ? "border-accent bg-accent text-on-accent" : "border-border/50 text-transparent hover:border-accent/50"
         )}>
           {selected && <Check className="h-3 w-3" aria-hidden="true" />}
         </div>
@@ -978,17 +978,17 @@ const ListRow = memo(function ListRow({
         <div className="hidden sm:flex items-center gap-1.5 shrink-0">
           {file.isFavorite && (
             <>
-              <Star className="h-3 w-3 fill-warning text-warning" aria-hidden="true" />
+              <Star className="h-3 w-3 fill-warning text-warning-ink" aria-hidden="true" />
               <span className="sr-only">Favorite</span>
             </>
           )}
           {file.encrypted && (
             <>
-              <Lock className="h-3 w-3 text-accent" aria-hidden="true" />
+              <Lock className="h-3 w-3 text-accent-ink" aria-hidden="true" />
               <span className="sr-only">Encrypted</span>
             </>
           )}
-          {file.isNote && <span className="rounded bg-accent/10 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-accent">Note</span>}
+          {file.isNote && <span className="rounded bg-accent/10 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-accent-ink">Note</span>}
         </div>
       </div>
 

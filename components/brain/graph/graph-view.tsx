@@ -414,7 +414,7 @@ export function GraphView({
         </button>
 
         {localActive ? (
-          <p className="pointer-events-none absolute left-14 top-3 max-w-[45%] truncate rounded-lg border border-accent/25 bg-accent/10 px-2 py-1.5 text-[11px] font-medium text-accent">
+          <p className="pointer-events-none absolute left-14 top-3 max-w-[45%] truncate rounded-lg border border-accent/25 bg-accent/10 px-2 py-1.5 text-[11px] font-medium text-accent-ink">
             Local · {focalLabel} · {localDepth} hop{localDepth > 1 ? "s" : ""}
           </p>
         ) : null}

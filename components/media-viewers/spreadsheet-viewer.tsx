@@ -134,7 +134,7 @@ export function SpreadsheetViewer({ src, fileName, fileId }: SpreadsheetViewerPr
                 "min-h-8 whitespace-nowrap rounded-lg px-2.5 text-xs font-medium transition-colors duration-150",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                 i === activeSheet
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-on-accent"
                   : "bg-surface text-muted-foreground hover:text-foreground"
               )}
             >

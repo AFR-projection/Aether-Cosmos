@@ -150,7 +150,7 @@ export function QuickActionsSheet({ open, onClose }: QuickActionsSheetProps) {
                 >
                   <span
                     aria-hidden
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent-ink"
                   >
                     <Icon className="h-5 w-5" />
                   </span>

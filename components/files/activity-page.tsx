@@ -91,7 +91,7 @@ function ActivityIcon({ type }: { type: string }) {
 function TimelineDetail({ item }: { item: ActivityItem }) {
   const { type, detail, source, destination, error, status, loaded, total } = item;
 
-  if (error) return <p className="mt-1 text-xs text-danger">{error}</p>;
+  if (error) return <p className="mt-1 text-xs text-danger-ink">{error}</p>;
 
   if (type === "rename") {
     const newName = detail?.startsWith("→") ? detail.slice(1).trim() : detail;
@@ -119,7 +119,7 @@ function TimelineDetail({ item }: { item: ActivityItem }) {
           {source && destination && <ArrowRight className="h-3 w-3 shrink-0" aria-hidden="true" />}
           {destination && (
             <>
-              <FolderIcon className="h-3 w-3 shrink-0 text-accent" aria-hidden="true" />
+              <FolderIcon className="h-3 w-3 shrink-0 text-accent-ink" aria-hidden="true" />
               <span className="max-w-[140px] truncate font-medium text-foreground">{destination}</span>
             </>
           )}
@@ -154,12 +154,12 @@ function TimelineItem({ item }: { item: ActivityItem }) {
       <div className={cn(
         "relative z-10 flex h-9 w-9 items-center justify-center rounded-xl border",
         failed
-          ? "border-danger/25 bg-danger/10 text-danger"
+          ? "border-danger/25 bg-danger/10 text-danger-ink"
           : cancelled
             ? "border-border bg-muted text-muted-foreground"
             : active
-              ? "border-accent/30 bg-accent/10 text-accent"
-              : "border-success/25 bg-success/10 text-success"
+              ? "border-accent/30 bg-accent/10 text-accent-ink"
+              : "border-success/25 bg-success/10 text-success-ink"
       )}>
         {active ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ActivityIcon type={item.type} />}
       </div>
@@ -195,7 +195,7 @@ function LiveTransfers({ items, stats }: { items: UploadItem[]; stats: UploadSta
           <p className="text-sm font-semibold text-foreground">Live transfers</p>
           <p className="mt-0.5 text-xs text-muted-foreground">Connected to the local transfer engine</p>
         </div>
-        <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-accent">
+        <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-accent-ink">
           <span className="h-2 w-2 animate-pulse rounded-full bg-accent" aria-hidden="true" />
           Live
         </span>
@@ -224,7 +224,7 @@ function LiveTransfers({ items, stats }: { items: UploadItem[]; stats: UploadSta
                     {item.speed > 0 ? ` · ${formatSpeed(item.speed)}` : ""}
                   </p>
                 </div>
-                <span className="shrink-0 font-mono text-xs tabular-nums text-accent">
+                <span className="shrink-0 font-mono text-xs tabular-nums text-accent-ink">
                   {item.status === "preparing" ? "--" : `${progress}%`}
                 </span>
               </div>
@@ -363,15 +363,15 @@ export function ActivityPage({ scopeId }: { scopeId: string }) {
       <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <span className="rounded-2xl border border-accent/20 bg-accent/10 p-3 text-accent">
+            <span className="rounded-2xl border border-accent/20 bg-accent/10 p-3 text-accent-ink">
               <Activity className="h-5 w-5" aria-hidden="true" />
             </span>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-accent">
+                <p className="text-xs font-semibold uppercase tracking-wide text-accent-ink">
                   File Activity Center
                 </p>
-                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-success">
+                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-success-ink">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />
                   Live
                 </span>
@@ -437,7 +437,7 @@ export function ActivityPage({ scopeId }: { scopeId: string }) {
                     "h-9 shrink-0 rounded-lg px-3 text-xs font-medium transition-colors",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                     type === item
-                      ? "bg-accent text-white"
+                      ? "bg-accent text-on-accent"
                       : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
                 >

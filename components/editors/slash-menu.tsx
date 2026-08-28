@@ -80,7 +80,7 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(
 
     return (
       <div className="note-slash-menu" ref={listRef}>
-        <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-widest text-accent">
+        <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-widest text-accent-ink">
           Blocks
         </p>
         {items.map((item, i) => {

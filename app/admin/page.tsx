@@ -352,7 +352,7 @@ export default function AdminOverviewPage() {
                       <span className="mb-1 flex items-center justify-between gap-2">
                         <Link
                           href={`/admin/users/${user.id}`}
-                          className="truncate text-[0.8rem] font-medium hover:text-accent hover:underline"
+                          className="truncate text-[0.8rem] font-medium hover:text-accent-ink hover:underline"
                         >
                           {user.username}
                         </Link>
@@ -480,7 +480,7 @@ function PanelLink({ href, children }: { href: string; children: React.ReactNode
   return (
     <Link
       href={href}
-      className="inline-flex items-center gap-1 text-[0.72rem] font-medium text-accent hover:underline"
+      className="inline-flex items-center gap-1 text-[0.72rem] font-medium text-accent-ink hover:underline"
     >
       {children}
       <ArrowUpRight className="h-3 w-3" aria-hidden="true" />

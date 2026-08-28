@@ -81,7 +81,7 @@ export default function RegisterPage() {
   if (checking) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-accent" />
+        <Loader2 className="h-8 w-8 animate-spin text-accent-ink" />
       </div>
     );
   }
@@ -98,7 +98,7 @@ export default function RegisterPage() {
         <div className="rounded-2xl border border-border/60 bg-surface/70 px-8 py-10 shadow-xl backdrop-blur-2xl">
           <div className="mb-8 text-center">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent shadow-lg shadow-accent/20">
-              <Cloud className="h-8 w-8 text-white" />
+              <Cloud className="h-8 w-8 text-on-accent" />
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-gradient">Create account</h1>
             <p className="mt-2 text-sm text-muted-foreground/80">Join {APP_NAME}</p>
@@ -175,7 +175,7 @@ export default function RegisterPage() {
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link href="/login" className="font-medium text-accent hover:underline">
+            <Link href="/login" className="font-medium text-accent-ink hover:underline">
               Sign in
             </Link>
           </p>

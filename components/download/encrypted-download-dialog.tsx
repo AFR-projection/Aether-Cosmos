@@ -131,7 +131,7 @@ export function EncryptedDownloadDialog() {
         </Field>
         {error && (
           <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-danger" aria-hidden="true" />
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-danger-ink" aria-hidden="true" />
             Nothing was written to disk — try the passphrase again.
           </p>
         )}

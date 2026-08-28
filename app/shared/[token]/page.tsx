@@ -99,7 +99,7 @@ export default function PublicSharedPage() {
             </>
           ) : (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 aria-hidden className="h-4 w-4 animate-spin text-accent" />
+              <Loader2 aria-hidden className="h-4 w-4 animate-spin text-accent-ink" />
               Loading shared file…
             </p>
           )}
@@ -132,7 +132,7 @@ export default function PublicSharedPage() {
           {/* Header */}
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-3">
             <div className="flex min-w-0 items-center gap-3">
-              <Cloud aria-hidden className="h-5 w-5 shrink-0 text-accent" />
+              <Cloud aria-hidden className="h-5 w-5 shrink-0 text-accent-ink" />
               <h1 className="truncate text-sm font-semibold">{noteTitle}</h1>
             </div>
             <ShareMeta
@@ -159,7 +159,7 @@ export default function PublicSharedPage() {
           {/* Header */}
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-3">
             <div className="flex min-w-0 items-center gap-3">
-              <Cloud aria-hidden className="h-5 w-5 shrink-0 text-accent" />
+              <Cloud aria-hidden className="h-5 w-5 shrink-0 text-accent-ink" />
               <div className="min-w-0">
                 <h1 className="truncate text-sm font-semibold">{data.file.name}</h1>
                 <p className="text-xs text-muted-foreground">{formatBytes(data.file.sizeBytes)}</p>
@@ -185,7 +185,7 @@ export default function PublicSharedPage() {
       ) : (
         <div className="flex min-h-dvh items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 text-center shadow-medium">
-            <Cloud aria-hidden className="mx-auto mb-4 h-12 w-12 text-accent" />
+            <Cloud aria-hidden className="mx-auto mb-4 h-12 w-12 text-accent-ink" />
             <h1 className="truncate text-xl font-bold">{data.file.name}</h1>
             <p className="mt-1 text-sm text-muted-foreground">{formatBytes(data.file.sizeBytes)}</p>
             <div className="mt-4">

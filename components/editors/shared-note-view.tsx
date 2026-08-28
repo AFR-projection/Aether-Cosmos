@@ -278,7 +278,7 @@ export function SharedNoteView({ token, content, canEdit }: SharedNoteViewProps)
                     ? `Saved at ${formatClock(lastSavedAt)}`
                     : "No changes yet"}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-medium text-accent">
+            <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-medium text-accent-ink">
               <Pencil aria-hidden className="h-3 w-3" /> Editable
             </span>
             <button

@@ -157,7 +157,7 @@ export default function SharesPage() {
           className="flex flex-col items-center justify-center py-24 text-muted-foreground"
         >
           <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/5 border border-accent/10">
-            <Share2 className="h-10 w-10 text-accent/40" />
+            <Share2 className="h-10 w-10 text-accent-ink/40" />
           </div>
           <p className="text-lg font-semibold">No shared links yet</p>
           <p className="mt-1 text-sm text-muted-foreground/70">Share files from the file browser</p>
@@ -177,12 +177,12 @@ export default function SharesPage() {
               >
                 <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
                   <div className="flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-xl bg-accent/10">
-                    <Link className="h-5 w-5 text-accent" />
+                    <Link className="h-5 w-5 text-accent-ink" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm truncate">{file.name}</p>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-0.5 text-[10px] font-semibold text-accent uppercase">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-0.5 text-[10px] font-semibold text-accent-ink uppercase">
                         <Shield className="h-2.5 w-2.5" />
                         {share.permission}
                       </span>
@@ -224,8 +224,8 @@ export default function SharesPage() {
                     className={cn(
                       "h-10 w-10 min-h-[44px] min-w-[44px] sm:h-9 sm:w-9",
                       historyShare === share.id
-                        ? "text-accent bg-accent/10"
-                        : "text-muted-foreground/60 hover:text-accent hover:bg-accent/10"
+                        ? "text-accent-ink bg-accent/10"
+                        : "text-muted-foreground/60 hover:text-accent-ink hover:bg-accent/10"
                     )}
                     onClick={() => setHistoryShare(historyShare === share.id ? null : share.id)}
                     title="View access history"
@@ -235,7 +235,7 @@ export default function SharesPage() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-10 w-10 min-h-[44px] min-w-[44px] sm:h-9 sm:w-9 text-muted-foreground/60 hover:text-danger hover:bg-danger/10"
+                    className="h-10 w-10 min-h-[44px] min-w-[44px] sm:h-9 sm:w-9 text-muted-foreground/60 hover:text-danger-ink hover:bg-danger/10"
                     disabled={loadingId === share.id}
                     onClick={() => deleteShare(share.id)}
                     title="Delete share"
@@ -261,7 +261,7 @@ export default function SharesPage() {
                     <div className="mt-2 rounded-2xl border border-border/40 bg-muted/20 p-5">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-sm font-semibold flex items-center gap-2">
-                          <Activity className="h-4 w-4 text-accent" />
+                          <Activity className="h-4 w-4 text-accent-ink" />
                           Access History
                           <span className="text-xs font-normal text-muted-foreground/60">
                             ({share.accessCount} access{share.accessCount !== 1 ? "es" : ""})
@@ -278,7 +278,7 @@ export default function SharesPage() {
 
                       {logsLoading ? (
                         <div className="flex items-center justify-center py-8">
-                          <Loader2 className="h-5 w-5 animate-spin text-accent" />
+                          <Loader2 className="h-5 w-5 animate-spin text-accent-ink" />
                         </div>
                       ) : !accessLogs || accessLogs.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
@@ -301,7 +301,7 @@ export default function SharesPage() {
                               >
                                 {/* Device Icon */}
                                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 mt-0.5">
-                                  <DeviceIcon className="h-4 w-4 text-accent" />
+                                  <DeviceIcon className="h-4 w-4 text-accent-ink" />
                                 </div>
 
                                 {/* Details */}
@@ -385,7 +385,7 @@ export default function SharesPage() {
                           {!expandedHistory && accessLogs.length > 5 && (
                             <button
                               onClick={() => setExpandedHistory(true)}
-                              className="w-full py-2 text-xs text-accent hover:text-accent/80 transition-colors flex items-center justify-center gap-1"
+                              className="w-full py-2 text-xs text-accent-ink hover:text-foreground transition-colors flex items-center justify-center gap-1"
                             >
                               <ChevronDown className="h-3 w-3" />
                               Show all {accessLogs.length} accesses

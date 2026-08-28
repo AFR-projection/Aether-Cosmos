@@ -10,13 +10,13 @@ import type { Memory } from "@/hooks/use-brain";
  * of how to read it, so it gets colour rather than another grey label.
  */
 const TYPE_TONE: Record<string, string> = {
-  instruction: "bg-accent/10 text-accent",
-  preference: "bg-accent/10 text-accent",
-  decision: "bg-warning/10 text-warning",
-  procedure: "bg-warning/10 text-warning",
-  fact: "bg-success/10 text-success",
-  knowledge: "bg-success/10 text-success",
-  concept: "bg-success/10 text-success",
+  instruction: "bg-accent/10 text-accent-ink",
+  preference: "bg-accent/10 text-accent-ink",
+  decision: "bg-warning/10 text-warning-ink",
+  procedure: "bg-warning/10 text-warning-ink",
+  fact: "bg-success/10 text-success-ink",
+  knowledge: "bg-success/10 text-success-ink",
+  concept: "bg-success/10 text-success-ink",
 };
 
 export function MemoryTypeBadge({ type }: { type: string }) {

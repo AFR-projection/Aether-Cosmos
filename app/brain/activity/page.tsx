@@ -91,7 +91,7 @@ export default function BrainActivityPage() {
                             className={cn(
                               "mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg",
                               entry.principalType === "agent"
-                                ? "bg-accent/10 text-accent"
+                                ? "bg-accent/10 text-accent-ink"
                                 : "bg-muted/40 text-muted-foreground"
                             )}
                             aria-hidden="true"

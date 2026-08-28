@@ -81,7 +81,7 @@ function Chip({
         "inline-flex min-h-8 items-center gap-1 rounded-lg border px-2.5 text-xs font-medium",
         "transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
         active
-          ? "border-accent bg-accent text-white"
+          ? "border-accent bg-accent text-on-accent"
           : "border-border/60 bg-surface text-muted-foreground hover:border-accent/40 hover:text-foreground"
       )}
     >
@@ -331,7 +331,7 @@ export function ShareDialog({ fileId, fileName, fileType, isNote, onClose }: Sha
           </p>
 
           {error && (
-            <p role="alert" className="flex items-start gap-1.5 text-xs text-danger">
+            <p role="alert" className="flex items-start gap-1.5 text-xs text-danger-ink">
               <span aria-hidden="true" className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />
               <span>{error}</span>
             </p>

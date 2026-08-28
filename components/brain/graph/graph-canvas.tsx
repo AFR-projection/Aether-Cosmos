@@ -8,6 +8,7 @@ import type {
   Ref,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { FALLBACK_THEME } from "@/lib/brain/graph/renderer";
 
 /**
  * The canvas surface and its viewport controls.
@@ -85,7 +86,14 @@ export function GraphCanvas({
   };
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#0d1117]">
+    /* The ground colour is the renderer's, not a token: the graph is painted dark
+       in both themes (see FALLBACK_THEME) so grey edges stay readable. Taking it
+       from the same constant keeps the wrapper and the canvas from drifting apart
+       during the frame before the first paint. */
+    <div
+      className="relative h-full w-full overflow-hidden"
+      style={{ background: FALLBACK_THEME.background }}
+    >
       <canvas
         ref={canvasRef}
         role="application"

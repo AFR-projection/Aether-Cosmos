@@ -242,7 +242,7 @@ export default function OAuthConsentClient() {
           </p>
         </div>
 
-        {error && <p className="text-xs text-danger">{error}</p>}
+        {error && <p className="text-xs text-danger-ink">{error}</p>}
         <div className="flex gap-2">
           <Button
             className={grantsDangerous ? "flex-1 bg-amber-600 hover:bg-amber-500 text-white" : "flex-1"}

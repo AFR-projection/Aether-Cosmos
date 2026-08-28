@@ -74,7 +74,7 @@ function ProgressRing({ progress, active }: { progress: number; active: boolean 
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={offset}
-        className={cn("transition-all duration-300", active ? "text-accent" : "text-success")}
+        className={cn("transition-all duration-300", active ? "text-accent-ink" : "text-success-ink")}
       />
     </svg>
   );
@@ -82,13 +82,13 @@ function ProgressRing({ progress, active }: { progress: number; active: boolean 
 
 function RowStatusIcon({ status }: { status: UploadItemStatus }) {
   if (status === "done") {
-    return <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />;
+    return <CheckCircle2 className="h-3.5 w-3.5 text-success-ink" aria-hidden="true" />;
   }
   if (status === "error") {
-    return <AlertCircle className="h-3.5 w-3.5 text-danger" aria-hidden="true" />;
+    return <AlertCircle className="h-3.5 w-3.5 text-danger-ink" aria-hidden="true" />;
   }
   if (status === "resume_requires_file") {
-    return <AlertCircle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />;
+    return <AlertCircle className="h-3.5 w-3.5 text-warning-ink" aria-hidden="true" />;
   }
   if (IN_FLIGHT.has(status)) {
     return (
@@ -134,11 +134,11 @@ function UploadRow({
           <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
             <span>{formatBytes(item.totalBytes)}</span>
             {inFlight ? (
-              <span className="font-mono tabular-nums text-accent">
+              <span className="font-mono tabular-nums text-accent-ink">
                 {Math.round(item.progress)}%
               </span>
             ) : (
-              <span className={cn(failed && "text-warning")}>{STATUS_TEXT[item.status]}</span>
+              <span className={cn(failed && "text-warning-ink")}>{STATUS_TEXT[item.status]}</span>
             )}
           </p>
         </div>
@@ -184,7 +184,7 @@ function UploadRow({
         </div>
       )}
 
-      {detail && <p className="ml-6 mt-0.5 text-xs text-danger">{detail}</p>}
+      {detail && <p className="ml-6 mt-0.5 text-xs text-danger-ink">{detail}</p>}
     </motion.li>
   );
 }
@@ -313,9 +313,9 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
             <ProgressRing progress={stats.overallProgress} active={hasActive} />
             <span className="absolute inset-0 flex items-center justify-center">
               {allDone && stats.failed === 0 ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-success-ink" aria-hidden="true" />
               ) : allDone && stats.failed > 0 ? (
-                <AlertCircle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />
+                <AlertCircle className="h-3.5 w-3.5 text-warning-ink" aria-hidden="true" />
               ) : (
                 <span className="font-mono text-xs font-bold tabular-nums text-foreground">
                   {Math.round(stats.overallProgress)}
@@ -405,7 +405,7 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
                 <span className="flex items-center gap-2.5">
                   {stats.speed > 0 && (
                     <span className="flex items-center gap-1">
-                      <Zap className="h-3 w-3 text-accent" aria-hidden="true" />
+                      <Zap className="h-3 w-3 text-accent-ink" aria-hidden="true" />
                       {formatSpeed(stats.speed)}
                     </span>
                   )}

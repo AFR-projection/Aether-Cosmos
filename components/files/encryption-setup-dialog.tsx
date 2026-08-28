@@ -176,7 +176,7 @@ function EncryptionSetupForm({
           error={mismatch ? "Passphrases don't match." : undefined}
           hint={
             confirm.length > 0 && !mismatch ? (
-              <span className="flex items-center gap-1 text-success">
+              <span className="flex items-center gap-1 text-success-ink">
                 <Check className="h-3 w-3" aria-hidden="true" /> Passphrases match
               </span>
             ) : undefined
@@ -213,7 +213,7 @@ function EncryptionSetupForm({
 
         <div className="rounded-xl border border-warning/30 bg-warning/5 p-3">
           <div className="flex gap-2.5">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-ink" aria-hidden="true" />
             <div className="space-y-2">
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Your passphrase never leaves this device. We{" "}

@@ -304,7 +304,7 @@ export default function AdminSharesPage() {
         <td>
           <Link
             href={`/admin/users/${s.ownerId}`}
-            className="font-medium text-accent hover:underline"
+            className="font-medium text-accent-ink hover:underline"
           >
             {s.ownerUsername}
           </Link>

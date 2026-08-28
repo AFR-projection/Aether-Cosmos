@@ -84,7 +84,7 @@ function TreeRowItem({ row, href, active, focused, droppable, onToggle, onFocus 
         ROW,
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
         active
-          ? "bg-accent/12 font-medium text-accent"
+          ? "bg-accent/12 font-medium text-accent-ink"
           : "text-foreground/85 hover:bg-surface-hover hover:text-foreground",
         isOver && "ring-2 ring-accent ring-offset-0"
       )}
@@ -108,7 +108,7 @@ function TreeRowItem({ row, href, active, focused, droppable, onToggle, onFocus 
         />
       </span>
       {row.expanded && row.hasChildren ? (
-        <FolderOpen aria-hidden className="h-4 w-4 shrink-0 text-accent" />
+        <FolderOpen aria-hidden className="h-4 w-4 shrink-0 text-accent-ink" />
       ) : (
         <Folder aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
       )}
@@ -164,7 +164,7 @@ function RootRow({
         ROW,
         "pl-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
         active
-          ? "bg-accent/12 font-medium text-accent"
+          ? "bg-accent/12 font-medium text-accent-ink"
           : "text-foreground/85 hover:bg-surface-hover hover:text-foreground",
         isOver && "ring-2 ring-accent"
       )}

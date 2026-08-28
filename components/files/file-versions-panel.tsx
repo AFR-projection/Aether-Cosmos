@@ -100,7 +100,7 @@ export function FileVersionsPanel({
       )}
 
       {error && (
-        <p role="alert" className="text-xs text-danger">
+        <p role="alert" className="text-xs text-danger-ink">
           {error}
         </p>
       )}

@@ -1,53 +1,55 @@
 /**
- * Brain Analytics API Route
+ * Retrieval analytics for one brain.
  *
- * GET /api/admin/monitoring/brain-analytics/:brainId
+ * GET /api/admin/monitoring/brain-analytics/:brainId?days=7
+ *
+ * Metrics are keyed on `query_hash`, never query text. See
+ * lib/monitoring/query-analytics.ts for what these numbers can and cannot tell
+ * you — in particular, a query that matched nothing leaves no row behind, so
+ * `omittedRate` (surfaced then dropped) is the honest noise signal.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth/session";
+import { NextRequest } from "next/server";
+import { z } from "zod";
+import { requireMasterOrApiKey } from "@/lib/auth/api-key";
+import { apiSuccess, handleApiError } from "@/lib/api/response";
 import { getRetrievalStats } from "@/lib/monitoring/query-analytics";
 
-async function requireAdmin() {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
+const querySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(7),
+});
+
+const paramsSchema = z.object({ brainId: z.string().uuid() });
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { brainId: string } }
+  { params }: { params: Promise<{ brainId: string }> }
 ) {
-  const authError = await requireAdmin();
-  if (authError) return authError;
-
   try {
-    const { brainId } = params;
-    const url = new URL(request.url);
-    const days = parseInt(url.searchParams.get("days") ?? "7", 10);
+    await requireMasterOrApiKey(request, "monitoring");
+
+    const { brainId } = paramsSchema.parse(await params);
+    const { days } = querySchema.parse(
+      Object.fromEntries(new URL(request.url).searchParams)
+    );
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     const stats = await getRetrievalStats(brainId, since);
 
-    return NextResponse.json({
+    return apiSuccess({
       brainId,
       period: { days, since },
       stats: {
-        totalQueries: stats.totalQueries,
+        totalEvents: stats.totalEvents,
+        attributedEvents: stats.attributedEvents,
         uniqueQueries: stats.uniqueQueries,
         avgCandidatesPerQuery: stats.avgCandidatesPerQuery,
-        zeroResultRate: stats.zeroResultRate,
-        topQueryHashes: stats.topQueryHashes.slice(0, 10), // limit for API
+        omittedRate: stats.omittedRate,
+        topQueryHashes: stats.topQueryHashes.slice(0, 10),
         lowRecallQueries: stats.lowRecallQueries,
       },
     });
   } catch (error) {
-    console.error("Brain analytics failed:", error);
-    return NextResponse.json(
-      { error: "Analytics failed", details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    );
+    return handleApiError(error);
   }
 }

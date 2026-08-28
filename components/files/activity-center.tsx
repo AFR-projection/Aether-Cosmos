@@ -82,11 +82,11 @@ type MetaTone = "accent" | "info" | "success" | "warning" | "danger" | "neutral"
 
 /** One class pair per tone, all from the theme — no palette colours in rows. */
 const META_TONE: Record<MetaTone, string> = {
-  accent: "bg-accent/10 text-accent",
-  info: "bg-info/10 text-info",
-  success: "bg-success/10 text-success",
-  warning: "bg-warning/10 text-warning",
-  danger: "bg-danger/10 text-danger",
+  accent: "bg-accent/10 text-accent-ink",
+  info: "bg-info/10 text-info-ink",
+  success: "bg-success/10 text-success-ink",
+  warning: "bg-warning/10 text-warning-ink",
+  danger: "bg-danger/10 text-danger-ink",
   neutral: "bg-muted text-muted-foreground",
 };
 
@@ -125,8 +125,8 @@ function ActivityTypeIcon({ type, className }: { type: ActivityType; className?:
 /** Decoration: every caller pairs this with the status in words. */
 function StatusIcon({ status, className }: { status: ActivityStatus | "uploading"; className?: string }) {
   const cls = cn("h-3.5 w-3.5 shrink-0", className);
-  if (status === "done")      return <CheckCircle2 className={cn(cls, "text-success")} aria-hidden="true" />;
-  if (status === "failed")    return <AlertCircle className={cn(cls, "text-danger")} aria-hidden="true" />;
+  if (status === "done")      return <CheckCircle2 className={cn(cls, "text-success-ink")} aria-hidden="true" />;
+  if (status === "failed")    return <AlertCircle className={cn(cls, "text-danger-ink")} aria-hidden="true" />;
   if (status === "cancelled") return <X className={cn(cls, "text-muted-foreground")} aria-hidden="true" />;
   if (status === "active" || status === "uploading" || status === "downloading" || status === "processing" || status === "preparing" || status === "verifying" || status === "retrying")
     return <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent/30 border-t-accent" aria-hidden="true" />;
@@ -198,10 +198,10 @@ function UploadRow({
       <div className="flex items-start gap-2.5">
         <span className="mt-1 shrink-0">
           {isActive && <span className="block h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" aria-hidden="true" />}
-          {isFailed && <AlertCircle className="h-3.5 w-3.5 text-danger" aria-hidden="true" />}
-          {isResumeNeeded && <AlertCircle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />}
+          {isFailed && <AlertCircle className="h-3.5 w-3.5 text-danger-ink" aria-hidden="true" />}
+          {isResumeNeeded && <AlertCircle className="h-3.5 w-3.5 text-warning-ink" aria-hidden="true" />}
           {isQueued && <Clock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />}
-          {item.status === "done" && <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />}
+          {item.status === "done" && <CheckCircle2 className="h-3.5 w-3.5 text-success-ink" aria-hidden="true" />}
         </span>
 
         <div className="min-w-0 flex-1">
@@ -232,19 +232,19 @@ function UploadRow({
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>{formatBytes(item.totalBytes)}</span>
             {isActive && (
-              <span className="font-mono tabular-nums text-accent">
+              <span className="font-mono tabular-nums text-accent-ink">
                 {item.status === "preparing" ? "Preparing" : `${Math.round(item.progress)}%`}
               </span>
             )}
             {isActive && item.speed > 0 && <span>{formatSpeed(item.speed)}</span>}
             {isQueued && <span>Waiting</span>}
-            {isResumeNeeded && <span className="text-warning">Needs the file again</span>}
+            {isResumeNeeded && <span className="text-warning-ink">Needs the file again</span>}
           </div>
 
           {isActive && (
             <ProgressBar value={item.progress} label={`Uploading ${name}`} className="mt-1.5" />
           )}
-          {detail && <p className="mt-0.5 text-xs text-danger">{detail}</p>}
+          {detail && <p className="mt-0.5 text-xs text-danger-ink">{detail}</p>}
         </div>
       </div>
     </motion.li>
@@ -277,7 +277,7 @@ function DownloadRow({ item, onCancel }: { item: DownloadItem; onCancel: () => v
             </p>
             <div className="-mt-1 flex shrink-0 items-center gap-1">
               {hasProgress && (
-                <span className="font-mono text-xs tabular-nums text-accent">{pct}%</span>
+                <span className="font-mono text-xs tabular-nums text-accent-ink">{pct}%</span>
               )}
               <Button
                 variant="ghost"
@@ -335,7 +335,7 @@ function HistoryRow({ item, onRemove }: { item: ActivityItem; onRemove: () => vo
             <p
               className={cn(
                 "truncate text-xs font-medium leading-tight",
-                isFailed ? "text-danger" : isCancelled ? "text-muted-foreground" : "text-foreground"
+                isFailed ? "text-danger-ink" : isCancelled ? "text-muted-foreground" : "text-foreground"
               )}
               title={item.name}
             >
@@ -346,7 +346,7 @@ function HistoryRow({ item, onRemove }: { item: ActivityItem; onRemove: () => vo
               {item.detail ?? labelStatus(item.status)}
             </p>
             {isFailed && item.error && (
-              <p className="mt-0.5 truncate text-xs text-danger">{item.error}</p>
+              <p className="mt-0.5 truncate text-xs text-danger-ink">{item.error}</p>
             )}
           </div>
           <div className="-mt-1 ml-1 flex shrink-0 items-center gap-1">
@@ -402,7 +402,7 @@ function FilterChip({
         "inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-3 text-xs font-medium transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
         active
-          ? "bg-accent text-white"
+          ? "bg-accent text-on-accent"
           : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
     >
@@ -431,7 +431,7 @@ function UploadStatsBar({ stats, paused, onPause, onResume, onRetryFailed }: {
           {hasActive && (
             <>
               <span className="flex items-center gap-1">
-                <Zap className="h-3 w-3 text-accent" aria-hidden="true" />
+                <Zap className="h-3 w-3 text-accent-ink" aria-hidden="true" />
                 {formatSpeed(stats.speed)}
               </span>
               {stats.eta > 0 && <span>{formatETA(stats.eta)} left</span>}
@@ -524,10 +524,10 @@ function PanelContent({
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/30 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Activity className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+          <Activity className="h-4 w-4 shrink-0 text-accent-ink" aria-hidden="true" />
           <h2 className="truncate text-sm font-semibold text-foreground">Activity Center</h2>
           {activeCount > 0 && (
-            <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 font-mono text-xs tabular-nums text-accent">
+            <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 font-mono text-xs tabular-nums text-accent-ink">
               {activeCount} active
             </span>
           )}
@@ -705,7 +705,7 @@ function PanelContent({
             variant="ghost"
             size="sm"
             onClick={onClearHistory}
-            className="hover:bg-danger/10 hover:text-danger"
+            className="hover:bg-danger/10 hover:text-danger-ink"
           >
             <Trash className="h-3.5 w-3.5" aria-hidden="true" /> Clear history
           </Button>
@@ -714,7 +714,7 @@ function PanelContent({
       <button
         type="button"
         onClick={onViewAll}
-        className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 border-t border-border/20 px-3 text-xs font-medium text-accent transition-colors hover:bg-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
+        className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 border-t border-border/20 px-3 text-xs font-medium text-accent-ink transition-colors hover:bg-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
       >
         View all activity <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
@@ -806,7 +806,7 @@ function FloatingActivityWindow({
               <h2 className="truncate text-sm font-semibold tracking-tight text-foreground">
                 File Activity Center
               </h2>
-              <span className="flex shrink-0 items-center gap-1 text-xs font-semibold uppercase tracking-wide text-success">
+              <span className="flex shrink-0 items-center gap-1 text-xs font-semibold uppercase tracking-wide text-success-ink">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />
                 Live
               </span>
@@ -845,7 +845,7 @@ function FloatingActivityWindow({
             size="icon"
             aria-label="Close the activity window"
             onClick={onClose}
-            className="hover:bg-danger/10 hover:text-danger"
+            className="hover:bg-danger/10 hover:text-danger-ink"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </Button>
@@ -882,7 +882,7 @@ function FloatingActivityWindow({
             <span>{uploadStats.completed} completed</span>
             <span>{activeTasks} processing</span>
             <span>{queuedTasks} queued</span>
-            {failedTasks > 0 && <span className="text-danger">{failedTasks} failed</span>}
+            {failedTasks > 0 && <span className="text-danger-ink">{failedTasks} failed</span>}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -896,7 +896,7 @@ function FloatingActivityWindow({
                   <span
                     className={cn(
                       "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-                      failed ? "bg-danger/10 text-danger" : "bg-accent/10 text-accent"
+                      failed ? "bg-danger/10 text-danger-ink" : "bg-accent/10 text-accent-ink"
                     )}
                   >
                     {failed ? (
@@ -913,7 +913,7 @@ function FloatingActivityWindow({
                         <p className="truncate text-sm font-medium text-foreground" title={name}>
                           {name}
                         </p>
-                        <p className={cn("mt-0.5 text-xs", failed ? "text-danger" : "text-muted-foreground")}>
+                        <p className={cn("mt-0.5 text-xs", failed ? "text-danger-ink" : "text-muted-foreground")}>
                           {failed
                             ? uploadErrorText(item.error) ?? "The upload failed."
                             : item.status === "preparing"
@@ -925,7 +925,7 @@ function FloatingActivityWindow({
                                   : "Uploading"}
                         </p>
                       </div>
-                      <span className="font-mono text-xs tabular-nums text-accent">
+                      <span className="font-mono text-xs tabular-nums text-accent-ink">
                         {item.status === "preparing" ? "--" : `${progress}%`}
                       </span>
                     </div>
@@ -955,7 +955,7 @@ function FloatingActivityWindow({
             return (
               <div key={item.id} className="rounded-xl border border-border/40 px-3 py-3">
                 <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info-ink">
                     <Download className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -967,7 +967,7 @@ function FloatingActivityWindow({
                         <p className="mt-0.5 text-xs text-muted-foreground">Downloading</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        <span className="font-mono text-xs tabular-nums text-info">
+                        <span className="font-mono text-xs tabular-nums text-info-ink">
                           {item.total > 0 ? `${progress}%` : "Live"}
                         </span>
                         <Button
@@ -1021,7 +1021,7 @@ function FloatingActivityWindow({
           ))}
         </div>
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border/40 px-3 py-2">
-          <Button variant="ghost" size="sm" onClick={onViewAll} className="text-accent">
+          <Button variant="ghost" size="sm" onClick={onViewAll} className="text-accent-ink">
             View all activity <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
           </Button>
           <span className="text-xs text-muted-foreground">Synced from the transfer engine</span>
@@ -1227,7 +1227,7 @@ export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = fals
           "bg-transparent hover:bg-muted/60",
           "transition-colors duration-150",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
-          open && "bg-accent/10 border-accent/25 text-accent",
+          open && "bg-accent/10 border-accent/25 text-accent-ink",
           !open && "text-muted-foreground hover:text-foreground"
         )}
       >
@@ -1242,7 +1242,7 @@ export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = fals
                 initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
                 className={cn(
                   "absolute -right-2 -top-2 flex h-[18px] min-w-[18px] items-center justify-center px-1",
-                  "rounded-full bg-accent text-xs font-bold leading-none tabular-nums text-white",
+                  "rounded-full bg-accent text-xs font-bold leading-none tabular-nums text-on-accent",
                   "ring-2 ring-background"
                 )}
               >
@@ -1256,7 +1256,7 @@ export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = fals
                 initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
                 className={cn(
                   "absolute -right-2 -top-2 flex h-[18px] min-w-[18px] items-center justify-center px-1",
-                  "rounded-full bg-danger text-xs font-bold leading-none tabular-nums text-white",
+                  "rounded-full bg-danger-ink text-xs font-bold leading-none tabular-nums text-on-danger",
                   "ring-2 ring-background"
                 )}
               >
