@@ -794,13 +794,13 @@ function FloatingActivityWindow({
 
   useEffect(() => {
     try {
-      const saved = sessionStorage.getItem("sbyafr_activity_window_geometry");
+      const saved = sessionStorage.getItem("aether_cosmos_activity_window_geometry");
       if (saved) setGeometry(JSON.parse(saved) as Geometry);
     } catch { /* session storage is optional */ }
   }, []);
 
   useEffect(() => {
-    try { sessionStorage.setItem("sbyafr_activity_window_geometry", JSON.stringify(geometry)); } catch { /* ignore */ }
+    try { sessionStorage.setItem("aether_cosmos_activity_window_geometry", JSON.stringify(geometry)); } catch { /* ignore */ }
   }, [geometry]);
 
   useEffect(() => {
@@ -1162,15 +1162,15 @@ export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = fals
   useEffect(() => {
     try {
       if (canUseActivityPopup()) {
-        sessionStorage.removeItem("sbyafr_activity_window_open");
-      } else if (sessionStorage.getItem("sbyafr_activity_window_open") === "true") {
+        sessionStorage.removeItem("aether_cosmos_activity_window_open");
+      } else if (sessionStorage.getItem("aether_cosmos_activity_window_open") === "true") {
         setWindowOpen(true);
       }
     } catch { /* session storage is optional */ }
   }, []);
 
   useEffect(() => {
-    try { sessionStorage.setItem("sbyafr_activity_window_open", String(windowOpen)); } catch { /* ignore */ }
+    try { sessionStorage.setItem("aether_cosmos_activity_window_open", String(windowOpen)); } catch { /* ignore */ }
   }, [windowOpen]);
 
   const activeDownloads = (downloads as DownloadItem[]).filter((d) => d.status === "active");

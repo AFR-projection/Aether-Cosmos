@@ -463,5 +463,9 @@ export async function requireMaster(): Promise<SessionUser> {
   return user;
 }
 
-// Keep sync snapshot warm
-getAdminSettings().catch(() => {});
+// Keep the production snapshot warm. Unit tests deliberately run without a
+// database unless they opt into an integration suite, so importing auth code
+// must not start an unrelated background connection attempt there.
+if (process.env.NODE_ENV !== "test") {
+  getAdminSettings().catch(() => {});
+}

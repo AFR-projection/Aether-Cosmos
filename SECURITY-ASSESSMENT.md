@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Target** | Aether Cosmos ByAFR — Next.js 16 App Router, PostgreSQL, Cloudflare R2, Redis |
-| **Scope** | Full source tree at `C:\Users\User\Documents\StrogeByAFR` (branch `main`, v0.4.0) — authentication, session management, authorization, upload/download, public sharing, admin console, OAuth 2.1 + API keys, and the Second Brain MCP surface |
+| **Scope** | Full repository source tree (branch `main`, v0.4.0) — authentication, session management, authorization, upload/download, public sharing, admin console, OAuth 2.1 + API keys, and the Second Brain MCP surface |
 | **Authorization** | Owner-authorized white-box review. No third-party system was touched. |
 | **Method** | OWASP WSTG, adapted to source-level review (see *Methodology*) |
 | **Assessed** | 2026-08-26 |
@@ -1386,7 +1386,6 @@ Beyond these, no production change is required other than deploying the current 
 *Assessment performed 2026-08-26 against branch `main` (v0.4.0) under owner authorization.
 Source-level review only — no live system was tested, and the Methodology table states what
 that leaves uncovered.*
-
 
 
 

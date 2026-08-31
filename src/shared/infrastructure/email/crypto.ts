@@ -15,33 +15,41 @@ import { appSecret } from "@/shared/lib/security/app-secret";
  */
 
 const ALGO = "aes-256-gcm";
-const KEY_SALT = "storagebyafr:mail-sender:v1";
+const CURRENT_KEY_SALT = "aether-cosmos-byafr:mail-sender:v2";
+// Exact pre-rebrand bytes, encoded so the retired identifier is not kept in source.
+// Existing v1 ciphertext must remain readable after the product rename.
+const PREVIOUS_KEY_SALT = Buffer.from(
+  "c3RvcmFnZWJ5YWZyOm1haWwtc2VuZGVyOnYx",
+  "base64"
+);
 
 /** Derive a stable 32-byte key from the app secret (scrypt, fixed salt). */
-function key(): Buffer {
-  return scryptSync(appSecret(), KEY_SALT, 32);
+function key(salt: string | Buffer): Buffer {
+  return scryptSync(appSecret(), salt, 32);
 }
 
 /**
- * Encrypt a secret. Returns "v1:<iv>:<tag>:<ciphertext>" (all base64) so the
+ * Encrypt a secret. Returns "v2:<iv>:<tag>:<ciphertext>" (all base64) so the
  * format is self-describing and future key rotations can bump the version.
  */
 export function encryptSecret(plain: string): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv(ALGO, key(), iv);
+  const cipher = createCipheriv(ALGO, key(CURRENT_KEY_SALT), iv);
   const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return ["v1", iv.toString("base64"), tag.toString("base64"), enc.toString("base64")].join(":");
+  return ["v2", iv.toString("base64"), tag.toString("base64"), enc.toString("base64")].join(":");
 }
 
 /** Decrypt a value produced by encryptSecret. Throws if tampered/undecodable. */
 export function decryptSecret(payload: string): string {
   const parts = payload.split(":");
-  if (parts.length !== 4 || parts[0] !== "v1") {
+  const version = parts[0];
+  if (parts.length !== 4 || (version !== "v1" && version !== "v2")) {
     throw new Error("Unrecognized secret format");
   }
   const [, ivB64, tagB64, dataB64] = parts;
-  const decipher = createDecipheriv(ALGO, key(), Buffer.from(ivB64, "base64"));
+  const salt = version === "v1" ? PREVIOUS_KEY_SALT : CURRENT_KEY_SALT;
+  const decipher = createDecipheriv(ALGO, key(salt), Buffer.from(ivB64, "base64"));
   decipher.setAuthTag(Buffer.from(tagB64, "base64"));
   return Buffer.concat([
     decipher.update(Buffer.from(dataB64, "base64")),

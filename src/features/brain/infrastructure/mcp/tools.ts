@@ -1246,7 +1246,6 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
           })),
         });
       } catch (error) {
-        console.error("[brain_health] Error:", error);
         return fail(error);
       }
     }

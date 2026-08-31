@@ -6,7 +6,7 @@ export type ActivityIdentityMessage = {
   previousScopeId: string | null;
 };
 
-const CHANNEL_NAME = "sbyafr_activity_identity_v1";
+const CHANNEL_NAME = "aether_cosmos_activity_identity_v1";
 let channel: BroadcastChannel | null = null;
 const listeners = new Set<(message: ActivityIdentityMessage) => void>();
 

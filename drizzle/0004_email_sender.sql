@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS "mail_senders" (
   "email" text NOT NULL,
   "app_password_encrypted" text NOT NULL,
   "display_name" text NOT NULL,
-  "from_name" text DEFAULT 'Storage ByAFR' NOT NULL,
+  "from_name" text DEFAULT 'Aether Cosmos ByAFR' NOT NULL,
   "status" "mail_status" DEFAULT 'unverified' NOT NULL,
   "is_active" boolean DEFAULT true NOT NULL,
   "last_error" text,

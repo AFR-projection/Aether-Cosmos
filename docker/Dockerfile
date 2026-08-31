@@ -1,4 +1,4 @@
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 
 # npm gives up after 2 retries and treats a stalled socket as fatal, which a VPS on
 # a congested link hits routinely — a dropped connection halfway through the install

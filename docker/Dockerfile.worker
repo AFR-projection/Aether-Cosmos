@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:24-alpine
 
 # See docker/Dockerfile: npm's default 2 retries turn a single dropped connection
 # into a failed deploy.
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci --omit=dev
 # Installed globally so the project tree stays exactly as the lockfile describes.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked npm install -g tsx@4.23.0
 
-COPY lib ./lib
+COPY src ./src
 COPY workers ./workers
 COPY drizzle.config.ts ./
 COPY tsconfig.json ./

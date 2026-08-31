@@ -1,4 +1,4 @@
--- Storage ByAFR initial schema
+-- Aether Cosmos ByAFR initial schema
 -- Run via: npm run db:push (recommended) or apply manually
 
 CREATE TYPE "public"."user_role" AS ENUM('master', 'user');

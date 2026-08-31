@@ -98,7 +98,7 @@ describe("updateEmbeddingConfig — the write boundary", () => {
     // What lands in the column is ciphertext, never the plaintext a DB dump could read.
     expect(state.row?.apiKeyEncrypted).toBeTruthy();
     expect(state.row?.apiKeyEncrypted).not.toBe("sk-or-secret");
-    expect(state.row?.apiKeyEncrypted).toMatch(/^v1:/);
+    expect(state.row?.apiKeyEncrypted).toMatch(/^v2:/);
 
     invalidateEmbeddingConfigCache();
     const loaded = await loadEmbeddingConfig(db, true);

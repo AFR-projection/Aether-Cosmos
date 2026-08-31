@@ -1,7 +1,11 @@
 {
-  "name": "storage-by-afr",
+  "name": "aether-cosmos-byafr",
   "version": "0.4.0",
   "private": true,
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "npm": ">=11.0.0 <12"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -85,7 +89,7 @@
     "next": "16.3.3",
     "nodemailer": "^9.0.3",
     "otpauth": "^9.5.1",
-    "pdfjs-dist": "^6.1.200",
+    "pdfjs-dist": "6.3.289",
     "postgres": "^3.4.9",
     "pptx-preview": "^1.0.7",
     "react": "19.2.4",
@@ -106,7 +110,7 @@
     "@types/archiver": "^8.0.0",
     "@types/dompurify": "^3.0.5",
     "@types/jszip": "^3.4.0",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",

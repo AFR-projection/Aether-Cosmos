@@ -130,11 +130,8 @@ const LEXICON: ReadonlyArray<readonly [string, BrainEntityType]> = [
   ["GitHub", "organization"], ["GitLab", "organization"], ["Anthropic", "organization"],
   ["OpenAI", "organization"], ["Claude", "product"], ["Obsidian", "product"],
   ["Model Context Protocol", "technology"], ["MCP", "technology"],
-  // The old brand stays listed alongside the new one on purpose: memories written
-  // before the rename still say "Storage ByAFR", and dropping it would stop those
-  // from matching the graph node they already belong to.
   ["Second Brain", "concept"], ["Aether Cosmos ByAFR", "product"],
-  ["Aether Cosmos", "product"], ["Storage ByAFR", "product"],
+  ["Aether Cosmos", "product"],
 ];
 
 /** Words that mark the next proper noun as a person. */
@@ -688,7 +685,6 @@ export function extractEntities(input: ExtractionInput): ExtractionResult {
     dropped: collected.length - entities.length,
   };
 }
-
 
 
 

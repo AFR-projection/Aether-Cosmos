@@ -237,14 +237,20 @@ describe("POST /api/oauth/register — abuse ceilings", () => {
   });
 
   it("never echoes the internal error message on a 500", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     store.insertThrows = new Error(
       'duplicate key value violates unique constraint "oauth_clients_client_id_key"'
     );
-    const response = await register(registerRequest(VALID));
-    const json = await response.json();
+    try {
+      const response = await register(registerRequest(VALID));
+      const json = await response.json();
 
-    expect(response.status).toBe(500);
-    expect(json).toEqual({ error: "server_error", error_description: "Registration failed" });
-    expect(JSON.stringify(json)).not.toMatch(/constraint|oauth_clients/);
+      expect(response.status).toBe(500);
+      expect(json).toEqual({ error: "server_error", error_description: "Registration failed" });
+      expect(JSON.stringify(json)).not.toMatch(/constraint|oauth_clients/);
+      expect(consoleError).toHaveBeenCalledOnce();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

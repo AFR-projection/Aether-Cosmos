@@ -66,9 +66,8 @@ export interface ActivityItem {
 type Listener = () => void;
 
 const MAX_ITEMS = 200;
-const STORAGE_KEY_PREFIX = "sbyafr_activity_v2:";
-const LEGACY_STORAGE_KEY = "sbyafr_activity_v1";
-const CHANNEL_NAME_PREFIX = "sbyafr_activity_channel_v2:";
+const STORAGE_KEY_PREFIX = "aether_cosmos_activity_v2:";
+const CHANNEL_NAME_PREFIX = "aether_cosmos_activity_channel_v2:";
 
 // ─── Module-level state ──────────────────────────────────────────────────────
 
@@ -209,10 +208,6 @@ export function configureActivityScope(scopeId: string | null): void {
   closeActivityChannel();
   activeScopeId = nextScopeId;
   replaceItems(nextScopeId ? loadHistory(nextScopeId) : []);
-
-  if (typeof window !== "undefined") {
-    try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch { /* ignore legacy cleanup failures */ }
-  }
 
   if (nextScopeId && typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
     activityChannel = new BroadcastChannel(`${CHANNEL_NAME_PREFIX}${nextScopeId}`);

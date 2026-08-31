@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderPdfFirstPage } from "./pdf-thumbnail";
 
 function minimalPdf(): Buffer {
-  const stream = "BT /F1 24 Tf 36 72 Td (Storage ByAFR) Tj ET";
+  const stream = "BT /F1 24 Tf 36 72 Td (Aether Cosmos ByAFR) Tj ET";
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",

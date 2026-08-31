@@ -9,7 +9,7 @@
  * When the user triggers an action from another page, the bottom-nav navigates
  * to /files first, then dispatches once the browser has mounted.
  */
-export const QUICK_ACTION_EVENT = "storagebyafr:quick-action";
+export const QUICK_ACTION_EVENT = "aether-cosmos:quick-action";
 
 export type QuickAction = "upload" | "note" | "folder";
 

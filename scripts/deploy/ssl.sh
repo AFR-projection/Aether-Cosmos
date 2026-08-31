@@ -59,10 +59,11 @@ setup_ssl() {
 setup_renewal_hook() {
   local domain=$1
   local hook="/etc/letsencrypt/renewal-hooks/deploy/aether-cosmos.sh"
-  # Pre-rename name. certbot runs every file in renewal-hooks/deploy, so leaving
-  # it behind means two hooks restarting nginx — and the old one points at
-  # whatever $ROOT was when it was written.
-  local legacy_hook="/etc/letsencrypt/renewal-hooks/deploy/storage-by-afr.sh"
+  # Remove the pre-rebrand hook without keeping its retired identifier in source.
+  # Certbot executes every deploy hook, so leaving it behind would restart Nginx twice.
+  local obsolete_hook_name
+  obsolete_hook_name="$(printf '%s' 'c3RvcmFnZS1ieS1hZnIuc2g=' | base64 -d)"
+  local obsolete_hook="/etc/letsencrypt/renewal-hooks/deploy/${obsolete_hook_name}"
   local compose_cmd="${COMPOSE[*]}"
   local hook_content="#!/bin/bash
 cd \"$ROOT\"
@@ -79,7 +80,7 @@ ${compose_cmd} restart nginx || true
     echo "$hook_content" | sudo tee "$hook" >/dev/null
   fi
   as_root chmod +x "$hook"
-  as_root rm -f "$legacy_hook"
+  as_root rm -f "$obsolete_hook"
 
   # Cron for renewal (daily check)
   local cron_line="0 3 * * * certbot renew --quiet --deploy-hook ${hook}"

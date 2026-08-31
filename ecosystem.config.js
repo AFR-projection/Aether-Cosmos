@@ -2,7 +2,7 @@
 module.exports = {
   apps: [
     {
-      name: "storage-by-afr",
+      name: "aether-cosmos",
       script: "node_modules/.bin/next",
       args: "start",
       cwd: __dirname,
@@ -12,7 +12,7 @@ module.exports = {
       max_memory_restart: "1G",
     },
     {
-      name: "storage-worker",
+      name: "aether-worker",
       script: "node_modules/.bin/tsx",
       args: "workers/index.ts",
       cwd: __dirname,

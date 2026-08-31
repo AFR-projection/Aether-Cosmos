@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Lint, typecheck & test
@@ -21,17 +24,52 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate deployment shell scripts
+        run: bash -n install.sh deploy.sh update.sh bin/aether scripts/deploy/*.sh
+
       - name: Lint
         run: npm run lint
+
+      - name: Generate Next.js route types
+        run: npx next typegen
 
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: Validate translations
+        run: npm run check:i18n
+
+      - name: Validate color contrast
+        run: npm run lint:contrast
+
       - name: Unit tests
         run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  containers:
+    name: Production container smoke tests
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build application image
+        run: docker build --file docker/Dockerfile --tag aether-app:ci .
+
+      - name: Build worker image
+        run: docker build --file docker/Dockerfile.worker --tag aether-worker:ci .
+
+      - name: Smoke-test worker image
+        run: docker run --rm --env REDIS_DISABLED=true aether-worker:ci
+
+      - name: Build setup image
+        run: docker build --file docker/Dockerfile.setup --tag aether-setup:ci .
