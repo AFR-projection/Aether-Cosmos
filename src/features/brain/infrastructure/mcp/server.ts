@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerBrainMcpTools } from "./tools";
+import { registerAdvancedBrainMcpTools } from "./tools-advanced";
 import type { McpPrincipal } from "./principal";
 
 /**
@@ -10,7 +11,7 @@ import type { McpPrincipal } from "./principal";
  * `/api/brain/[id]/connect` hands out, so the snippet has to be re-pasted.
  */
 export const BRAIN_MCP_SERVER_NAME = "aether-cosmos-brain";
-export const BRAIN_MCP_SERVER_VERSION = "2.0.0";
+export const BRAIN_MCP_SERVER_VERSION = "2.1.0";
 
 /**
  * A server instance scoped to ONE authenticated principal.
@@ -39,12 +40,20 @@ export function createBrainMcpServer(principal: McpPrincipal): McpServer {
         "5. Use brain_link_memory to create explicit relationships between memories.",
         "   Use brain_link to record entity relationships the brain should know about.",
         "",
+        "Advanced features (NEW in v2.1):",
+        "- brain_batch_search: Execute multiple queries in parallel for efficiency",
+        "- brain_analytics: Get usage insights and quality metrics",
+        "- brain_suggest_queries: Generate query suggestions based on brain content",
+        "- brain_semantic_status: Check semantic search availability and backfill progress",
+        "- brain_export_memories: Export for backup or migration (JSON/Markdown)",
+        "",
         "Retrieval notes:",
-        "- Semantic search is OFF by default (embeddings disabled). Retrieval uses lexical (FTS),",
-        "  entity overlap, and graph proximity. To enable semantic: set BRAIN_EMBEDDING_PROVIDER",
-        "  to 'openai' or 'voyageai' and provide the API key.",
-        "- brain_related returns memories connected by explicit links (memory_links table) or",
-        "  semantic/entity overlap. If results are empty, use brain_link_memory to create links.",
+        "- Semantic search can be enabled from /brain/settings (OpenRouter embeddings).",
+        "  Check status with brain_semantic_status. When enabled, retrieval uses:",
+        "  lexical (FTS) + entity overlap + graph proximity + semantic similarity.",
+        "- brain_related returns memories connected by explicit links (memory_links table),",
+        "  derived relationships (scored by local algorithms), or semantic/entity overlap.",
+        "  If results are empty, use brain_link_memory to create explicit links.",
         "",
         "You are a guest here. The brain outlives you: keep it valuable, not exhaustive.",
       ].join("\n"),
@@ -52,5 +61,6 @@ export function createBrainMcpServer(principal: McpPrincipal): McpServer {
   );
 
   registerBrainMcpTools(server, principal);
+  registerAdvancedBrainMcpTools(server, principal);
   return server;
 }

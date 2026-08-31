@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { BrainError } from "@brain/domain/errors";
+import { clearCache } from "./cache";
 import type { McpPrincipal } from "./principal";
 
 /**
@@ -302,6 +303,7 @@ const healthReport = {
 };
 
 beforeEach(() => {
+  clearCache(); // Clear MCP cache to ensure audit logs fire
   vi.clearAllMocks();
 
   logBrainAudit.mockResolvedValue(undefined);

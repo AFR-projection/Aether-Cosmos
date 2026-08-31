@@ -40,6 +40,7 @@ import { listProjects } from "@brain/application/commands/project-service";
 import { recallBrainContext } from "@brain/application/queries/recall";
 import { rememberMemory } from "@brain/application/commands/remember";
 import { requireGrant, type McpPrincipal } from "./principal";
+import { getCached, setCached, invalidateBrainCache, CACHE_TTL } from "./cache";
 
 /**
  * The Brain MCP tool surface.
@@ -222,7 +223,7 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
     "brain_context",
     {
       description:
-        "Assemble a token-bounded context package for one task: the memories worth knowing, why each was chosen, what was left out and why, plus — on request — the graph edges between them, contradictions among them, and their provenance. Use this instead of brain_recall when you have a token budget to respect: `contextText` is measured with a documented tokenizer and never exceeds the budget you ask for.",
+        "Assemble a token-bounded context package for one task: the memories worth knowing, why each was chosen, what was left out and why, plus — on request — the graph edges between them, contradictions among them, and their provenance. Use this instead of brain_recall when you have a token budget to respect: `contextText` is measured with a documented tokenizer and never exceeds the budget you ask for. CACHED for 60s.",
       inputSchema: z.object({
         ...brainIdArg,
         task: z
@@ -266,6 +267,27 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
     async (args) => {
       try {
         const grant = requireGrant(principal, args.brainId, "brain.read");
+
+        // Check cache first
+        const cacheKey = {
+          task: args.task,
+          tokenBudget: args.tokenBudget,
+          maxMemories: args.maxMemories,
+          includeGraph: args.includeGraph,
+          includeProvenance: args.includeProvenance,
+          projectId: args.projectId,
+          types: args.types,
+          seedMemoryIds: args.seedMemoryIds,
+        };
+        const cached = getCached<ReturnType<typeof compactContext>>(
+          "brain_context",
+          grant.brainId,
+          cacheKey
+        );
+        if (cached) {
+          return ok({ ...cached, _cached: true });
+        }
+
         const context = await buildBrainContext({
           brainId: grant.brainId,
           task: args.task,
@@ -277,6 +299,12 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
           types: args.types,
           seedMemoryIds: args.seedMemoryIds,
         });
+
+        const compacted = compactContext(context);
+
+        // Cache the result
+        setCached("brain_context", grant.brainId, cacheKey, compacted, CACHE_TTL.context);
+
         // Counts, not text: an audit row records that context was assembled, not what
         // the brain knows (§ no Brain content in audit logs unnecessarily).
         await audit(grant.brainId, "memory.context", {
@@ -288,7 +316,7 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
           omitted: context.omitted.length,
           truncated: context.truncated,
         });
-        return ok(compactContext(context));
+        return ok(compacted);
       } catch (error) {
         return fail(error);
       }
@@ -336,6 +364,9 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
           principal: { userId: principal.userId, agentId: principal.agentId },
           data,
         });
+
+        // Invalidate cache on write
+        invalidateBrainCache(grant.brainId);
 
         await audit(
           grant.brainId,
@@ -609,6 +640,10 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
           data,
           changeReason,
         });
+
+        // Invalidate cache on write
+        invalidateBrainCache(grant.brainId);
+
         await audit(grant.brainId, "memory.update", {
           via: "brain_update",
           fields: Object.keys(data),
@@ -641,6 +676,10 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
         const grant = requireGrant(principal, brainId, "brain.delete");
         const deleted = await deleteMemory({ brainId: grant.brainId, memoryId });
         if (!deleted) return fail(new BrainError("Memory not found", 404, "MEMORY_NOT_FOUND"));
+
+        // Invalidate cache on write
+        invalidateBrainCache(grant.brainId);
+
         await audit(grant.brainId, "memory.delete", { via: "brain_delete" });
         await publishToUser(principal.userId, {
           type: "brain_memory_deleted",
@@ -842,6 +881,9 @@ export function registerBrainMcpTools(server: McpServer, principal: McpPrincipal
           linkType,
           principal: { userId: principal.userId, agentId: principal.agentId },
         });
+
+        // Invalidate cache on write
+        invalidateBrainCache(grant.brainId);
 
         await audit(grant.brainId, "memory.linked", {
           via: "brain_link_memory",
