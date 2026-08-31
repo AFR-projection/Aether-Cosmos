@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createBrainMcpServer } from "./server";
@@ -46,7 +46,8 @@ describe("Advanced Brain MCP tools", () => {
 
       // Check server version
       const serverInfo = await client.getServerVersion();
-      expect(serverInfo.version).toBe("2.1.0");
+      expect(serverInfo).toBeDefined();
+      expect(serverInfo?.version).toBe("2.1.0");
     } finally {
       await client.close();
       await server.close();

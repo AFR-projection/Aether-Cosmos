@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logBrainAudit } from "@brain/infrastructure/audit";
-import { publishToUser } from "@/shared/infrastructure/realtime/events";
 import { MEMORY_TYPES } from "@brain/domain/constants";
 import { BrainError } from "@brain/domain/errors";
 import { searchMemories, listMemories } from "@brain/application/commands/memory-service";
@@ -387,7 +386,7 @@ export function registerAdvancedBrainMcpTools(server: McpServer, principal: McpP
         const { embeddingsAvailable } = await import("@brain/infrastructure/providers/resolve");
         const { getPublicEmbeddingConfig } = await import("@brain/infrastructure/providers/config");
         const { db } = await import("@/shared/infrastructure/db");
-        const { eq, and, isNotNull, sql } = await import("drizzle-orm");
+        const { eq, sql } = await import("drizzle-orm");
         const { memories } = await import("@/shared/infrastructure/db/schema");
 
         const [available, config, stats] = await Promise.all([
