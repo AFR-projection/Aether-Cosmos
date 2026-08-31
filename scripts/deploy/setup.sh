@@ -90,7 +90,16 @@ apt_get() {
 banner
 
 command -v apt-get >/dev/null 2>&1 \
-  || die "This bootstrap targets Ubuntu/Debian. On another distro, install git + Docker by hand and run ./install.sh."
+  || die "This bootstrap targets Ubuntu 22.04/24.04 LTS. On another distro, install git + Docker by hand and run ./install.sh."
+
+# Keep the one-command promise narrow and testable. Debian happens to have apt,
+# but Docker's repository URL/codename and package support are not interchangeable
+# with Ubuntu's.
+# shellcheck disable=SC1091
+source /etc/os-release
+if [[ "${ID:-}" != "ubuntu" ]] || [[ "${VERSION_ID:-}" != "22.04" && "${VERSION_ID:-}" != "24.04" ]]; then
+  die "Unsupported OS: ${PRETTY_NAME:-unknown}. Use Ubuntu 22.04 or 24.04 LTS."
+fi
 
 # ── 1. Prerequisites ──────────────────────────────────────────────────────────
 step "Installing prerequisites (git, curl)"
@@ -107,7 +116,19 @@ step "Installing Docker"
 if command -v docker >/dev/null 2>&1; then
   ok "Docker already installed ($(docker --version 2>/dev/null | cut -d, -f1))"
 else
-  curl -fsSL https://get.docker.com | $SUDO sh >/dev/null
+  # Use Docker's apt repository. Docker explicitly limits get.docker.com to
+  # testing/development; a production bootstrap should receive normal, auditable
+  # package upgrades from the official repository.
+  $SUDO install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    | $SUDO tee /etc/apt/keyrings/docker.asc >/dev/null
+  $SUDO chmod a+r /etc/apt/keyrings/docker.asc
+  DOCKER_ARCH="$(dpkg --print-architecture)"
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' \
+    "$DOCKER_ARCH" "${UBUNTU_CODENAME:-$VERSION_CODENAME}" \
+    | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+  apt_get update -qq
+  apt_get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
   ok "Docker installed"
 fi
 

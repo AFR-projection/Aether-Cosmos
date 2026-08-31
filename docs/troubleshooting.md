@@ -67,8 +67,9 @@ Certificates are fetched and renewed by the installer (`install.sh`) and by
 3. Re-run `aether update` — it requests a certificate if none exists.
 4. If the request still fails, check `aether logs nginx`.
 
-Let's Encrypt renews certs older than 60 days automatically on every
-`aether update`.
+The installer creates a daily Certbot renewal job, and `aether update` also asks
+Certbot to renew certificates that are due. The health check fails when the local
+certificate is expired or has less than 24 hours remaining.
 
 **Container won't start**
 

@@ -18,4 +18,4 @@ COPY drizzle.config.ts ./
 COPY src ./src
 COPY scripts ./scripts
 
-CMD ["sh", "-c", "npm run db:push && npm run bootstrap"]
+CMD ["sh", "-c", "npm run db:prepare && npm run db:push && npm run bootstrap"]

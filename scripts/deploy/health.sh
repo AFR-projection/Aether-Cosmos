@@ -20,26 +20,30 @@ status_line() {
   fi
 }
 
-check_docker_services() {
-  local svc status
-  for svc in redis app worker nginx; do
-    status="$("${COMPOSE[@]}" ps "$svc" --format '{{.State}}' 2>/dev/null | head -n1 || echo "missing")"
-    if [[ "$status" == "running" ]]; then
-      status_line 0 "${svc^}" "running"
-    else
-      status_line 1 "${svc^}" "$status"
-    fi
-  done
-}
-
 check_app_http() {
-  local url="https://${DEPLOY_DOMAIN}/api/auth/csrf"
-  if curl -sf --max-time 15 -k "$url" >/dev/null 2>&1 || curl -sf --max-time 15 "$url" >/dev/null 2>&1; then
+  if curl -sf --max-time 10 "http://127.0.0.1:3000/api/auth/csrf" >/dev/null 2>&1; then
     status_line 0 "App" "HTTP responding"
-  elif curl -sf --max-time 10 "http://127.0.0.1:3000/api/auth/csrf" >/dev/null 2>&1; then
-    status_line 0 "App" "direct :3000 OK (nginx may need check)"
   else
     status_line 1 "App" "no response"
+  fi
+}
+
+check_nginx() {
+  local state domain="${DEPLOY_DOMAIN:-}"
+  state="$("${COMPOSE[@]}" ps nginx --format '{{.State}}' 2>/dev/null | head -n1 || echo "missing")"
+  state="${state:-missing}"
+  if [[ "$state" != "running" ]]; then
+    status_line 1 "Nginx" "$state"
+    return
+  fi
+
+  # Resolve locally so this verifies Nginx + the real hostname certificate without
+  # depending on whether the VPS provider supports hairpinning its own public IP.
+  if curl -sf --max-time 15 --resolve "${domain}:443:127.0.0.1" \
+    "https://${domain}/api/auth/csrf" >/dev/null 2>&1; then
+    status_line 0 "Nginx" "HTTPS responding"
+  else
+    status_line 1 "Nginx" "running, but HTTPS/certificate verification failed"
   fi
 }
 
@@ -55,6 +59,7 @@ check_worker() {
   local logs state
   logs="$("${COMPOSE[@]}" logs worker --tail 30 2>/dev/null || true)"
   state="$("${COMPOSE[@]}" ps worker --format '{{.State}}' 2>/dev/null | head -n1 || echo "missing")"
+  state="${state:-missing}"
 
   # Signatures, not the bare word "error": a worker that logs "job retried after error"
   # is working, and failing a whole deploy over that word teaches the operator to ignore
@@ -76,10 +81,12 @@ check_ssl() {
   local domain="${DEPLOY_DOMAIN:-}"
   domain="${domain,,}"
   local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
-  if root_test_f "$cert"; then
+  if root_test_f "$cert" && as_root openssl x509 -checkend 86400 -noout -in "$cert" >/dev/null 2>&1; then
     local expiry
     expiry="$(as_root openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2 || echo "?")"
     status_line 0 "SSL" "valid until $expiry"
+  elif root_test_f "$cert"; then
+    status_line 1 "SSL" "expired or expires within 24 hours"
   else
     status_line 1 "SSL" "certificate missing"
   fi
@@ -116,16 +123,16 @@ run_health() {
   echo
   log "Health check"
   echo
-  check_docker_services
-  check_database_quick
   check_redis
   check_app_http
   check_worker
+  check_nginx
+  check_database_quick
   check_ssl
   check_email
   echo
   if [[ $HEALTH_FAILED -ne 0 ]]; then
-    fail "Some checks failed. Run: npm run deploy:logs"
+    fail "Some checks failed. Run: aether logs"
     return 1
   fi
   ok "All services healthy"

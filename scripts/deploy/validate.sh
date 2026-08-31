@@ -47,8 +47,8 @@ validate_database_url() {
     check_mark 1 "DATABASE_URL must start with postgresql://..."
     return
   fi
-  if [[ "$DATABASE_URL" == *'>' ]] || [[ "$DATABASE_URL" != *'sslmode='* ]]; then
-    check_mark 1 "DATABASE_URL IS TRUNCATED — paste the full single line from your provider (it ends with sslmode=require)"
+  if [[ "$DATABASE_URL" == *'>' ]] || [[ "$DATABASE_URL" != *'sslmode=require'* ]]; then
+    check_mark 1 "DATABASE_URL must be one complete line and include sslmode=require (keep any extra provider parameters)"
     return
   fi
   check_mark 0 "DATABASE_URL format OK"
@@ -60,7 +60,7 @@ validate_database_url() {
   else
     local vps_ip
     vps_ip="$(get_public_ip)"
-    check_warn 1 "Database live test skipped/failed — continuing deploy (check your provider's IP Allow: ${vps_ip})"
+    check_mark 1 "Database connection failed — verify DATABASE_URL and your provider's IP allowlist (${vps_ip})"
   fi
 }
 
@@ -120,7 +120,7 @@ validate_r2() {
     amazon/aws-cli:2.15.0 s3 ls "s3://${R2_BUCKET_NAME}" --endpoint-url "$endpoint" >/dev/null 2>&1; then
     ok "R2 bucket accessible"
   else
-    check_warn 1 "R2 live test skipped/failed — continuing deploy (check the credentials in Cloudflare)"
+    check_mark 1 "R2 bucket is not accessible — check the bucket name and Cloudflare credentials"
   fi
 }
 
@@ -158,8 +158,8 @@ validate_session_secret() {
   fi
 }
 
-validate_required_env() {
-  log "Checking required .env keys..."
+validate_admin_and_email() {
+  log "Checking admin credentials and certificate email..."
   local missing=0
   for v in MASTER_USERNAME MASTER_PASSWORD CERTBOT_EMAIL; do
     if [[ -z "${!v:-}" ]]; then
@@ -167,18 +167,47 @@ validate_required_env() {
       fail "$v is empty"
     fi
   done
-  [[ $missing -eq 0 ]] && ok "Admin & SSL email OK" || VALIDATION_FAILED=1
+  if [[ $missing -ne 0 ]]; then
+    VALIDATION_FAILED=1
+    return
+  fi
+
+  if [[ ! "$MASTER_USERNAME" =~ ^[a-zA-Z0-9._-]{3,50}$ ]]; then
+    check_mark 1 "MASTER_USERNAME must be 3–50 characters using letters, numbers, dot, underscore, or hyphen"
+  else
+    check_mark 0 "Master username format OK"
+  fi
+
+  local classes=0
+  [[ "$MASTER_PASSWORD" =~ [a-z] ]] && classes=$(( classes + 1 ))
+  [[ "$MASTER_PASSWORD" =~ [A-Z] ]] && classes=$(( classes + 1 ))
+  [[ "$MASTER_PASSWORD" =~ [0-9] ]] && classes=$(( classes + 1 ))
+  [[ "$MASTER_PASSWORD" =~ [^a-zA-Z0-9] ]] && classes=$(( classes + 1 ))
+  if (( ${#MASTER_PASSWORD} < 10 || ${#MASTER_PASSWORD} > 128 || classes < 3 )); then
+    check_mark 1 "MASTER_PASSWORD must be 10–128 characters and use at least 3 of: lowercase, uppercase, number, special"
+  else
+    check_mark 0 "Master password policy OK"
+  fi
+
+  if [[ "$CERTBOT_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+    check_mark 0 "Certificate email format OK"
+  else
+    check_mark 1 "CERTBOT_EMAIL is not a valid email address"
+  fi
 }
 
 validate_ports() {
   log "Checking ports 80 & 443..."
-  local ok80=0 ok443=0
+  local ok80=0 ok443=0 nginx_state=""
   port_free 80 && ok80=1
   port_free 443 && ok443=1
   if [[ $ok80 -eq 1 && $ok443 -eq 1 ]]; then
     check_mark 0 "Port 80 & 443 available"
+  elif nginx_state="$("${COMPOSE[@]}" ps nginx --format '{{.State}}' 2>/dev/null | head -n1)" \
+    && [[ "$nginx_state" == "running" ]]; then
+    warn "Port 80/443 are in use by the running Aether Nginx container (expected)"
   else
-    warn "Port 80/443 in use — they will be stopped temporarily for SSL setup"
+    check_mark 1 "Port 80 or 443 is used by another service — stop it before installing"
   fi
 }
 
@@ -190,7 +219,7 @@ run_validate() {
   normalize_env_file
   load_env
   validate_no_placeholders
-  validate_required_env
+  validate_admin_and_email
   validate_domain_format
   validate_app_url
   validate_session_secret

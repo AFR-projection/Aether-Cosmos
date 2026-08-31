@@ -3,13 +3,25 @@ import { eq } from "drizzle-orm";
 import { db } from "@/shared/infrastructure/db";
 import { users } from "@/shared/infrastructure/db/schema";
 import { hashPassword } from "@/shared/lib/auth/password";
+import { validatePasswordStrength } from "@/shared/lib/security/password-policy";
 
 async function bootstrapMaster() {
   const username = process.env.MASTER_USERNAME ?? "ByAFR";
   const password = process.env.MASTER_PASSWORD;
 
+  if (!/^[a-zA-Z0-9._-]{3,50}$/.test(username)) {
+    console.error("MASTER_USERNAME must be 3–50 characters using letters, numbers, dot, underscore, or hyphen");
+    process.exit(1);
+  }
+
   if (!password) {
     console.error("MASTER_PASSWORD is required for bootstrap");
+    process.exit(1);
+  }
+
+  const passwordCheck = validatePasswordStrength(password);
+  if (!passwordCheck.valid) {
+    console.error(`MASTER_PASSWORD is not strong enough: ${passwordCheck.errors.join("; ")}`);
     process.exit(1);
   }
 

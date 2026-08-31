@@ -11,6 +11,7 @@ if [[ "${1:-}" == "--force" ]]; then
   FORCE_RESET=true
   shift
 fi
+[[ $# -eq 0 ]] || die "Usage: aether update [--force]"
 
 main() {
   local started=$SECONDS
@@ -31,36 +32,33 @@ main() {
   ok "Backup saved to .deploy/backups/"
 
   step "Fetching the latest code"
-  local before="" after=""
+  local before="" after="" branch=""
   if [[ -d .git ]]; then
     before="$(git rev-parse HEAD 2>/dev/null || true)"
-    log "git pull..."
+    branch="$(git branch --show-current)"
+    [[ -n "$branch" ]] || die "The VPS checkout is in detached HEAD state — check out a branch before updating"
 
     if [[ "$FORCE_RESET" == "true" ]]; then
-      warn "Force reset mode — discarding all local changes"
-      git fetch origin
-      git reset --hard origin/"$(git branch --show-current)"
+      warn "Force reset mode — discarding tracked local changes and local commits"
+      git fetch origin "$branch"
+      git reset --hard "origin/${branch}"
       ok "Repository reset to origin"
     else
-      # Check for uncommitted changes
-      if ! git diff-index --quiet HEAD --; then
-        warn "Uncommitted local changes detected"
-        log "Stashing local changes..."
-        git stash push -m "Auto-stash before update $(date +%Y%m%d-%H%M%S)"
+      # A normal update is deliberately non-destructive. Auto-stashing is not safe:
+      # it makes work appear to vanish, and a later hard reset can discard local
+      # commits the operator never agreed to lose. --force is the explicit escape
+      # hatch for a disposable server checkout.
+      if [[ -n "$(git status --porcelain)" ]]; then
+        fail "The VPS checkout has local changes; a normal update will not hide or discard them."
+        fail "Keep them: cd $ROOT && git stash, then rerun 'aether update'."
+        die "Discard tracked changes instead: aether update --force"
       fi
 
-      # Fetch latest
-      git fetch origin
-
-      # Try fast-forward first
-      if ! git pull --ff-only origin "$(git branch --show-current)" 2>/dev/null; then
-        warn "Cannot fast-forward — trying rebase..."
-        if ! git rebase origin/"$(git branch --show-current)"; then
-          warn "Rebase failed — resetting to origin"
-          git rebase --abort 2>/dev/null || true
-          log "Resetting to origin/$(git branch --show-current)..."
-          git reset --hard origin/"$(git branch --show-current)"
-        fi
+      git fetch origin "$branch"
+      if ! git merge --ff-only "origin/${branch}"; then
+        fail "Not possible to fast-forward safely; no local commit was discarded."
+        fail "Keep local commits: rebase them onto origin/${branch}, then rerun the update."
+        die "Discard local commits instead: aether update --force"
       fi
 
       ok "Repository updated"
@@ -84,15 +82,20 @@ main() {
 
   step "Rebuilding containers"
   build_all_images
-  "${COMPOSE[@]}" up -d redis app worker
+  "${COMPOSE[@]}" up -d redis
 
   step "Syncing the database schema"
   "${COMPOSE[@]}" --profile setup run --rm setup
 
+  # Start the new application only after its database schema is ready. On a fresh
+  # database this prevents the worker from querying tables that do not exist yet;
+  # on an update the old app stays up until this point.
+  "${COMPOSE[@]}" up -d app worker
+
   step "Certificate and nginx"
   if [[ -f "$NGINX_TEMPLATE" ]]; then
-    bash "$SCRIPT_DIR/ssl.sh" 2>/dev/null || warn "SSL renew skipped"
-    bash "$SCRIPT_DIR/nginx.sh" || warn "Nginx config generation skipped"
+    bash "$SCRIPT_DIR/ssl.sh"
+    bash "$SCRIPT_DIR/nginx.sh"
     "${COMPOSE[@]}" up -d nginx
   else
     "${COMPOSE[@]}" up -d

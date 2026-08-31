@@ -3,13 +3,19 @@ import { eq } from "drizzle-orm";
 import { db } from "@/shared/infrastructure/db";
 import { users } from "@/shared/infrastructure/db/schema";
 import { hashPassword } from "@/shared/lib/auth/password";
+import { validatePasswordStrength } from "@/shared/lib/security/password-policy";
 
 async function resetMasterPassword() {
-  const username = process.env.MASTER_USERNAME ?? "ByAFR";
   const password = process.env.MASTER_PASSWORD;
 
   if (!password) {
     console.error("MASTER_PASSWORD is required in .env");
+    process.exit(1);
+  }
+
+  const passwordCheck = validatePasswordStrength(password);
+  if (!passwordCheck.valid) {
+    console.error(`MASTER_PASSWORD is not strong enough: ${passwordCheck.errors.join("; ")}`);
     process.exit(1);
   }
 

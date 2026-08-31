@@ -197,9 +197,11 @@ Main window ──mutation──► React Query ──► BroadcastChannel ─�
 8. **End-to-end encryption (optional)** — AES-GCM in the browser; the server holds
    ciphertext and no key material.
 
-Secrets derived from `SESSION_SECRET`: TOTP secrets, step codes, and stored email
-credentials are encrypted with a key derived from it. Rotating it invalidates all
-three — plan for re-entering them rather than treating it as a free rotation.
+`SESSION_SECRET` signs short-lived login-stage tokens and derives the encryption
+keys for stored Gmail App Passwords and the Second Brain embedding credential.
+TOTP enrolments are stored independently and step codes are Argon2-hashed. Rotating
+the secret invalidates in-progress login tokens and makes the two encrypted
+credentials unreadable, but does not replace passwords, step codes, or TOTP.
 
 ---
 
@@ -222,6 +224,5 @@ transport issues no session id. Scaling out is a compose change, not a rewrite.
 **See also:** [Getting Started](getting-started.md) ·
 [Development](development.md) · [API Reference](api-reference.md) ·
 [Second Brain Architecture](second-brain-architecture.md)
-
 
 

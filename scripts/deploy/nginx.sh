@@ -33,6 +33,20 @@ generate_nginx() {
 
   envsubst '${DOMAIN} ${SSL_CERT} ${SSL_KEY}' < "$NGINX_TEMPLATE" > "$NGINX_GEN"
   ok "Nginx config generated: $NGINX_GEN"
+
+  # Prepare a production-only R2 CORS policy without editing the tracked template.
+  # Keeping runtime configuration under .deploy also means `aether update` sees a
+  # clean Git checkout on the VPS.
+  local cors_template="$ROOT/docker/r2-cors.json"
+  local cors_output="$ROOT/.deploy/r2-cors.json"
+  if [[ -f "$cors_template" ]]; then
+    mkdir -p "$ROOT/.deploy"
+    sed \
+      -e 's#"http://localhost:3000", ##' \
+      -e "s#https://your-domain.com#https://${domain}#g" \
+      "$cors_template" > "$cors_output"
+    ok "R2 CORS policy generated: $cors_output"
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

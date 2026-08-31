@@ -52,7 +52,7 @@ R2_PUBLIC_URL="https://pub-xxxxx.r2.dev"
 # Session & Authentication
 SESSION_SECRET="minimum-64-random-characters-here"
 MASTER_USERNAME="admin"
-MASTER_PASSWORD="your-secure-password"
+MASTER_PASSWORD="ReplaceMe-Strong-2026!"
 
 # Application
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
@@ -90,8 +90,8 @@ Use configuration from `docker/r2-cors.json`:
 ```json
 [
   {
-    "AllowedOrigins": ["http://localhost:3000"],
-    "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+    "AllowedOrigins": ["http://localhost:3000", "https://your-domain.com"],
+    "AllowedMethods": ["GET", "PUT", "POST", "HEAD"],
     "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3600
@@ -102,7 +102,7 @@ Use configuration from `docker/r2-cors.json`:
 Or via Wrangler CLI:
 
 ```bash
-wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
+npx wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
 ```
 
 ### 5. Start Development
@@ -143,9 +143,9 @@ Then set `REDIS_DISABLED=false` in `.env`.
 | `R2_SECRET_ACCESS_KEY` | ✅ | - | R2 Secret Key |
 | `R2_BUCKET_NAME` | ✅ | - | R2 bucket name |
 | `R2_PUBLIC_URL` | ✅ | - | Bucket public URL (dev: `https://pub-<hash>.r2.dev`) |
-| `SESSION_SECRET` | ✅ | - | Minimum 64 random characters for session encryption. Rotating it invalidates TOTP secrets, step codes, and stored email credentials — see [Deployment § SESSION_SECRET](deployment.md#rotating-session_secret-invalidates-credentials). |
-| `MASTER_USERNAME` | ✅ | - | Master admin username |
-| `MASTER_PASSWORD` | ✅ | - | Master admin password |
+| `SESSION_SECRET` | ✅ | - | Minimum 32 characters; the installer generates 64 hexadecimal characters. Rotating it invalidates in-progress login tokens plus stored email and embedding credentials — see [Deployment § SESSION_SECRET](deployment.md#rotating-session_secret-invalidates-credentials). |
+| `MASTER_USERNAME` | ✅ | - | Master admin username: 3–50 letters, numbers, dots, underscores, or hyphens |
+| `MASTER_PASSWORD` | ✅ | - | 10–128 characters using at least 3 of lowercase, uppercase, number, and special character |
 | `NEXT_PUBLIC_APP_URL` | ✅ | `http://localhost:3000` | Application base URL |
 | `BRAIN_EMBEDDING_PROVIDER` | ❌ | `none` | Embedding provider: `none` (default, semantic search abstains) or `openai` / `voyageai` (requires API key). See [Second Brain 2.0 § Embeddings](second-brain-2.0.md#embeddings). |
 | `REDIS_URL` | ❌ | `redis://localhost:6379` | Redis connection string |

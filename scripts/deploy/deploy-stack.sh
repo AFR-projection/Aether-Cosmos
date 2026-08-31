@@ -11,8 +11,19 @@ deploy_stack() {
   log "Building containers (first time may take several minutes)..."
   build_all_images
 
-  log "Starting redis, app, worker..."
+  log "Starting Redis..."
   "${COMPOSE[@]}" up -d redis
+
+  # The application and worker must not start against a fresh database before its
+  # tables exist. The setup image is already built above and does not need Redis.
+  log "Syncing database schema + bootstrapping the master account..."
+  if ! "${COMPOSE[@]}" --profile setup run --rm setup; then
+    fail "Database setup failed"
+    die "Check DATABASE_URL and run: ${COMPOSE[*]} --profile setup run --rm setup"
+  fi
+  ok "Database ready"
+
+  log "Starting app and worker..."
   "${COMPOSE[@]}" up -d app worker
 
   log "Waiting for app to become healthy..."
@@ -31,12 +42,6 @@ deploy_stack() {
   fi
   ok "App is healthy"
 
-  log "Running database migration + admin bootstrap..."
-  if ! "${COMPOSE[@]}" --profile setup run --rm setup; then
-    fail "Database setup failed"
-    die "Check DATABASE_URL and run: ${COMPOSE[*]} --profile setup run --rm setup"
-  fi
-  ok "Database ready"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

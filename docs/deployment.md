@@ -1,24 +1,23 @@
 # Deployment
 
-Production deployment of Aether Cosmos ByAFR on a fresh Ubuntu VPS, from nothing to a
-working HTTPS site. One command does the whole thing; everything below that command
-is either an explanation of it or a way out of a specific problem.
+Production deployment of Aether Cosmos ByAFR on a fresh Ubuntu VPS, from an empty
+server to a working HTTPS site.
 
 For local development, see [Getting Started](getting-started.md).
 
-- [Before you start](#before-you-start)
-- [Install in one command](#install-in-one-command)
+- [Quick start production](#quick-start-production)
+- [What the installer does](#what-the-installer-does)
 - [Redeploy](#redeploy)
 - [The `aether` command](#the-aether-command)
-- [What the installer asks for](#what-the-installer-asks-for)
+- [What you fill into `.env`](#what-you-fill-into-env)
 - [After the first install](#after-the-first-install)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Before you start
+## Quick start production
 
-### Server
+### 1. Prepare the VPS
 
 | Item | Minimum |
 |------|---------|
@@ -28,42 +27,100 @@ For local development, see [Getting Started](getting-started.md).
 | Disk | 20 GB SSD |
 | Network | Ports **80** and **443** open in the provider's security group |
 
-### External services (free tiers are sufficient)
+Use a fresh Ubuntu VPS. Open inbound TCP ports **22**, **80**, and **443** in the
+hosting provider's firewall/security group before continuing.
+
+### 2. Prepare the domain, database, and object storage
 
 | Service | Used for | Where |
 |---------|----------|-------|
-| PostgreSQL | All metadata and Second Brain data | Any managed PostgreSQL provider |
+| PostgreSQL + pgvector | All metadata and Second Brain data | A dedicated production database at a provider that supports the `vector` extension |
 | Cloudflare R2 | File objects | https://dash.cloudflare.com → R2 |
 | A domain | HTTPS certificate and app URL | Your registrar's DNS panel |
 
-The database is **external to the VPS**. The VPS runs the app, the
-worker, Redis, and Nginx; it never becomes the system of record.
+Have these values ready before connecting to the VPS:
 
-### One thing to do first: point the domain at the VPS
+- the complete PostgreSQL `DATABASE_URL`, on one line and containing
+  `sslmode=require` (the installer enables `pgvector` automatically);
+- the R2 Account ID, Access Key ID, Secret Access Key, bucket name, and public URL;
+- the production domain and an email address for Let's Encrypt.
+
+If the PostgreSQL provider uses an IP allowlist, add the VPS public IP before
+running the installer. The validation step prints that IP when access is refused.
+
+The PostgreSQL database and R2 bucket are external. The VPS runs the app, worker,
+Redis, and Nginx.
+
+Point the domain at the VPS:
 
 | Type | Name | Value |
 |------|------|-------|
 | A | `aether` (or `@`) | YOUR-VPS-IP |
 
-Propagation takes 5–30 minutes. `ping aether.example.com` must answer with the VPS
-IP before you install — Let's Encrypt verifies over HTTP, so certificate issuance
-fails while DNS still points elsewhere.
+Wait for propagation. `ping aether.example.com` or `dig +short
+aether.example.com` must return the VPS IP before installation because Let's
+Encrypt validates the domain over HTTP.
 
----
+### 3. Prepare the install directory
 
-## Install in one command
+SSH into the VPS as a normal sudo-capable user, then run these commands one line
+at a time:
 
-SSH into the VPS and run:
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates
+
+sudo mkdir -p /opt/aether-cosmos
+sudo chown "$USER:$USER" /opt/aether-cosmos
+cd /opt/aether-cosmos
+```
+
+Do not install Docker with `get.docker.com` first. The Aether bootstrap installs
+Docker Engine and Compose from Docker's official Ubuntu apt repository.
+
+### 4. Run the first-time installer
+
+While still inside `/opt/aether-cosmos`, run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AFR-projection/Aether-Cosmos/main/scripts/deploy/setup.sh | bash
 ```
 
-That is the whole install. It installs git and Docker, opens ports 80/443, clones
-the repository to `/opt/aether-cosmos`, installs the `aether` command, copies
-`.env.example` to `.env` and opens it in `nano` for you to fill in (domain,
-database, R2, admin account), then builds and starts everything. Expect 5–10
-minutes, most of it the container build.
+The installer opens `/opt/aether-cosmos/.env` in `nano`. Fill in the domain,
+PostgreSQL, R2, and master admin values, then save with **Ctrl+O**, **Enter**, and
+exit with **Ctrl+X**. Leave `SESSION_SECRET` unchanged; it is generated
+automatically.
+
+The remaining work is automatic: Docker and Compose installation, firewall rules,
+repository clone, HTTPS certificate, Nginx configuration, container builds,
+database schema sync, master account bootstrap, service startup, and health checks.
+Expect roughly 5–15 minutes depending on VPS and network speed.
+
+The installation is complete only when the final report says:
+
+```text
+All services healthy
+```
+
+Then open `https://your-domain.com` and sign in with `MASTER_USERNAME` and
+`MASTER_PASSWORD` from `.env`.
+
+If the installer stops, nothing needs to be deleted or restarted from zero. Fix
+the value it names and run:
+
+```bash
+cd /opt/aether-cosmos
+nano .env
+./install.sh
+```
+
+Before testing uploads, apply the generated R2 CORS policy. Add a Gmail sender if
+users need OTP email. Those are external account settings and cannot be completed
+by the VPS installer; see [After the first install](#after-the-first-install).
+
+---
+
+## What the installer does
 
 You write `.env` yourself, so you can re-open it with `nano .env` and re-run
 `./install.sh` as many times as it takes — nothing is hidden in a wizard's state.
@@ -91,16 +148,22 @@ AETHER_NO_INSTALL=1     bash setup.sh   # clone and stop, configure by hand
 AETHER_WIZARD=1         bash setup.sh   # answer prompts instead of editing .env
 ```
 
-### Doing it by hand instead
+### Manual installation instead
 
-The bootstrap is the same seven commands you would type yourself. If you would
+The bootstrap performs the same operations you would do yourself. If you would
 rather see each one, run these **one line at a time**:
 
 ```bash
-sudo apt update && sudo apt install -y git curl
+sudo apt update && sudo apt install -y git curl ca-certificates
 
-# Docker
-curl -fsSL https://get.docker.com | sh
+# Docker's official apt repository (Ubuntu 22.04/24.04)
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+. /etc/os-release
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${UBUNTU_CODENAME:-$VERSION_CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo usermod -aG docker "$USER" && newgrp docker
 
 # /opt belongs to root, so hand the directory over before cloning — cloning as
@@ -144,19 +207,20 @@ Rebuild without pulling — after editing `.env`, for example:
 aether deploy
 ```
 
-### When the update fails with "Not possible to fast-forward"
+### When the update refuses local changes or cannot fast-forward
 
 ```
-fatal: Not possible to fast-forward, aborting.
+Not possible to fast-forward safely; no local commit was discarded.
 ```
 
-The VPS checkout has diverged from the remote — someone edited files on the server.
-Three ways out, in order of preference:
+The VPS checkout has local edits or commits that are not on the remote. A normal
+update stops without stashing, rebasing, or deleting them. Three ways out, in order
+of preference:
 
 **1. Force reset** — the right choice when nothing on the VPS is worth keeping:
 
 ```bash
-aether update --force     # discards local changes, resets to origin, then updates
+aether update --force     # discards tracked edits/local commits, then updates
 ```
 
 **2. Stash and rebase** — keeps the local changes:
@@ -179,8 +243,9 @@ git reset --hard origin/main    # discards all local changes
 aether update
 ```
 
-Options 1 and 3 delete uncommitted work on the server permanently. `.env` and the
-Nginx config survive either way, because the update backs them up first.
+Options 1 and 3 delete tracked edits and local commits on the server permanently;
+untracked files are left alone. `.env` and the generated Nginx config survive
+either way and are also backed up before Git is touched.
 
 ---
 
@@ -201,6 +266,7 @@ checkout lives (`/etc/aether-cosmos.conf`), so none of these need a `cd` first.
 | `aether stop` / `aether start` | Stop or start the whole stack |
 | `aether env` | Open `.env` in `$EDITOR`, then re-validate it |
 | `aether backup` | Copy `.env` and the Nginx config into `.deploy/backups/` |
+| `aether reset-password` | Reset the master password from `MASTER_PASSWORD` in `.env` |
 | `aether shell [service]` | Shell inside a container (default `app`) |
 | `aether version` | Version, install directory, domain, deployed commit |
 
@@ -218,15 +284,17 @@ Four things. Have them open in a browser tab before you start.
 (`https://` + that hostname), and `CERTBOT_EMAIL`, an address Let's Encrypt can warn
 about expiry.
 
-**2. `DATABASE_URL`** — copy it from your PostgreSQL provider dashboard exactly as given, on one
-line, ending in `sslmode=require`.
+**2. `DATABASE_URL`** — copy it from your PostgreSQL provider dashboard exactly as
+given on one line. It must include `sslmode=require`; keep any additional parameters
+the provider adds after it.
 
 **3. R2 credentials** — account ID, access key ID, secret access key, bucket name,
 and the bucket's public URL. The account ID and access key ID are 32 hex characters,
 the secret is 64 — the install warns when a length looks wrong, because pasting the
 access key ID into both fields is the usual mistake.
 
-**4. Admin account** — username and a password of at least 10 characters. This
+**4. Admin account** — a 3–50 character username, plus a 10–128 character password
+using at least three of lowercase, uppercase, number, and special characters. This
 becomes the master account.
 
 Everything else in `.env.example` is already correct. `SESSION_SECRET` is generated
@@ -278,7 +346,7 @@ R2_BUCKET_NAME=aether-cosmos
 R2_PUBLIC_URL=https://pub-xxxx.r2.dev
 
 MASTER_USERNAME=admin
-MASTER_PASSWORD=password-at-least-10-characters
+MASTER_PASSWORD=ReplaceMe-Strong-2026!
 SESSION_SECRET=random-64-character-hex
 
 NEXT_PUBLIC_APP_URL=https://aether.example.com
@@ -304,23 +372,24 @@ Every variable, including the optional ones, is documented in
 Everything settable from the running app — upload limits, presigned URL lifetime,
 rate limits, login lockout — lives in **Admin → Settings**, not in `.env`.
 
-### What the installer does, in order
+### Install stages, in order
 
-1. validates `.env` formatting and reachability of the database and R2,
+1. validates `.env` formatting and proves the database and R2 bucket are reachable,
 2. requests a Let's Encrypt certificate,
 3. generates the Nginx configuration,
-4. builds and starts the containers (app, worker, redis, nginx),
-5. syncs the database schema and bootstraps the master admin,
+4. builds the images and starts Redis,
+5. enables pgvector, syncs the database schema, bootstraps the master admin, then
+   starts the app, worker, and Nginx,
 6. health-checks every service.
 
 A successful run ends with a health report; the labels are `Redis`, `App`,
 `Worker`, `Nginx`, `Database`, `SSL`, and `Email`:
 
 ```
-  Redis          OK   running
+  Redis          OK   PONG
   App            OK   HTTP responding
   Worker         OK   running
-  Nginx          OK   running
+  Nginx          OK   HTTPS responding
   Database       OK   connected
   SSL            OK   valid until Nov 12 08:14:00 2026 GMT
   Email          WARN no verified sender — add one in Admin → Email
@@ -328,33 +397,28 @@ A successful run ends with a health report; the labels are `Redis`, `App`,
 ```
 
 `Email` warns rather than fails on a fresh install — see
-[Add an email sender](#3-add-an-email-sender-otp-delivery).
+[Add an email sender](#2-add-an-email-sender-otp-delivery).
 
 ---
 
 ## After the first install
 
-Three things the installer cannot do for you.
+Two external account settings remain after the VPS is healthy.
 
 ### 1. Configure R2 CORS
 
 Browser uploads go straight to R2, so the bucket must accept your origin.
 Uploads fail with a CORS error until this is done.
 
-1. Edit `docker/r2-cors.json` and replace `your-domain.com` with your domain.
-2. Apply it — Cloudflare Dashboard → R2 → your bucket → Settings → CORS, or:
+The installer already writes a production-only policy containing your domain to
+`.deploy/r2-cors.json`. Apply it through Cloudflare Dashboard → R2 → your bucket →
+Settings → CORS, or from `/opt/aether-cosmos`:
 
 ```bash
-wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
+npx wrangler r2 bucket cors set YOUR-BUCKET-NAME --file .deploy/r2-cors.json
 ```
 
-### 2. Configure database IP allowlist (if required)
-
-Some PostgreSQL providers with IP restrictions enabled reject the VPS until it is allowlisted.
-Check your provider's dashboard → Project → Settings → **IP Allow** → add the VPS public IP. The
-installer prints the IP it connected from when the check fails.
-
-### 3. Add an email sender (OTP delivery)
+### 2. Add an email sender (OTP delivery)
 
 Registration codes, verification codes, and notifications go out over SMTP using
 Gmail senders you add yourself. Until at least one sender is verified, the health
@@ -377,6 +441,15 @@ it survives restarts.
 > Rotating `SESSION_SECRET` makes every stored App Password unreadable. Re-enter
 > them from Admin → Email afterwards.
 
+### Rotating `SESSION_SECRET` invalidates credentials
+
+Treat this value as a permanent encryption key, not as a password you rotate on a
+schedule. Changing it invalidates in-progress login-stage tokens and makes stored
+Gmail App Passwords plus the Second Brain embedding API key unreadable. Existing
+passwords, step codes, TOTP enrolments, and database-backed sessions remain valid.
+After an emergency rotation, rebuild with `aether deploy` and re-enter the email
+and embedding credentials in the admin UI.
+
 ### Backups
 
 Automatic, on every `aether update`: `.env` and the generated Nginx config, under
@@ -390,20 +463,18 @@ Worth doing yourself:
 
 ### Why schema updates need no manual step
 
-- PostgreSQL and Redis are **external services**. The VPS only connects to
-  them, and it connects to the same database used during development.
-- `aether update` syncs the schema with **`npm run db:push`**, not
-  `drizzle-kit migrate`. `db:push` compares `src/shared/infrastructure/db/schema.ts` against the live
-  database and applies only the difference; when they already match it is a no-op.
-- Schema changes already applied during development (new columns, indexes,
-  full-text search columns) are therefore live the moment the VPS connects. A
-  redeploy only rebuilds the application code.
+- PostgreSQL is external; Redis runs in Docker on the VPS and stores queues/cache.
+- Production should use its own PostgreSQL database, not the development database.
+- During every install and update, the setup container runs **`npm run db:push`**
+  against the `DATABASE_URL` configured on that VPS. It compares
+  `src/shared/infrastructure/db/schema.ts` with that database and applies the
+  difference; when they already match it is a no-op.
 
-> **Renaming a column is the exception.** `db:push` handles added columns and
-> indexes safely, but a rename it has not seen yet looks like "drop the old column,
-> create a new one", which destroys the data in it. Apply renames to your database **before**
-> redeploying, so `db:push` sees a schema that already matches. Keep the order
-> "apply to database first, then redeploy" and data is never at risk.
+> **Back up production before a destructive schema change.** Adds and compatible
+> indexes are routine, but a rename, type change, or removal can cause data loss or
+> require an explicit SQL migration. Do not rely on an unattended `db:push` for
+> those changes: prepare and test the migration first, then deploy compatible app
+> code.
 
 ---
 
@@ -507,15 +578,21 @@ session or socket to restore — a stalled pool is always a sender problem.
 
 ### Reset the master password
 
+Set the new value as `MASTER_PASSWORD` in `.env`, then run:
+
 ```bash
-docker compose -f docker/docker-compose.yml --profile setup run --rm setup
-# or, on the host with .env present:
-npm run reset-master-password
+aether reset-password
 ```
 
-> Changing `SESSION_SECRET` is not a password reset and is not free: stored Gmail
-> app passwords and TOTP secrets are encrypted with it and become unreadable.
-> Re-enter them from the admin panel afterwards.
+The equivalent low-level command is:
+
+```bash
+docker compose -f docker/docker-compose.yml --profile setup run --rm setup npm run reset-master-password
+```
+
+> Changing `SESSION_SECRET` is not a password reset. It makes stored Gmail App
+> Passwords and the embedding API key unreadable; re-enter both from the admin
+> panel afterwards.
 
 ---
 
@@ -554,12 +631,3 @@ metadata and Second Brain content.
 
 **See also:** [Getting Started](getting-started.md) ·
 [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
-
-
-
-
-
-
-
-
-

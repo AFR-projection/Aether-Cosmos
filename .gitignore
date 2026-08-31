@@ -13,6 +13,12 @@ out/
 .DS_Store
 Thumbs.db
 
+# Production runtime state (generated on the VPS)
+.deploy/
+docker/generated/*
+!docker/generated/.gitkeep
+docker/certbot-webroot/
+
 # Playwright output (default paths — playwright.config.ts sets no outputDir)
 test-results/
 playwright-report/

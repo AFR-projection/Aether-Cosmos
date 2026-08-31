@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:prepare": "tsx scripts/prepare-production-db.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "bootstrap": "tsx scripts/bootstrap-master.ts",

@@ -244,6 +244,7 @@ env_is_placeholder() {
     postgresql://user:pass@*|postgres://user:pass@*) return 0 ;;
     change-me-openssl-rand-hex-32) return 0 ;;
     change-this-strong-password-min-10-chars) return 0 ;;
+    ReplaceMe-Strong-2026!) return 0 ;;
     your_account_id|your_access_key|your_secret_key) return 0 ;;
     aether.example.com|https://aether.example.com|http://aether.example.com) return 0 ;;
     admin@example.com) return 0 ;;
@@ -371,7 +372,7 @@ init_docker() {
       export _DOCKER_SUDO_WARNED=1
     fi
   else
-    die "Docker is not reachable. Install: curl -fsSL https://get.docker.com | sh"
+    die "Docker is not reachable. Install Docker Engine from Docker's official apt repository, then rerun."
   fi
   COMPOSE=("${DOCKER[@]}" compose -f "$COMPOSE_FILE")
 }
@@ -589,6 +590,7 @@ print_final_status() {
   box_row "  $cli status     health of every service"
   box_row "  $cli logs       follow the logs"
   box_row "  $cli update     pull, rebuild, migrate, verify"
+  box_row "  Apply .deploy/r2-cors.json in Cloudflare R2" "$DIM"
   [[ "$cli" == "./bin/aether" ]] && \
     box_row "  sudo install -m 0755 bin/aether /usr/local/bin/" "$DIM"
   box_bot

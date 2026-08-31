@@ -71,6 +71,7 @@ usage() {
     aether stop | start      stop or start the whole stack
     aether env               edit .env, then re-validate it
     aether backup            copy .env and the nginx config into .deploy/backups
+    aether reset-password    reset master password from MASTER_PASSWORD in .env
     aether shell [service]   open a shell inside a container (default: app)
     aether version           versions and the deployed commit
 
@@ -144,6 +145,14 @@ case "$cmd" in
     cp "$ENV_FILE" "$DIR/.deploy/backups/.env.${stamp}"
     [[ -f "$NGINX_GEN" ]] && cp "$NGINX_GEN" "$DIR/.deploy/backups/nginx.${stamp}.conf"
     ok "Saved .deploy/backups/.env.${stamp}"
+    ;;
+  reset-password|reset-master-password)
+    ensure_docker >/dev/null
+    [[ -f "$ENV_FILE" ]] || die "No .env here — run the installer first"
+    load_env
+    [[ ${#MASTER_PASSWORD} -ge 10 ]] || die "Set MASTER_PASSWORD in .env to at least 10 characters first"
+    "${COMPOSE[@]}" --profile setup run --rm setup npm run reset-master-password
+    ok "Master password updated from MASTER_PASSWORD in .env"
     ;;
   version|--version|-v)
     load_env
