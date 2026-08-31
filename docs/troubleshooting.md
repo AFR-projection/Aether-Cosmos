@@ -28,9 +28,9 @@ Common failure modes and how to fix them.
 The presigned URL flow crosses origins: your dev app (`http://localhost:3000`)
 sends the client to R2. If R2 CORS is missing or wrong, the browser blocks it.
 
-1. Apply the CORS policy from `docker/r2-cors.json` to your bucket:
+1. Apply the generated CORS policy from `.deploy/r2-cors.json` to your bucket:
    ```bash
-   wrangler r2 bucket cors set <BUCKET_NAME> --file docker/r2-cors.json
+   npx wrangler r2 bucket cors set <BUCKET_NAME> --file .deploy/r2-cors.json
    ```
 2. Confirm `AllowedOrigins` includes `http://localhost:3000` or your dev URL.
 

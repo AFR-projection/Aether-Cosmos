@@ -97,6 +97,18 @@ validate_r2() {
   [[ $missing -eq 1 ]] && { VALIDATION_FAILED=1; return; }
   check_mark 0 "R2 variables OK"
 
+  if [[ "$R2_PUBLIC_URL" == https://* ]]; then
+    check_mark 0 "R2 public URL format OK"
+  else
+    check_mark 1 "R2_PUBLIC_URL must start with https://"
+  fi
+
+  if [[ "$R2_BUCKET_NAME" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]]; then
+    check_mark 0 "R2 bucket name format OK"
+  else
+    check_warn 1 "R2_BUCKET_NAME usually uses 3–63 lowercase letters, numbers, or hyphens — verify the exact dashboard value"
+  fi
+
   # Cloudflare hands out 32-hex Account ID / Access Key ID and a 64-hex Secret.
   # Pasting the Access Key ID into both fields is the single most common mistake and
   # otherwise only surfaces after a 7-minute build. Length only, never the value.
@@ -111,17 +123,11 @@ validate_r2() {
     fi
   done
 
-  local endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-  init_docker 2>/dev/null || true
-  if docker_run --rm \
-    -e AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
-    -e AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
-    -e AWS_DEFAULT_REGION=auto \
-    amazon/aws-cli:2.15.0 s3 ls "s3://${R2_BUCKET_NAME}" --endpoint-url "$endpoint" >/dev/null 2>&1; then
-    ok "R2 bucket accessible"
-  else
-    check_mark 1 "R2 bucket is not accessible — check the bucket name and Cloudflare credentials"
-  fi
+  # Do not use a third-party AWS CLI image here. A registry/network failure is not
+  # an R2 credential failure, and hiding both behind one message blocked valid VPS
+  # installs. The setup image verifies authenticated access with the exact AWS SDK
+  # used by the application and prints the real Cloudflare error.
+  ok "R2 values captured — authenticated access will be verified with the application SDK"
 }
 
 validate_app_url() {
@@ -178,13 +184,8 @@ validate_admin_and_email() {
     check_mark 0 "Master username format OK"
   fi
 
-  local classes=0
-  [[ "$MASTER_PASSWORD" =~ [a-z] ]] && classes=$(( classes + 1 ))
-  [[ "$MASTER_PASSWORD" =~ [A-Z] ]] && classes=$(( classes + 1 ))
-  [[ "$MASTER_PASSWORD" =~ [0-9] ]] && classes=$(( classes + 1 ))
-  [[ "$MASTER_PASSWORD" =~ [^a-zA-Z0-9] ]] && classes=$(( classes + 1 ))
-  if (( ${#MASTER_PASSWORD} < 10 || ${#MASTER_PASSWORD} > 128 || classes < 3 )); then
-    check_mark 1 "MASTER_PASSWORD must be 10–128 characters and use at least 3 of: lowercase, uppercase, number, special"
+  if (( ${#MASTER_PASSWORD} < 6 || ${#MASTER_PASSWORD} > 128 )); then
+    check_mark 1 "MASTER_PASSWORD must be 6–128 characters"
   else
     check_mark 0 "Master password policy OK"
   fi

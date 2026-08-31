@@ -243,7 +243,7 @@ env_is_placeholder() {
   case "${1:-}" in
     postgresql://user:pass@*|postgres://user:pass@*) return 0 ;;
     change-me-openssl-rand-hex-32) return 0 ;;
-    change-this-strong-password-min-10-chars) return 0 ;;
+    change-this-strong-password-min-10-chars|change-this-admin-password-min-6-chars) return 0 ;;
     ReplaceMe-Strong-2026!) return 0 ;;
     your_account_id|your_access_key|your_secret_key) return 0 ;;
     aether.example.com|https://aether.example.com|http://aether.example.com) return 0 ;;

@@ -14,8 +14,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
 
-COPY drizzle.config.ts ./
+COPY drizzle.config.ts tsconfig.json ./
 COPY src ./src
 COPY scripts ./scripts
 
-CMD ["sh", "-c", "npm run db:prepare && npm run db:push && npm run bootstrap"]
+CMD ["sh", "-c", "npm run r2:verify && npm run db:prepare && npm run db:push && npm run bootstrap"]

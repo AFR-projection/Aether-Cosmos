@@ -286,7 +286,7 @@ echo -e "    ${BOLD}CERTBOT_EMAIL${NC}          your email (for SSL expiry notif
 echo -e "    ${BOLD}DATABASE_URL${NC}           the PostgreSQL connection string, one full line ${DIM}(…sslmode=require)${NC}"
 echo -e "    ${BOLD}R2_*${NC}                   Account ID, Access Key ID, Secret, bucket, public URL"
 echo -e "    ${BOLD}MASTER_USERNAME${NC}        admin username"
-echo -e "    ${BOLD}MASTER_PASSWORD${NC}        admin password, min 10 characters"
+echo -e "    ${BOLD}MASTER_PASSWORD${NC}        admin password, min 6 characters"
 echo
 echo -e "  ${DIM}SESSION_SECRET is generated automatically — leave it alone.${NC}"
 echo -e "  ${DIM}Every value stays in $DIR/.env on this machine and is never sent anywhere.${NC}"

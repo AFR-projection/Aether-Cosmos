@@ -145,7 +145,7 @@ Then set `REDIS_DISABLED=false` in `.env`.
 | `R2_PUBLIC_URL` | ✅ | - | Bucket public URL (dev: `https://pub-<hash>.r2.dev`) |
 | `SESSION_SECRET` | ✅ | - | Minimum 32 characters; the installer generates 64 hexadecimal characters. Rotating it invalidates in-progress login tokens plus stored email and embedding credentials — see [Deployment § SESSION_SECRET](deployment.md#rotating-session_secret-invalidates-credentials). |
 | `MASTER_USERNAME` | ✅ | - | Master admin username: 3–50 letters, numbers, dots, underscores, or hyphens |
-| `MASTER_PASSWORD` | ✅ | - | 10–128 characters using at least 3 of lowercase, uppercase, number, and special character |
+| `MASTER_PASSWORD` | ✅ | - | Master admin password, 6–128 characters |
 | `NEXT_PUBLIC_APP_URL` | ✅ | `http://localhost:3000` | Application base URL |
 | `BRAIN_EMBEDDING_PROVIDER` | ❌ | `none` | Embedding provider: `none` (default, semantic search abstains) or `openai` / `voyageai` (requires API key). See [Second Brain 2.0 § Embeddings](second-brain-2.0.md#embeddings). |
 | `REDIS_URL` | ❌ | `redis://localhost:6379` | Redis connection string |

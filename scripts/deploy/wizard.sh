@@ -103,10 +103,10 @@ run_wizard() {
 
   section "Admin account  ·  4 of 4"
   prompt_into "Admin username" MASTER_USERNAME "ByAFR"
-  prompt_secret_into "Admin password (min 10 characters)" MASTER_PASSWORD
-  while [[ ${#MASTER_PASSWORD} -lt 10 ]]; do
-    warn "Admin password must be at least 10 characters."
-    prompt_secret_into "Admin password (min 10 characters)" MASTER_PASSWORD
+  prompt_secret_into "Admin password (min 6 characters)" MASTER_PASSWORD
+  while [[ ${#MASTER_PASSWORD} -lt 6 ]]; do
+    warn "Admin password must be at least 6 characters."
+    prompt_secret_into "Admin password (min 6 characters)" MASTER_PASSWORD
   done
 
   if command -v openssl >/dev/null 2>&1; then

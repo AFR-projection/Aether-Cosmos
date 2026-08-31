@@ -150,7 +150,7 @@ case "$cmd" in
     ensure_docker >/dev/null
     [[ -f "$ENV_FILE" ]] || die "No .env here — run the installer first"
     load_env
-    [[ ${#MASTER_PASSWORD} -ge 10 ]] || die "Set MASTER_PASSWORD in .env to at least 10 characters first"
+    [[ ${#MASTER_PASSWORD} -ge 6 ]] || die "Set MASTER_PASSWORD in .env to at least 6 characters first"
     "${COMPOSE[@]}" --profile setup run --rm setup npm run reset-master-password
     ok "Master password updated from MASTER_PASSWORD in .env"
     ;;

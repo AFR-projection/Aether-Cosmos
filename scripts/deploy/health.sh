@@ -118,6 +118,16 @@ check_database_quick() {
   fi
 }
 
+check_r2() {
+  # Run the same verifier bundled into the setup image so health checks exercise
+  # the same SDK, endpoint, and credentials as production file operations.
+  if "${COMPOSE[@]}" --profile setup run --rm setup npm run r2:verify >/dev/null 2>&1; then
+    status_line 0 "R2" "bucket accessible"
+  else
+    status_line 1 "R2" "access failed — run: ${COMPOSE[*]} --profile setup run --rm setup npm run r2:verify"
+  fi
+}
+
 run_health() {
   init_docker 2>/dev/null || true
   echo
@@ -128,6 +138,7 @@ run_health() {
   check_worker
   check_nginx
   check_database_quick
+  check_r2
   check_ssl
   check_email
   echo

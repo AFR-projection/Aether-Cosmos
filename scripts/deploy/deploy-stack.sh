@@ -16,12 +16,12 @@ deploy_stack() {
 
   # The application and worker must not start against a fresh database before its
   # tables exist. The setup image is already built above and does not need Redis.
-  log "Syncing database schema + bootstrapping the master account..."
+  log "Verifying R2, syncing the database, and bootstrapping the master account..."
   if ! "${COMPOSE[@]}" --profile setup run --rm setup; then
-    fail "Database setup failed"
-    die "Check DATABASE_URL and run: ${COMPOSE[*]} --profile setup run --rm setup"
+    fail "Production setup failed"
+    die "Read the error above, then retry: ${COMPOSE[*]} --profile setup run --rm setup"
   fi
-  ok "Database ready"
+  ok "R2, database, and master account ready"
 
   log "Starting app and worker..."
   "${COMPOSE[@]}" up -d app worker

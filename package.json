@@ -22,6 +22,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:prepare": "tsx scripts/prepare-production-db.ts",
     "db:push": "drizzle-kit push",
+    "r2:verify": "tsx scripts/verify-production-r2.ts",
     "db:studio": "drizzle-kit studio",
     "bootstrap": "tsx scripts/bootstrap-master.ts",
     "reset-master-password": "tsx scripts/reset-master-password.ts",

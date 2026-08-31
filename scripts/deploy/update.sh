@@ -84,7 +84,7 @@ main() {
   build_all_images
   "${COMPOSE[@]}" up -d redis
 
-  step "Syncing the database schema"
+  step "Verifying R2 and syncing the database schema"
   "${COMPOSE[@]}" --profile setup run --rm setup
 
   # Start the new application only after its database schema is ready. On a fresh

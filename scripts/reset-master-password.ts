@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/shared/infrastructure/db";
 import { users } from "@/shared/infrastructure/db/schema";
 import { hashPassword } from "@/shared/lib/auth/password";
-import { validatePasswordStrength } from "@/shared/lib/security/password-policy";
+import { validateMasterPassword } from "./master-password";
 
 async function resetMasterPassword() {
   const password = process.env.MASTER_PASSWORD;
@@ -13,9 +13,9 @@ async function resetMasterPassword() {
     process.exit(1);
   }
 
-  const passwordCheck = validatePasswordStrength(password);
-  if (!passwordCheck.valid) {
-    console.error(`MASTER_PASSWORD is not strong enough: ${passwordCheck.errors.join("; ")}`);
+  const passwordError = validateMasterPassword(password);
+  if (passwordError) {
+    console.error(passwordError);
     process.exit(1);
   }
 

@@ -293,9 +293,8 @@ and the bucket's public URL. The account ID and access key ID are 32 hex charact
 the secret is 64 — the install warns when a length looks wrong, because pasting the
 access key ID into both fields is the usual mistake.
 
-**4. Admin account** — a 3–50 character username, plus a 10–128 character password
-using at least three of lowercase, uppercase, number, and special characters. This
-becomes the master account.
+**4. Admin account** — a 3–50 character username and a password containing 6–128
+characters. This becomes the master account.
 
 Everything else in `.env.example` is already correct. `SESSION_SECRET` is generated
 for you when it is still the placeholder, and `NEXT_PUBLIC_APP_URL` /
@@ -374,16 +373,17 @@ rate limits, login lockout — lives in **Admin → Settings**, not in `.env`.
 
 ### Install stages, in order
 
-1. validates `.env` formatting and proves the database and R2 bucket are reachable,
+1. validates `.env` formatting and proves the database is reachable,
 2. requests a Let's Encrypt certificate,
 3. generates the Nginx configuration,
 4. builds the images and starts Redis,
-5. enables pgvector, syncs the database schema, bootstraps the master admin, then
-   starts the app, worker, and Nginx,
+5. verifies R2 through the application's AWS SDK, enables pgvector, syncs the
+   database schema, bootstraps the master admin, then starts the app, worker, and
+   Nginx,
 6. health-checks every service.
 
 A successful run ends with a health report; the labels are `Redis`, `App`,
-`Worker`, `Nginx`, `Database`, `SSL`, and `Email`:
+`Worker`, `Nginx`, `Database`, `R2`, `SSL`, and `Email`:
 
 ```
   Redis          OK   PONG
@@ -391,6 +391,7 @@ A successful run ends with a health report; the labels are `Redis`, `App`,
   Worker         OK   running
   Nginx          OK   HTTPS responding
   Database       OK   connected
+  R2             OK   bucket accessible
   SSL            OK   valid until Nov 12 08:14:00 2026 GMT
   Email          WARN no verified sender — add one in Admin → Email
   All services healthy
@@ -535,6 +536,20 @@ nano .env                 # or just fix the line, then ./install.sh
 - The R2 bucket CORS policy must list your HTTPS origin (see
   [Configure R2 CORS](#1-configure-r2-cors)).
 - `NEXT_PUBLIC_APP_URL` must match the URL in the browser's address bar.
+
+### R2 verification fails during install
+
+Run the verifier directly to see Cloudflare's real error without printing any
+secret value:
+
+```bash
+docker compose -f docker/docker-compose.yml --profile setup run --rm setup npm run r2:verify
+```
+
+Use the **S3 API credentials** created under Cloudflare R2 → Manage R2 API Tokens,
+not a normal Cloudflare API token. The token needs Object Read & Write access to
+the exact bucket in `R2_BUCKET_NAME`. Copy the Access Key ID and Secret Access Key
+into their matching `.env` fields; they are different values.
 
 ### Encrypted files ask for a passphrase and are excluded from ZIPs
 
