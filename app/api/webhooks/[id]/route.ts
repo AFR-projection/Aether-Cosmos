@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import {
   WEBHOOK_EVENTS,
   deleteWebhook,
   updateWebhook,
   type WebhookEventName,
-} from "@/lib/webhooks/manage";
-import { assertSafeWebhookTarget, WebhookTargetError } from "@/lib/webhooks/ssrf";
+} from "@/shared/infrastructure/webhooks/manage";
+import { assertSafeWebhookTarget, WebhookTargetError } from "@/shared/infrastructure/webhooks/ssrf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

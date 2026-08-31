@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { getTableName } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import * as schema from "@/lib/db/schema";
-import { relateOne, type RelateMemory } from "@/lib/brain/graph/relate";
+import * as schema from "@/shared/infrastructure/db/schema";
+import { relateOne, type RelateMemory } from "@brain/domain/graph/relate";
 import {
   RELATE_POLICY,
   RELATE_VERSION,
@@ -10,7 +10,7 @@ import {
   reconcileDerivedEdges,
   toDerivedEdgeInputs,
   type DerivedEdgeInput,
-} from "@/lib/brain/graph/derived-link-service";
+} from "@brain/application/commands/derived-link-service";
 
 /**
  * PHASE 2, end to end: the scenario the spec makes mandatory.
@@ -33,11 +33,11 @@ import {
 
 const retrieveMemories = vi.fn();
 
-vi.mock("@/lib/brain/retrieval/retrieve", () => ({
+vi.mock("@brain/application/queries/retrieve", () => ({
   retrieveMemories: (...args: unknown[]) => retrieveMemories(...args),
 }));
 
-const { findRelatedMemories } = await import("@/lib/brain/graph/related-service");
+const { findRelatedMemories } = await import("@brain/application/queries/related-service");
 
 const MEMORY_TABLE = getTableName(schema.memories);
 const LINK_TABLE = getTableName(schema.memoryLinks);
@@ -467,7 +467,7 @@ describe("quality gate 10 — one brain, five kinds of answer", () => {
  *
  * It implements those clauses rather than verifying them — a fake cannot confirm its
  * own WHERE — so brain scoping and the version filter stay asserted against the SQL
- * in `lib/brain/graph/derived-link-service.test.ts` and the migration in
+ * in `src/features/brain/application/commands/derived-link-service.test.ts` and the migration in
  * `tests/brain-derived-schema.test.ts`. What it does prove is what neither of those
  * can: that scoring, pruning, canonicalising and upserting *compose* into a converging
  * state when the same job runs twice, or when both endpoints of a pair are scored in

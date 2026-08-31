@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { keyHasScope } from "@/lib/auth/api-key";
+import { keyHasScope } from "@/shared/lib/auth/api-key";
 import {
   BRAIN_API_SCOPES,
   brainScopeSatisfied,
   DEFAULT_BRAIN_AGENT_SCOPES,
-} from "@/lib/brain/constants";
-import { parseBrainArchive, planImport } from "@/lib/brain/import-service";
+} from "@brain/domain/constants";
+import { parseBrainArchive, planImport } from "@brain/application/commands/import-service";
 
 /**
  * §46 — multi-tenant isolation. Mandatory, and the reason this file exists rather
@@ -41,7 +41,7 @@ function readAll(dir: string, predicate: (path: string) => boolean): { path: str
 
 const brainRoutes = readAll(join(ROOT, "app", "api", "brain"), (path) => path.endsWith("route.ts"));
 const brainServices = readAll(
-  join(ROOT, "lib", "brain"),
+  join(ROOT, "src", "features", "brain"),
   (path) => path.endsWith(".ts") && !path.endsWith(".test.ts")
 );
 
@@ -102,7 +102,7 @@ describe("case 3 — every brain-table query is brain-scoped", () => {
 
   /**
    * A file "touches" a table when it names it in a Drizzle query position, not when
-   * prose happens to use the same English word — `lib/brain/graph/relate.ts` talks
+   * prose happens to use the same English word — `src/features/brain/domain/graph/relate.ts` talks
    * about "17 memories" in a comment and queries nothing.
    *
    * `\\b` deliberately, not `\b`: inside a template literal the single escape is a
@@ -172,7 +172,7 @@ describe("case 5 — brain scopes do not escalate", () => {
 });
 
 describe("case 6 — MCP tools resolve a grant before every operation", () => {
-  const tools = readFileSync(join(ROOT, "lib", "brain", "mcp", "tools.ts"), "utf8");
+  const tools = readFileSync(join(ROOT, "src", "features", "brain", "infrastructure", "mcp", "tools.ts"), "utf8");
 
   it("every registered tool calls requireGrant", () => {
     const bodies = tools.split(/server\.registerTool\(/).slice(1);
@@ -194,7 +194,7 @@ describe("case 6 — MCP tools resolve a grant before every operation", () => {
     const suspicious = tools
       .split(/server\.registerTool\(/)
       .slice(1)
-      .filter((body) => /brainId:\s*brainId/.test(body))
+      .filter((body) => /brainId:\s*brainId\b/.test(body))
       .map((body) => body.slice(0, 60).replace(/\s+/g, " "));
 
     expect(suspicious).toEqual([]);
@@ -216,8 +216,8 @@ describe("case 6 — MCP tools resolve a grant before every operation", () => {
 });
 
 describe("case 7 — the link table cannot hold a cross-brain or malformed edge", () => {
-  const schema = readFileSync(join(ROOT, "lib", "db", "schema.ts"), "utf8");
-  const linkService = readFileSync(join(ROOT, "lib", "brain", "link-service.ts"), "utf8");
+  const schema = readFileSync(join(ROOT, "src", "shared", "infrastructure", "db", "schema.ts"), "utf8");
+  const linkService = readFileSync(join(ROOT, "src", "features", "brain", "application", "commands", "link-service.ts"), "utf8");
 
   it("memory_links carries its own brain_id", () => {
     expect(schema).toMatch(/memoryLinks = pgTable\(/);
@@ -264,7 +264,7 @@ describe("case 8 — an imported archive cannot claim ownership", () => {
   });
 
   it("stamps ownership from the target brain, never from the archive", () => {
-    const source = readFileSync(join(ROOT, "lib", "brain", "import-service.ts"), "utf8");
+    const source = readFileSync(join(ROOT, "src", "features", "brain", "application", "commands", "import-service.ts"), "utf8");
     const run = source.slice(source.indexOf("export async function runImport"));
 
     // Every inserted row is built with the route's brainId in scope.
@@ -301,7 +301,7 @@ describe("case 9 — imported references cannot point outside the archive", () =
 
 describe("case 10 — export carries brain content only", () => {
   it("the archive builder never reads a user, session, api key or credential table", () => {
-    const source = readFileSync(join(ROOT, "lib", "brain", "export-service.ts"), "utf8");
+    const source = readFileSync(join(ROOT, "src", "features", "brain", "application", "commands", "export-service.ts"), "utf8");
     for (const forbidden of ["users", "sessions", "apiKeys", "mailSenders", "otpTokens", "oauth"]) {
       expect(source).not.toMatch(new RegExp(`\b${forbidden}\b`));
     }

@@ -237,7 +237,7 @@ env_put() {
 }
 
 # True when a value is still one of the literal examples from .env.example. Matched
-# exactly, not by substring: a real Neon URL or R2 key must never be mistaken for a
+# exactly, not by substring: a real PostgreSQL URL or R2 key must never be mistaken for a
 # placeholder and block a deploy that would have worked.
 env_is_placeholder() {
   case "${1:-}" in

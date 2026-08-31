@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BrainGraphSnapshot as ServerSnapshot } from "@/lib/brain/graph-snapshot";
-import { DEFAULT_GROUP_RULES, resolveGroups } from "@/lib/brain/graph/groups";
-import { buildGraphModel, edgesOf, emptyGraphModel, neighboursOf } from "@/lib/brain/graph/model";
-import { describeQuery, matchesQuery, parseGraphQuery } from "@/lib/brain/graph/query";
-import { DEFAULT_CAMERA, fitCamera, panCamera, zoomCamera } from "@/lib/brain/graph/renderer";
-import { ALPHA_MIN, ForceSimulation } from "@/lib/brain/graph/simulation";
+import type { BrainGraphSnapshot as ServerSnapshot } from "@brain/application/queries/graph-snapshot";
+import { DEFAULT_GROUP_RULES, resolveGroups } from "@brain/presentation/canvas/groups";
+import { buildGraphModel, edgesOf, emptyGraphModel, neighboursOf } from "@brain/presentation/canvas/model";
+import { describeQuery, matchesQuery, parseGraphQuery } from "@brain/presentation/canvas/query";
+import { DEFAULT_CAMERA, fitCamera, panCamera, zoomCamera } from "@brain/presentation/canvas/renderer";
+import { ALPHA_MIN, ForceSimulation } from "@brain/presentation/canvas/simulation";
 import {
   DEFAULT_DISPLAY_SETTINGS,
   type BrainGraphSnapshot,
   type DisplaySettings,
-} from "@/lib/brain/graph/types";
-import { buildGraphView, buildLocalView } from "@/lib/brain/graph/view";
+} from "@brain/presentation/canvas/types";
+import { buildGraphView, buildLocalView } from "@brain/presentation/canvas/view";
 
 /**
  * Unit tests for the graph pipeline: model -> query -> view -> groups, plus the

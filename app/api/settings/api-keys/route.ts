@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import {
   API_KEY_SCOPES,
   API_KEY_PRESETS,
@@ -14,8 +14,8 @@ import {
   normalizeApiKeyScopes,
   type ApiKeyScope,
   type ApiKeyPreset,
-} from "@/lib/auth/api-key";
-import { buildApiV1Docs } from "@/lib/api/v1-docs";
+} from "@/shared/lib/auth/api-key";
+import { buildApiV1Docs } from "@/shared/api/v1-docs";
 
 export async function GET() {
   try {

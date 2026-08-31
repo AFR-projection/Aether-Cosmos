@@ -1,18 +1,18 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import {
   generateTotpSecret,
   verifyTotpCode,
   generateRecoveryCodes,
-} from "@/lib/security/totp";
-import { verifyPassword } from "@/lib/auth/password";
+} from "@/shared/lib/security/totp";
+import { verifyPassword } from "@/shared/lib/auth/password";
 
 /** Start 2FA setup — returns secret + otpauth URI (not enabled until confirm). */
 export async function POST(request: NextRequest) {

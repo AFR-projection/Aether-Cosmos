@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { requireBrainContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
-import { searchMemories } from "@/lib/brain/memory-service";
-import { MEMORY_SEARCH_MAX, MEMORY_TYPES } from "@/lib/brain/constants";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { requireBrainContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
+import { searchMemories } from "@brain/application/commands/memory-service";
+import { MEMORY_SEARCH_MAX, MEMORY_TYPES } from "@brain/domain/constants";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

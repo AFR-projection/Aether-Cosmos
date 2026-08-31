@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireMaster, getClientIp } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { requireMaster, getClientIp } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import {
   MASTER_API_KEY_PRESETS,
   MASTER_API_KEY_SCOPES,
@@ -15,8 +15,8 @@ import {
   normalizeMasterApiKeyScopes,
   type MasterApiKeyPreset,
   type MasterApiKeyScope,
-} from "@/lib/auth/api-key";
-import { buildMasterApiDocs } from "@/lib/api/master-v1-docs";
+} from "@/shared/lib/auth/api-key";
+import { buildMasterApiDocs } from "@/shared/api/master-v1-docs";
 
 export async function GET() {
   try {

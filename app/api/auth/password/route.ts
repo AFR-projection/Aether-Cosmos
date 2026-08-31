@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { eq, and, ne } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users, sessions } from "@/lib/db/schema";
-import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { requireAuth, destroyAllUserSessions } from "@/lib/auth/session";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { logActivity } from "@/lib/auth/audit";
-import { validatePasswordStrength } from "@/lib/security/password-policy";
-import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
-import { notifyUser } from "@/lib/email/notify-user";
+import { db } from "@/shared/infrastructure/db";
+import { users, sessions } from "@/shared/infrastructure/db/schema";
+import { hashPassword, verifyPassword } from "@/shared/lib/auth/password";
+import { requireAuth, destroyAllUserSessions } from "@/shared/lib/auth/session";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validatePasswordStrength } from "@/shared/lib/security/password-policy";
+import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { notifyUser } from "@/shared/infrastructure/email/notify-user";
 
 const passwordSchema = z.object({
   currentPassword: z.string().min(1).optional(),

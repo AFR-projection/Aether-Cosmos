@@ -29,7 +29,7 @@ agents reach it only through an authorized API.
                     │          (entities)     (relationships)
               Versioning
                     │
-                Brain API  ── lib/brain/*-service.ts
+                Brain API  ── @brain/application/**/*-service.ts
                     │
            ┌────────┴────────┐
            │                 │
@@ -88,7 +88,7 @@ Notable constraints:
 ## Isolation
 
 Every request resolves in one order, at one choke point
-(`lib/brain/access.ts` for REST, `lib/brain/mcp/principal.ts` for MCP):
+(`@brain/infrastructure/access.ts` for REST, `@brain/infrastructure/mcp/principal.ts` for MCP):
 
 ```
 authenticated principal → authorized brain → authorized resource → operation
@@ -127,8 +127,8 @@ New agents default to `read + search + write + link` — never `delete`, never
 
 **The storage `full` scope does NOT grant any `brain.*` scope.** Every API key
 already issued with `full` would otherwise silently gain access to the owner's
-memories. See `keyHasScope` in `lib/auth/api-key.ts` and the test in
-`lib/brain/constants.test.ts`.
+memories. See `keyHasScope` in `@/shared/lib/auth/api-key.ts` and the test in
+`@brain/domain/constants.test.ts`.
 
 OAuth access tokens can never reach the Brain: `brain.*` is not in `OAUTH_SCOPES`,
 so `parseScopes` strips it.

@@ -52,13 +52,13 @@ npm test
 
 ## Tests
 
-Vitest runs in the Node environment and collects `lib/**/*.test.ts` and
+Vitest runs in the Node environment and collects `src/**/*.test.ts` and
 `tests/**/*.test.ts`. Tests are colocated with the code they cover.
 
 Consequences worth knowing:
 
 - A test placed under `app/**` will never run. Route logic is tested by extracting
-  it into `lib/` and testing that.
+  it into `src/` and testing that.
 - Database access is faked, not mocked away: the suite uses recording fakes that
   stage writes inside a transaction and only "commit" them on resolve, so
   atomicity and rollback are asserted directly rather than assumed.
@@ -83,21 +83,21 @@ Two rules the suite depends on:
   the bundled docs in `node_modules/next/dist/docs/` are the authority, not memory
   of older releases. Heed deprecation notices there.
 - **The proxy file is `proxy.ts`**, not `middleware.ts`.
-- **Schema first.** `lib/db/schema.ts` is the source of truth; enum lists used by
-  validation are derived from it (`lib/brain/constants.ts`) so zod and Postgres
+- **Schema first.** `src/shared/infrastructure/db/schema.ts` is the source of truth; enum lists used by
+  validation are derived from it (`@brain/domain/constants.ts`) so zod and Postgres
   cannot drift.
 - **Migrations are additive.** The database was bootstrapped with `db:push`, so
   `__drizzle_migrations` is empty and `drizzle-kit migrate` would replay from zero.
   Apply a single file with `npx tsx scripts/apply-migration.ts <file.sql>` instead.
   Do not write destructive migrations; do not rename or drop existing tables.
-- **Errors.** Return typed messages through `lib/api/response.ts`; SQL text and
+- **Errors.** Return typed messages through `@/shared/api/response.ts`; SQL text and
   stack traces stay in the server log.
 - **Comments** explain why, not what, and match the density of the file they are in.
 
 ## Version stamping
 
-`package.json` declares the version; `lib/app-version.ts` mirrors it as a literal
-for the client bundle, and `lib/app-version.test.ts` fails if the two drift. When
+`package.json` declares the version; `@/shared/lib/app-version.ts` mirrors it as a literal
+for the client bundle, and `@/shared/lib/app-version.test.ts` fails if the two drift. When
 releasing, bump both — the test tells you if you forgot. The version is shown in
 Settings → About.
 

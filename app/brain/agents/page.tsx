@@ -19,10 +19,10 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { BrainShell } from "@/components/brain/brain-shell";
-import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { BrainShell } from "@brain/presentation/components/brain-shell";
+import { BrainErrorState, BrainLoading, BrainPanel } from "@brain/presentation/components/brain-states";
 import {
   agentMonogram,
   bucketTimestamps,
@@ -32,11 +32,17 @@ import {
   PresencePill,
   TickStrip,
   useNow,
-} from "@/components/brain/agent-presence";
-import { useDialogs } from "@/components/ui/dialog-prompts";
-import { notify } from "@/lib/system/notify-store";
-import { cn, formatDate } from "@/lib/utils";
-import { BRAIN_RISKY_SCOPES, BRAIN_SCOPE_LABELS } from "@/lib/brain/ui-constants";
+} from "@brain/presentation/components/agent-presence";
+import { useDialogs } from "@/ui/primitives/dialog-prompts";
+import { notify } from "@/shared/lib/system/notify-store";
+import { cn } from "@/shared/lib/utils";
+import { useFormat, useT } from "@/shared/lib/i18n";
+import {
+  BRAIN_RISKY_SCOPES,
+  brainOperationLabel,
+  brainScopeDescription,
+  brainScopeLabel,
+} from "@brain/domain/ui-constants";
 import {
   useActiveBrain,
   useAgents,
@@ -45,11 +51,11 @@ import {
   useCreateAgent,
   useRevokeAgent,
   type BrainAgent,
-} from "@/hooks/use-brain";
+} from "@brain/presentation/hooks/use-brain";
 
 /**
  * The audit feed is the only signal there is for "which agents are talking to
- * this brain right now" (see components/brain/agent-presence.tsx), so this page
+ * this brain right now" (see @brain/presentation/components/agent-presence.tsx), so this page
  * asks for the widest window the endpoint allows and re-polls it tightly.
  */
 const AUDIT_WINDOW = 200;
@@ -70,6 +76,7 @@ function CopyButton({
   variant?: "secondary" | "ghost";
 }) {
   const [copied, setCopied] = useState(false);
+  const t = useT();
 
   return (
     <Button
@@ -82,7 +89,7 @@ function CopyButton({
           setCopied(true);
           window.setTimeout(() => setCopied(false), 1800);
         } catch {
-          notify({ title: "Clipboard blocked by the browser", tone: "error" });
+          notify({ title: t("brain.agents.clipboardBlocked"), tone: "error" });
         }
       }}
     >
@@ -91,7 +98,7 @@ function CopyButton({
       ) : (
         <Copy className="h-4 w-4" aria-hidden="true" />
       )}
-      {copied ? "Copied" : label}
+      {copied ? t("common.copied") : label}
     </Button>
   );
 }
@@ -110,21 +117,26 @@ function SyncPill({
   updatedAt: number;
   now: number;
 }) {
-  const age = updatedAt > 0 ? formatAge(now - updatedAt) : null;
+  const t = useT();
+  const age = updatedAt > 0 ? formatAge(now - updatedAt, t) : null;
   return (
     <span
       className="brain-sync"
       data-state={state}
-      title={`Refreshes every ${Math.round(AUDIT_POLL_MS / 1000)}s`}
+      title={t("brain.agents.syncTitle", { seconds: Math.round(AUDIT_POLL_MS / 1000) })}
     >
       <span className="brain-sync__dot" aria-hidden="true" />
-      {state === "error" ? "Sync failed" : state === "syncing" ? "Syncing" : "Live"}
+      {state === "error"
+        ? t("brain.agents.syncFailed")
+        : state === "syncing"
+          ? t("brain.agents.syncing")
+          : t("brain.agents.syncLive")}
       {age && state !== "error" && (
         <>
           <span aria-hidden="true">·</span>
           <span className="brain-sync__time">{age}</span>
           <span className="sr-only">
-            last updated {describeAge(now - updatedAt)}
+            {t("brain.agents.lastUpdated", { age: describeAge(now - updatedAt, t) })}
           </span>
         </>
       )}
@@ -135,6 +147,8 @@ function SyncPill({
 export default function BrainAgentsPage() {
   const { brain } = useActiveBrain();
   const { dialogs, askConfirm } = useDialogs();
+  const t = useT();
+  const { formatDate, formatNumber } = useFormat();
 
   const agents = useAgents(brain?.id);
   const audit = useBrainAudit(brain?.id, AUDIT_WINDOW, AUDIT_POLL_MS);
@@ -225,11 +239,11 @@ export default function BrainAgentsPage() {
           setName("");
           setScopes([]);
           setCreating(false);
-          notify({ title: "Agent created — copy its key now", tone: "success" });
+          notify({ title: t("brain.agents.created"), tone: "success" });
         },
         onError: (error) =>
           notify({
-            title: error instanceof Error ? error.message : "Could not create agent",
+            title: error instanceof Error ? error.message : t("brain.agents.createFailed"),
             tone: "error",
           }),
       }
@@ -238,11 +252,15 @@ export default function BrainAgentsPage() {
 
   async function handleRevoke(agent: BrainAgent, everywhere: boolean) {
     const confirmed = await askConfirm({
-      title: everywhere ? `Revoke ${agent.name} everywhere?` : `Remove ${agent.name} from this brain?`,
+      title: everywhere
+        ? t("brain.agents.revokeEverywhereTitle", { name: agent.name })
+        : t("brain.agents.removeAccessTitle", { name: agent.name }),
       message: everywhere
-        ? "Its API key is deleted and every brain grant it holds is dropped. This cannot be undone."
-        : "It loses access to this brain. Its key keeps working for any other brain it was granted.",
-      confirmText: everywhere ? "Revoke everywhere" : "Remove access",
+        ? t("brain.agents.revokeEverywhereBody")
+        : t("brain.agents.removeAccessBody"),
+      confirmText: everywhere
+        ? t("brain.agents.revokeEverywhere")
+        : t("brain.agents.removeAccess"),
       danger: everywhere,
     });
     if (!confirmed) return;
@@ -250,10 +268,10 @@ export default function BrainAgentsPage() {
     revokeAgent.mutate(
       { agentId: agent.id, everywhere },
       {
-        onSuccess: () => notify({ title: "Access revoked", tone: "success" }),
+        onSuccess: () => notify({ title: t("brain.agents.revoked"), tone: "success" }),
         onError: (error) =>
           notify({
-            title: error instanceof Error ? error.message : "Could not revoke access",
+            title: error instanceof Error ? error.message : t("brain.agents.revokeFailed"),
             tone: "error",
           }),
       }
@@ -262,12 +280,12 @@ export default function BrainAgentsPage() {
 
   return (
     <BrainShell
-      title="Agents"
-      description="Give an external agent scoped access to this brain. The brain outlives the agent."
+      title={t("brain.agents.title")}
+      description={t("brain.agents.description")}
       actions={
         <Button size="sm" onClick={() => setCreating((value) => !value)}>
           <Plus className="h-4 w-4" aria-hidden="true" />
-          Connect agent
+          {t("brain.agents.connectAction")}
         </Button>
       }
     >
@@ -275,16 +293,15 @@ export default function BrainAgentsPage() {
 
       <div className="space-y-5">
         {/* ── Live fleet ── */}
-        <section className="brain-surface p-5" aria-label="Fleet status">
+        <section className="brain-surface p-5" aria-label={t("brain.agents.fleetStatus")}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Radio className="h-4 w-4 text-accent-ink" aria-hidden="true" />
-                Live fleet
+                {t("brain.agents.liveFleet")}
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Presence is read from the audit trail — an agent counts as connected once it
-                calls this brain. Last {AUDIT_WINDOW} events.
+                {t("brain.agents.fleetBody", { count: AUDIT_WINDOW })}
               </p>
             </div>
             <SyncPill state={syncState} updatedAt={audit.dataUpdatedAt} now={now} />
@@ -294,52 +311,53 @@ export default function BrainAgentsPage() {
             <div className="brain-metric" data-presence="live">
               <span>
                 <Zap aria-hidden="true" />
-                Connected
+                {t("brain.agents.connected")}
               </span>
-              <strong>{fleet.live}</strong>
-              <small>called in the last 2 minutes</small>
-            </div>            <div className="brain-metric">
+              <strong>{formatNumber(fleet.live)}</strong>
+              <small>{t("brain.agents.connectedHint")}</small>
+            </div>
+            <div className="brain-metric">
               <span>
                 <Activity aria-hidden="true" />
-                Idle
+                {t("brain.agents.idle")}
               </span>
-              <strong>{fleet.idle}</strong>
-              <small>quiet for under 30 minutes</small>
+              <strong>{formatNumber(fleet.idle)}</strong>
+              <small>{t("brain.agents.idleHint")}</small>
             </div>
             <div className="brain-metric">
               <span>
                 <Users aria-hidden="true" />
-                Agents
+                {t("brain.agents.roster")}
               </span>
               <strong>
-                {fleet.active}
+                {formatNumber(fleet.active)}
                 {agents.data && (
                   <span className="text-sm font-normal text-muted-foreground">
                     {" / "}
-                    {agents.data.maxAgents}
+                    {formatNumber(agents.data.maxAgents)}
                   </span>
                 )}
               </strong>
-              <small>with access to this brain</small>
+              <small>{t("brain.agents.rosterHint")}</small>
             </div>
             <div className="brain-metric">
               <span>
                 <Terminal aria-hidden="true" />
-                Agent calls
+                {t("brain.agents.calls")}
               </span>
-              <strong>{fleet.calls}</strong>
-              <small>in the window shown below</small>
+              <strong>{formatNumber(fleet.calls)}</strong>
+              <small>{t("brain.agents.callsHint")}</small>
             </div>
           </div>
 
           <div className="mt-4">
             <TickStrip
               buckets={fleet.buckets}
-              label={`Agent calls per hour over the last 24 hours. ${fleet.calls} calls in total.`}
+              label={t("brain.agents.fleetTicks", { count: fleet.calls })}
             />
             <div className="brain-ticks__axis">
-              <span>24h ago</span>
-              <span>now</span>
+              <span>{t("brain.agents.axisStart")}</span>
+              <span>{t("brain.agents.axisEnd")}</span>
             </div>
           </div>
         </section>
@@ -351,20 +369,17 @@ export default function BrainAgentsPage() {
         {issuedKey && (
           <BrainPanel
             icon={KeyRound}
-            title={`Key for ${issuedKey.agent}`}
+            title={t("brain.agents.keyFor", { name: issuedKey.agent })}
             className="brain-surface--warn"
           >
-            <p className="text-sm text-muted-foreground">
-              This is the only time the key is shown. Only its hash is stored — if you lose it,
-              mint a new agent.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("brain.agents.keyOnce")}</p>
             <code
               className={cn("brain-code brain-code--secret mt-3 block", !keyRevealed && "brain-code--masked")}
             >
               {issuedKey.key}
             </code>
             <div className="mt-3 flex flex-wrap gap-2">
-              <CopyButton value={issuedKey.key} label="Copy key" />
+              <CopyButton value={issuedKey.key} label={t("brain.agents.copyKey")} />
               <Button
                 variant="ghost"
                 size="sm"
@@ -376,7 +391,7 @@ export default function BrainAgentsPage() {
                 ) : (
                   <Eye className="h-4 w-4" aria-hidden="true" />
                 )}
-                {keyRevealed ? "Hide" : "Reveal"}
+                {keyRevealed ? t("brain.agents.hide") : t("brain.agents.reveal")}
               </Button>
               <Button
                 variant="ghost"
@@ -386,29 +401,30 @@ export default function BrainAgentsPage() {
                   setKeyRevealed(false);
                 }}
               >
-                I have saved it
+                {t("brain.agents.keySaved")}
               </Button>
             </div>
           </BrainPanel>
         )}
 
         {creating && (
-          <BrainPanel icon={Plus} title="Connect an agent">
+          <BrainPanel icon={Plus} title={t("brain.agents.connectTitle")}>
             <form onSubmit={handleCreate} className="space-y-4">
               <Input
                 value={name}
                 maxLength={100}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Agent name (OpenClaw, Hermes, …)"
-                aria-label="Agent name"
+                placeholder={t("brain.agents.namePlaceholder")}
+                aria-label={t("brain.agents.nameLabel")}
                 autoFocus
               />
 
               <fieldset>
-                <legend className="mb-2 text-xs font-medium text-foreground">Permissions</legend>
+                <legend className="mb-2 text-xs font-medium text-foreground">
+                  {t("brain.agents.permissions")}
+                </legend>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {availableScopes.map((scope) => {
-                    const meta = BRAIN_SCOPE_LABELS[scope];
                     const checked = effectiveScopes.includes(scope);
                     return (
                       <label
@@ -425,21 +441,23 @@ export default function BrainAgentsPage() {
                           <Check />
                         </span>
                         <span className="min-w-0">
-                          <span className="brain-scope__label">{meta?.label ?? scope}</span>
-                          <span className="brain-scope__hint">{meta?.description ?? scope}</span>
+                          <span className="brain-scope__label">{brainScopeLabel(scope, t)}</span>
+                          <span className="brain-scope__hint">
+                            {brainScopeDescription(scope, t) ?? scope}
+                          </span>
                         </span>
                       </label>
                     );
                   })}
                 </div>
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  Delete and Export are off by default on purpose.
+                  {t("brain.agents.riskyOff")}
                 </p>
               </fieldset>
 
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" size="sm" onClick={() => setCreating(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   type="submit"
@@ -449,16 +467,19 @@ export default function BrainAgentsPage() {
                   {createAgent.isPending && (
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   )}
-                  Create agent
+                  {t("brain.agents.createAgent")}
                 </Button>
               </div>
             </form>
           </BrainPanel>
         )}
 
-        {agents.isLoading && <BrainLoading label="Loading agents" />}
+        {agents.isLoading && <BrainLoading label={t("brain.agents.loading")} />}
         {agents.isError && (
-          <BrainErrorState message="Could not load agents." onRetry={() => void agents.refetch()} />
+          <BrainErrorState
+            message={t("brain.agents.loadFailed")}
+            onRetry={() => void agents.refetch()}
+          />
         )}
 
         {agents.data &&
@@ -487,8 +508,13 @@ export default function BrainAgentsPage() {
                         </div>
                         <span className="brain-agent__op">
                           {state?.lastOperation && state.lastSeenAt
-                            ? `${state.lastOperation} · ${formatDate(state.lastSeenAt, "medium")}`
-                            : `Added ${formatDate(agent.createdAt, "medium")}`}
+                            ? t("brain.agents.lastActivity", {
+                                operation: brainOperationLabel(state.lastOperation, t),
+                                date: formatDate(state.lastSeenAt, "medium"),
+                              })
+                            : t("brain.agents.addedOn", {
+                                date: formatDate(agent.createdAt, "medium"),
+                              })}
                         </span>
                       </div>
 
@@ -497,10 +523,13 @@ export default function BrainAgentsPage() {
                           <TickStrip
                             compact
                             buckets={state.buckets}
-                            label={`${agent.name}: ${state.ops} calls in the last two hours`}
+                            label={t("brain.agents.agentTicks", {
+                              name: agent.name,
+                              count: state.ops,
+                            })}
                           />
                           <span className="mt-1 block text-[10px] text-muted-foreground">
-                            {state.ops} call{state.ops === 1 ? "" : "s"} · 2h
+                            {t("brain.agents.callsWindow", { count: state.ops })}
                           </span>
                         </div>
                       )}
@@ -516,7 +545,7 @@ export default function BrainAgentsPage() {
                               BRAIN_RISKY_SCOPES.has(scope) && "brain-chip--on"
                             )}
                           >
-                            {BRAIN_SCOPE_LABELS[scope]?.label ?? scope}
+                            {brainScopeLabel(scope, t)}
                           </span>
                         ))}
                       </span>
@@ -529,7 +558,7 @@ export default function BrainAgentsPage() {
                           onClick={() => void handleRevoke(agent, false)}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden="true" />
-                          Remove from brain
+                          {t("brain.agents.removeFromBrain")}
                         </Button>
                         <Button
                           variant="destructive"
@@ -538,7 +567,7 @@ export default function BrainAgentsPage() {
                           onClick={() => void handleRevoke(agent, true)}
                         >
                           <ShieldOff className="h-4 w-4" aria-hidden="true" />
-                          Revoke everywhere
+                          {t("brain.agents.revokeEverywhere")}
                         </Button>
                       </span>
                     </div>
@@ -551,51 +580,49 @@ export default function BrainAgentsPage() {
               <span className="brain-empty__icon">
                 <Bot className="h-5 w-5" aria-hidden="true" />
               </span>
-              <p className="brain-empty__title">No agents connected</p>
-              <p className="brain-empty__body">
-                Create an agent to give OpenClaw, Hermes, or any MCP client scoped access to this
-                brain. Once it calls in, it appears here live.
-              </p>
+              <p className="brain-empty__title">{t("brain.agents.emptyTitle")}</p>
+              <p className="brain-empty__body">{t("brain.agents.emptyBody")}</p>
               <Button size="sm" className="mt-1" onClick={() => setCreating(true)}>
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                Connect an agent
+                {t("brain.agents.connectTitle")}
               </Button>
             </div>
           ))}
 
         {connect.data && (
-          <BrainPanel icon={Plug} title="MCP connection">
-            <p className="text-sm text-muted-foreground">
-              Point any MCP client at this endpoint with the agent key as a Bearer token. Stateless
-              — no session id to manage.
-            </p>
+          <BrainPanel icon={Plug} title={t("brain.agents.mcpTitle")}>
+            <p className="text-sm text-muted-foreground">{t("brain.agents.mcpBody")}</p>
 
             <dl className="mt-4 space-y-4 text-sm">
               <div>
                 <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                  Endpoint
+                  {t("brain.agents.endpoint")}
                 </dt>
                 <dd className="mt-1.5 flex flex-wrap items-center gap-2">
                   <code className="brain-code min-w-0 flex-1">{connect.data.mcp.url}</code>
-                  <CopyButton value={connect.data.mcp.url} label="Copy URL" />
+                  <CopyButton value={connect.data.mcp.url} label={t("brain.agents.copyUrl")} />
                 </dd>
               </div>
 
               <div>
                 <dt className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                  Set-up snippet
+                  {t("brain.agents.snippet")}
                 </dt>
                 <dd className="mt-1.5">
                   {/* Two ways in, one at a time — a switch instead of two stacked
                       code blocks the user has to scroll past. */}
-                  <div className="brain-seg mb-2" role="group" aria-label="Snippet format">
+                  <div
+                    className="brain-seg mb-2"
+                    role="group"
+                    aria-label={t("brain.agents.snippetFormat")}
+                  >
                     <button
                       type="button"
                       className="brain-seg__btn"
                       aria-pressed={connectTab === "config"}
                       onClick={() => setConnectTab("config")}
                     >
-                      Client config
+                      {t("brain.agents.clientConfig")}
                     </button>
                     <button
                       type="button"
@@ -617,7 +644,11 @@ export default function BrainAgentsPage() {
                         <div className="mt-2">
                           <CopyButton
                             value={snippet}
-                            label={connectTab === "config" ? "Copy config" : "Copy command"}
+                            label={
+                              connectTab === "config"
+                                ? t("brain.agents.copyConfig")
+                                : t("brain.agents.copyCommand")
+                            }
                           />
                         </div>
                       </>
@@ -628,7 +659,7 @@ export default function BrainAgentsPage() {
 
               <div>
                 <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                  Authentication
+                  {t("brain.agents.authentication")}
                 </dt>
                 <dd className="mt-1.5 text-xs text-muted-foreground">
                   <span className="brain-chip brain-chip--mono">

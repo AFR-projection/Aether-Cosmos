@@ -1,12 +1,12 @@
 import { eq, and, isNull, desc, count, sum } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { files, folders, activityLogs, users } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId, isMaster } from "@/lib/auth/permissions";
+import { db } from "@/shared/infrastructure/db";
+import { files, folders, activityLogs, users } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId, isMaster } from "@/shared/lib/auth/permissions";
 import { NextResponse } from "next/server";
-import { SECURITY_HEADERS } from "@/lib/security";
-import { handleApiError } from "@/lib/api/response";
-import { getAdminSettings } from "@/lib/admin-settings";
+import { SECURITY_HEADERS } from "@/shared/lib/security";
+import { handleApiError } from "@/shared/api/response";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
 
 export async function GET() {
   try {

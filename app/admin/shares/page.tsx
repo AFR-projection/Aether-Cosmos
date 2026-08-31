@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { apiFetch } from "@/lib/api/client";
-import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/admin/confirm-dialog";
+import { apiFetch } from "@/shared/api/client";
+import { Button } from "@/ui/primitives/button";
+import { useConfirm } from "@admin/presentation/components/confirm-dialog";
 import {
   AdminEmpty,
   AdminHeader,
@@ -18,9 +18,10 @@ import {
   SearchField,
   Segment,
   Skeleton,
-} from "@/components/admin/admin-ui";
-import { notify } from "@/lib/system/notify-store";
-import { cn, formatBytes, formatDate } from "@/lib/utils";
+} from "@admin/presentation/components/admin-ui";
+import { notify } from "@/shared/lib/system/notify-store";
+import { useFormat, useT } from "@/shared/lib/i18n";
+import { cn } from "@/shared/lib/utils";
 import {
   Share2,
   Search,
@@ -54,20 +55,35 @@ type ShareRow = {
   status: "active" | "expired";
 };
 
-const STATUS_OPTIONS = [
-  { value: "all" as const, label: "All" },
-  { value: "active" as const, label: "Active" },
-  { value: "expired" as const, label: "Expired" },
-];
+const STATUS_VALUES = ["all", "active", "expired"] as const;
 
 export default function AdminSharesPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+  const t = useT();
+  const { formatBytes, formatDate } = useFormat();
   const [status, setStatus] = useState<"all" | "active" | "expired">("all");
   const [ownerSearch, setOwnerSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [revoking, setRevoking] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+
+  // Built here rather than at module scope: the labels are translated, and `t`
+  // only exists inside the component.
+  const statusOptions = useMemo(
+    () =>
+      STATUS_VALUES.map((value) => ({
+        value,
+        label: t(
+          value === "all"
+            ? "admin.shares.statusAll"
+            : value === "active"
+              ? "admin.shares.statusActive"
+              : "admin.shares.statusExpired"
+        ),
+      })),
+    [t]
+  );
 
   const { data: shares, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["admin-shares", status],
@@ -125,9 +141,9 @@ export default function AdminSharesPage() {
     if (selected.size === 0) return;
     confirm.open(
       {
-        title: `Revoke ${selected.size} share link${selected.size !== 1 ? "s" : ""}?`,
-        message: "Anyone holding these links will immediately lose access. This cannot be undone.",
-        confirmLabel: "Revoke links",
+        title: t("admin.shares.revokeTitle", { count: selected.size }),
+        message: t("admin.shares.revokeMessage"),
+        confirmLabel: t("admin.shares.revokeConfirm"),
         danger: true,
       },
       async () => {
@@ -138,14 +154,17 @@ export default function AdminSharesPage() {
             body: JSON.stringify({ ids: Array.from(selected) }),
           });
           if (!res.success) {
-            notify({ title: res.error ?? "Failed to revoke shares", tone: "error" });
+            notify({ title: res.error ?? t("admin.shares.revokeFailed"), tone: "error" });
             return;
           }
-          notify({ title: `${selected.size} share link(s) revoked`, tone: "success" });
+          notify({
+            title: t("admin.shares.revoked", { count: selected.size }),
+            tone: "success",
+          });
           setSelected(new Set());
           queryClient.invalidateQueries({ queryKey: ["admin-shares"] });
         } catch {
-          notify({ title: "Connection failed", tone: "error" });
+          notify({ title: t("errors.connectionFailed"), tone: "error" });
         } finally {
           setRevoking(false);
         }
@@ -167,28 +186,46 @@ export default function AdminSharesPage() {
     <div className="space-y-5">
       <AdminHeader
         icon={Share2}
-        kicker="Shares"
-        title="Share links"
-        lede="Every public link across every account, newest first. Select the ones that should stop working and revoke them in one pass."
+        kicker={t("admin.shares.kicker")}
+        title={t("admin.shares.title")}
+        lede={t("admin.shares.lede")}
         actions={
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} aria-hidden="true" />
-            Refresh
+            {t("common.refresh")}
           </Button>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <AdminMetric icon={Link2} label="Links" value={rows.length} tone="accent" hint="In this view" />
-        <AdminMetric icon={Check} label="Active" value={summary.active} tone="success" hint="Reachable right now" />
+        <AdminMetric
+          icon={Link2}
+          label={t("admin.shares.metricLinks")}
+          value={rows.length}
+          tone="accent"
+          hint={t("admin.shares.metricLinksHint")}
+        />
+        <AdminMetric
+          icon={Check}
+          label={t("admin.shares.statusActive")}
+          value={summary.active}
+          tone="success"
+          hint={t("admin.shares.metricActiveHint")}
+        />
         <AdminMetric
           icon={CircleSlash}
-          label="Expired"
+          label={t("admin.shares.statusExpired")}
           value={summary.expired}
           tone="muted"
-          hint="Already refusing access"
+          hint={t("admin.shares.metricExpiredHint")}
         />
-        <AdminMetric icon={Eye} label="Opens" value={summary.opens} tone="info" hint="Total across all links" />
+        <AdminMetric
+          icon={Eye}
+          label={t("admin.shares.opens")}
+          value={summary.opens}
+          tone="info"
+          hint={t("admin.shares.metricOpensHint")}
+        />
       </div>
 
       {/* One bar for both jobs: filtering when nothing is selected, bulk actions
@@ -200,14 +237,14 @@ export default function AdminSharesPage() {
               checked
               indeterminate={!allSelected}
               onChange={() => setSelected(new Set())}
-              label="Clear selection"
+              label={t("admin.ui.clearSelection")}
             />
             <span className="text-[0.8rem] font-medium">
-              <span className="adm-num">{selected.size}</span> selected
+              {t("common.selectedCount", { count: selected.size })}
             </span>
             <div className="ml-auto flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button variant="destructive" size="sm" disabled={revoking} onClick={revokeSelected}>
                 {revoking ? (
@@ -215,7 +252,7 @@ export default function AdminSharesPage() {
                 ) : (
                   <Trash2 className="h-4 w-4" aria-hidden="true" />
                 )}
-                Revoke {selected.size}
+                {t("admin.shares.revokeCount", { count: selected.size })}
               </Button>
             </div>
           </>
@@ -225,18 +262,27 @@ export default function AdminSharesPage() {
               icon={Search}
               value={ownerSearch}
               onChange={setOwnerSearch}
-              label="Search shares"
-              placeholder="Owner, file name, or token…"
+              label={t("admin.shares.searchLabel")}
+              placeholder={t("admin.shares.searchPlaceholder")}
             />
-            <Segment value={status} onChange={setStatus} options={STATUS_OPTIONS} label="Share status" />
+            <Segment
+              value={status}
+              onChange={setStatus}
+              options={statusOptions}
+              label={t("admin.shares.statusFilterLabel")}
+            />
           </>
         )}
       </div>
 
       <AdminPanel
         icon={Share2}
-        title={`${filtered.length} share${filtered.length !== 1 ? "s" : ""}`}
-        sub={ownerSearch.trim() ? `Matching “${ownerSearch.trim()}”` : undefined}
+        title={t("admin.shares.panelTitle", { count: filtered.length })}
+        sub={
+          ownerSearch.trim()
+            ? t("admin.ui.matching", { query: ownerSearch.trim() })
+            : undefined
+        }
         flush
       >
         {isLoading ? (
@@ -246,11 +292,13 @@ export default function AdminSharesPage() {
         ) : filtered.length === 0 ? (
           <AdminEmpty
             icon={Link2}
-            title={rows.length === 0 ? "No share links" : "Nothing matches that filter"}
-            body={
+            title={
               rows.length === 0
-                ? "When a user shares a file by link it appears here, along with how many times it has been opened."
-                : "Try a different owner, file name, or token — or widen the status filter."
+                ? t("admin.shares.emptyTitle")
+                : t("admin.shares.noMatchTitle")
+            }
+            body={
+              rows.length === 0 ? t("admin.shares.emptyBody") : t("admin.shares.noMatchBody")
             }
           />
         ) : (
@@ -263,15 +311,19 @@ export default function AdminSharesPage() {
                       checked={allSelected}
                       indeterminate={selected.size > 0}
                       onChange={toggleAll}
-                      label={allSelected ? "Deselect all shares" : "Select all shares"}
+                      label={
+                        allSelected
+                          ? t("admin.shares.deselectAll")
+                          : t("admin.shares.selectAll")
+                      }
                     />
                   </th>
-                  <th>File</th>
-                  <th>Owner</th>
-                  <th>Status</th>
-                  <th>Opens</th>
-                  <th>Created</th>
-                  <th style={{ width: "5.5rem" }}>Link</th>
+                  <th>{t("admin.shares.colFile")}</th>
+                  <th>{t("admin.shares.colOwner")}</th>
+                  <th>{t("admin.shares.colStatus")}</th>
+                  <th>{t("admin.shares.opens")}</th>
+                  <th>{t("admin.shares.colCreated")}</th>
+                  <th style={{ width: "5.5rem" }}>{t("admin.shares.colLink")}</th>
                 </tr>
               </thead>
               <tbody>{filtered.map((s) => renderRow(s))}</tbody>
@@ -292,7 +344,7 @@ export default function AdminSharesPage() {
           <CheckBox
             checked={selected.has(s.id)}
             onChange={() => toggle(s.id)}
-            label={`Select share for ${s.fileName}`}
+            label={t("admin.shares.selectOne", { name: s.fileName })}
           />
         </td>
         <td>
@@ -311,9 +363,15 @@ export default function AdminSharesPage() {
         </td>
         <td>
           <Chip tone={s.status === "active" ? "success" : "muted"}>
-            {s.status === "active" ? "Active" : "Expired"}
+            {s.status === "active"
+              ? t("admin.shares.statusActive")
+              : t("admin.shares.statusExpired")}
           </Chip>
-          {s.expiresAt && <div className="adm-sub mt-1">Expires {formatDate(s.expiresAt)}</div>}
+          {s.expiresAt && (
+            <div className="adm-sub mt-1">
+              {t("admin.shares.expires", { date: formatDate(s.expiresAt) })}
+            </div>
+          )}
         </td>
         <td>
           <span className="adm-num">
@@ -336,7 +394,7 @@ export default function AdminSharesPage() {
             <IconButton
               icon={copied === s.id ? Check : Copy}
               tone={copied === s.id ? "success" : undefined}
-              label={copied === s.id ? "Link copied" : "Copy share link"}
+              label={copied === s.id ? t("admin.shares.linkCopied") : t("admin.shares.copyLink")}
               onClick={() => void copyUrl(s.shareUrl, s.id)}
             />
             <a
@@ -344,8 +402,8 @@ export default function AdminSharesPage() {
               target="_blank"
               rel="noreferrer"
               className="adm-iconbtn"
-              aria-label={`Open share link for ${s.fileName} in a new tab`}
-              title="Open link"
+              aria-label={t("admin.shares.openLinkFor", { name: s.fileName })}
+              title={t("admin.shares.openLink")}
             >
               <ExternalLink aria-hidden="true" />
             </a>

@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { fileContents, changeHistory } from "@/lib/db/schema";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp } from "@/lib/auth/session";
-import { getAccessibleFile, getEffectiveUserId } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { tiptapToPlainText } from "@/lib/search/tiptap-text";
+import { db } from "@/shared/infrastructure/db";
+import { fileContents, changeHistory } from "@/shared/infrastructure/db/schema";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { getAccessibleFile, getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { tiptapToPlainText } from "@/shared/lib/search/tiptap-text";
 
 export async function GET(
   _request: NextRequest,
@@ -82,7 +82,7 @@ export async function PUT(
       });
     }
 
-    const { files } = await import("@/lib/db/schema");
+    const { files } = await import("@/shared/infrastructure/db/schema");
     await db
       .update(files)
       .set({

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { Readable } from "stream";
 import sharp from "sharp";
-import { EDIT_MAX_DIMENSION, EDIT_SOURCE_MAX_BYTES } from "@/lib/files/edit-limits";
+import { EDIT_MAX_DIMENSION, EDIT_SOURCE_MAX_BYTES } from "@files/domain/services/edit-limits";
 
 /**
  * Bounds and guarantees on the server-side image editor and the media trimmer.
@@ -47,13 +47,13 @@ const store = vi.hoisted(() => ({
   queueUp: true,
 }));
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn().mockResolvedValue(true) };
 });
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return {
     ...actual,
     requireAuth: vi.fn().mockResolvedValue({ id: "user-1", role: "user" }),
@@ -61,7 +61,7 @@ vi.mock("@/lib/auth/session", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/auth/permissions", () => ({
+vi.mock("@/shared/lib/auth/permissions", () => ({
   getAccessibleFile: vi.fn(async () =>
     store.file ? { canView: true, canEdit: store.canEdit, file: store.file } : null
   ),
@@ -71,7 +71,7 @@ vi.mock("@/lib/auth/permissions", () => ({
   resolveWritableDestination: vi.fn(async () => store.destination),
 }));
 
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@files/infrastructure/storage/r2", () => ({
   objectExists: vi.fn(async () => true),
   downloadFromR2Stream: vi.fn(async () => {
     store.r2Calls++;
@@ -83,14 +83,14 @@ vi.mock("@/lib/storage/r2", () => ({
   buildR2Key: vi.fn((userId: string, fileId: string) => `users/${userId}/objects/${fileId}`),
 }));
 
-vi.mock("@/lib/files/versions", () => ({
+vi.mock("@files/application/commands/versions", () => ({
   snapshotFileVersion: vi.fn(async () => {
     store.snapshots++;
     return { previousVersion: 1, newVersion: 2 };
   }),
 }));
 
-vi.mock("@/lib/queue", () => ({
+vi.mock("@/shared/infrastructure/queue", () => ({
   getQueue: vi.fn(() => (store.queueUp ? ({} as unknown) : null)),
   enqueueJob: vi.fn(async (type: string, data: Record<string, unknown>) => {
     if (!store.queueUp) return false;
@@ -99,13 +99,13 @@ vi.mock("@/lib/queue", () => ({
   }),
 }));
 
-vi.mock("@/lib/auth/audit", () => ({
+vi.mock("@/shared/lib/auth/audit", () => ({
   logActivity: vi.fn(async (_user: unknown, action: string, options?: { metadata?: unknown }) => {
     store.activity.push({ action, metadata: options?.metadata });
   }),
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   const selectChain = {
     from: () => selectChain,
     where: () => selectChain,
@@ -137,7 +137,7 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-vi.mock("@/lib/db/schema", async (importOriginal) => importOriginal());
+vi.mock("@/shared/infrastructure/db/schema", async (importOriginal) => importOriginal());
 
 const FILE_ID = "6f1a1b1e-1c2d-4e3f-8a4b-5c6d7e8f9a01";
 

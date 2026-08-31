@@ -3,27 +3,29 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Brain as BrainIcon, Check, Plus, Search, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { BrainShell } from "@/components/brain/brain-shell";
-import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
-import { MemoryCard } from "@/components/brain/memory-card";
-import { MemoryForm } from "@/components/brain/memory-form";
-import { notify } from "@/lib/system/notify-store";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { MEMORY_TYPE_OPTIONS } from "@/lib/brain/ui-constants";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { BrainShell } from "@brain/presentation/components/brain-shell";
+import { BrainErrorState, BrainLoading, BrainPanel } from "@brain/presentation/components/brain-states";
+import { MemoryCard } from "@brain/presentation/components/memory-card";
+import { MemoryForm } from "@brain/presentation/components/memory-form";
+import { notify } from "@/shared/lib/system/notify-store";
+import { useDebouncedValue } from "@/ui/hooks/use-debounced-value";
+import { useT } from "@/shared/lib/i18n";
+import { MEMORY_TYPE_OPTIONS } from "@brain/domain/ui-constants";
 import {
   useActiveBrain,
   useBrainTags,
   useCreateMemory,
   useMemories,
   useProjects,
-} from "@/hooks/use-brain";
+} from "@brain/presentation/hooks/use-brain";
 
 export default function BrainMemoriesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { brain } = useActiveBrain();
+  const t = useT();
 
   const [creating, setCreating] = useState(searchParams.get("new") === "1");
   // The graph view deep-links here as ?q=<label> when a memory node is opened.
@@ -74,33 +76,36 @@ export default function BrainMemoriesPage() {
 
   return (
     <BrainShell
-      title="Memories"
-      description="Everything this brain knows. Search it, or write something worth keeping."
+      title={t("brain.memories.title")}
+      description={t("brain.memories.description")}
       actions={
         <Button size="sm" onClick={() => setCreating((value) => !value)}>
           <Plus className="h-4 w-4" aria-hidden="true" />
-          New memory
+          {t("brain.memories.newMemory")}
         </Button>
       }
     >
       <div className="space-y-5">
         {creating && (
-          <BrainPanel icon={Plus} title="New memory">
+          <BrainPanel icon={Plus} title={t("brain.memories.newMemory")}>
             <MemoryForm
               projects={projects.data?.projects ?? []}
-              submitLabel="Save memory"
+              submitLabel={t("brain.memories.saveMemory")}
               pending={createMemory.isPending}
               error={createMemory.error instanceof Error ? createMemory.error.message : null}
               onCancel={closeForm}
               onSubmit={(values) => {
                 createMemory.mutate(values, {
                   onSuccess: () => {
-                    notify({ title: "Memory saved", tone: "success" });
+                    notify({ title: t("brain.memories.saved"), tone: "success" });
                     closeForm();
                   },
                   onError: (error) =>
                     notify({
-                      title: error instanceof Error ? error.message : "Could not save memory",
+                      title:
+                        error instanceof Error
+                          ? error.message
+                          : t("brain.memories.saveFailed"),
                       tone: "error",
                     }),
                 });
@@ -115,34 +120,37 @@ export default function BrainMemoriesPage() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search memories…"
-              aria-label="Search memories"
+              placeholder={t("brain.memories.searchPlaceholder")}
+              aria-label={t("brain.memories.searchLabel")}
               className="h-9 border-0 bg-transparent px-0 focus-visible:border-0 focus-visible:ring-0"
             />
             {hasFilters && (
               <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
                 <X className="h-4 w-4" aria-hidden="true" />
-                Clear
+                {t("brain.memories.clearFilters")}
               </Button>
             )}
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/40 pt-3">
             <FilterSelect
-              label="Type"
+              label={t("brain.memories.filterType")}
               value={type}
               onChange={setType}
               options={[
-                { value: "", label: "All types" },
-                ...MEMORY_TYPE_OPTIONS.map((option) => ({ ...option })),
+                { value: "", label: t("brain.memories.allTypes") },
+                ...MEMORY_TYPE_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: t(option.labelKey),
+                })),
               ]}
             />
             <FilterSelect
-              label="Project"
+              label={t("brain.memories.filterProject")}
               value={projectId}
               onChange={setProjectId}
               options={[
-                { value: "", label: "All projects" },
+                { value: "", label: t("brain.memories.allProjects") },
                 ...(projects.data?.projects ?? []).map((project) => ({
                   value: project.id,
                   label: project.name,
@@ -150,11 +158,11 @@ export default function BrainMemoriesPage() {
               ]}
             />
             <FilterSelect
-              label="Tag"
+              label={t("brain.memories.filterTag")}
               value={tag}
               onChange={setTag}
               options={[
-                { value: "", label: "All tags" },
+                { value: "", label: t("brain.memories.allTags") },
                 ...(tags.data?.tags ?? []).map((item) => ({
                   value: item.name,
                   label: item.name,
@@ -170,15 +178,15 @@ export default function BrainMemoriesPage() {
               <span className="brain-scope__box" aria-hidden="true">
                 <Check />
               </span>
-              <span className="brain-scope__label">Archived only</span>
+              <span className="brain-scope__label">{t("brain.memories.archivedOnly")}</span>
             </label>
           </div>
         </div>
 
-        {memories.isLoading && <BrainLoading label="Loading memories" rows={4} />}
+        {memories.isLoading && <BrainLoading label={t("brain.memories.loading")} rows={4} />}
         {memories.isError && (
           <BrainErrorState
-            message="Could not load memories."
+            message={t("brain.memories.loadFailed")}
             onRetry={() => void memories.refetch()}
           />
         )}
@@ -191,8 +199,7 @@ export default function BrainMemoriesPage() {
               ))}
               {memories.data.nextCursor && (
                 <p className="pt-1 text-center text-xs text-muted-foreground">
-                  Showing the first {memories.data.memories.length}. Narrow the filters to find
-                  more.
+                  {t("brain.memories.truncated", { count: memories.data.memories.length })}
                 </p>
               )}
             </div>
@@ -202,22 +209,24 @@ export default function BrainMemoriesPage() {
                 <BrainIcon className="h-5 w-5" aria-hidden="true" />
               </span>
               <p className="brain-empty__title">
-                {hasFilters ? "Nothing matches those filters" : "No memories"}
+                {hasFilters
+                  ? t("brain.memories.emptyFilteredTitle")
+                  : t("brain.memories.emptyTitle")}
               </p>
               <p className="brain-empty__body">
                 {hasFilters
-                  ? "Try a different search term, or clear the filters."
-                  : "Write something this brain should remember permanently."}
+                  ? t("brain.memories.emptyFilteredBody")
+                  : t("brain.memories.emptyBody")}
               </p>
               {hasFilters ? (
                 <Button size="sm" variant="secondary" className="mt-1" onClick={clearFilters}>
                   <X className="h-4 w-4" aria-hidden="true" />
-                  Clear filters
+                  {t("brain.memories.clearFilters")}
                 </Button>
               ) : (
                 <Button size="sm" className="mt-1" onClick={() => setCreating(true)}>
                   <Plus className="h-4 w-4" aria-hidden="true" />
-                  Write a memory
+                  {t("brain.memories.writeMemory")}
                 </Button>
               )}
             </div>

@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { webhooks } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getOwnedWebhook } from "@/lib/webhooks/manage";
-import { fetchWebhook } from "@/lib/webhooks/ssrf";
-import { WEBHOOK_USER_AGENT } from "@/lib/webhooks/constants";
-import { APP_NAME } from "@/lib/app-version";
+import { db } from "@/shared/infrastructure/db";
+import { webhooks } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { getOwnedWebhook } from "@/shared/infrastructure/webhooks/manage";
+import { fetchWebhook } from "@/shared/infrastructure/webhooks/ssrf";
+import { WEBHOOK_USER_AGENT } from "@/shared/infrastructure/webhooks/constants";
+import { APP_NAME } from "@/shared/lib/app-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,5 +1,5 @@
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { getAdminSettings } from "@/lib/admin-settings";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
 
 /**
  * Registration status probe used by the register/login pages to decide whether

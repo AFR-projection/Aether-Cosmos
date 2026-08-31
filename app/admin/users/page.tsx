@@ -4,13 +4,13 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { apiFetch } from "@/lib/api/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useConfirm } from "@/components/admin/confirm-dialog";
-import { UserSecurityPanel } from "@/components/admin/user-security-panel";
-import { useAdminEvents } from "@/hooks/use-admin-events";
-import { notify } from "@/lib/system/notify-store";
+import { apiFetch } from "@/shared/api/client";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { useConfirm } from "@admin/presentation/components/confirm-dialog";
+import { UserSecurityPanel } from "@admin/presentation/components/user-security-panel";
+import { useAdminEvents } from "@admin/presentation/hooks/use-admin-events";
+import { notify } from "@/shared/lib/system/notify-store";
 import {
   AdminEmpty,
   AdminHeader,
@@ -27,8 +27,8 @@ import {
   StatusDot,
   Switch,
   type Tone,
-} from "@/components/admin/admin-ui";
-import { formatBytes, formatDate } from "@/lib/utils";
+} from "@admin/presentation/components/admin-ui";
+import { relativeTime, useFormat, useT, type TranslationKey } from "@/shared/lib/i18n";
 import {
   UserPlus,
   Ban,
@@ -99,46 +99,48 @@ type SortBy = "online" | "recent" | "storage" | "name";
  * Verification state, said once. The old page carried three different colour maps
  * for the same three states; this is the only one now, and its tones resolve
  * through the shared `[data-tone]` contract instead of raw emerald/amber/red.
+ *
+ * The wording is a key rather than text: the same state is read by an operator
+ * working in English, Indonesian or Chinese.
  */
-const VERIFICATION: Record<Verification, { label: string; tone: Tone; icon: LucideIcon }> = {
-  active: { label: "Active", tone: "success", icon: CheckCircle2 },
-  unverified: { label: "Unverified", tone: "warning", icon: MailWarning },
-  suspended: { label: "Suspended", tone: "danger", icon: Ban },
+const VERIFICATION: Record<
+  Verification,
+  { labelKey: TranslationKey; tone: Tone; icon: LucideIcon }
+> = {
+  active: { labelKey: "admin.users.verifyActive", tone: "success", icon: CheckCircle2 },
+  unverified: { labelKey: "admin.users.verifyUnverified", tone: "warning", icon: MailWarning },
+  suspended: { labelKey: "admin.users.verifySuspended", tone: "danger", icon: Ban },
 };
 
-const PRESENCE_LABEL: Record<Presence, string> = {
-  live: "Online",
-  idle: "Recently here",
-  dormant: "Away",
-  never: "Never signed in",
+/**
+ * Presence, from a live session down to one that never happened.
+ */
+const PRESENCE_KEYS: Record<Presence, TranslationKey> = {
+  live: "admin.users.presenceLive",
+  idle: "admin.users.presenceIdle",
+  dormant: "admin.users.presenceDormant",
+  never: "admin.users.presenceNever",
 };
-
-const SORT_OPTIONS: { value: SortBy; label: string }[] = [
-  { value: "online", label: "Online first" },
-  { value: "recent", label: "Newest" },
-  { value: "storage", label: "Storage used" },
-  { value: "name", label: "Name (A–Z)" },
-];
-
-/** Pure relative time — the page already ticks `now`, so nothing needs Date.now(). */
-function relTime(dateStr: string, now: number): string {
-  if (now === 0) return "—";
-  const diffSec = Math.max(0, Math.floor((now - new Date(dateStr).getTime()) / 1000));
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const min = Math.floor(diffSec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}d ago`;
-  return `${Math.floor(day / 30)}mo ago`;
-}
 
 export default function AdminUsersPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const live = useAdminEvents(["admin-users"]);
+  const t = useT();
+  const { formatBytes, formatDate } = useFormat();
+
+  // Built here rather than at module scope: the labels are translated, and a
+  // module-level array would have frozen whichever language loaded first.
+  const sortOptions = useMemo(
+    () => [
+      { value: "online" as const, label: t("admin.users.sortOnline") },
+      { value: "recent" as const, label: t("admin.users.sortRecent") },
+      { value: "storage" as const, label: t("admin.users.sortStorage") },
+      { value: "name" as const, label: t("admin.users.sortName") },
+    ],
+    [t]
+  );
 
   const [showCreate, setShowCreate] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
@@ -301,15 +303,15 @@ export default function AdminUsersPage() {
         }),
       });
       if (!res.success) {
-        setFormError(res.error ?? "Failed to create user");
+        setFormError(res.error ?? t("admin.users.createFailed"));
         return;
       }
       setShowCreate(false);
       setForm({ username: "", email: "", password: "", quotaGB: 10 });
-      ok("User created successfully");
+      ok(t("admin.users.created"));
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     } catch {
-      setFormError("Connection failed");
+      setFormError(t("errors.connectionFailed"));
     } finally {
       setFormLoading(false);
     }
@@ -323,17 +325,18 @@ export default function AdminUsersPage() {
         body: JSON.stringify({
           id,
           status,
-          suspendReason: status === "suspended" ? reason || "Suspended by administrator" : null,
+          suspendReason:
+            status === "suspended" ? reason || t("admin.users.defaultSuspendReason") : null,
         }),
       });
       if (!res.success) {
-        fail(res.error ?? "Failed to update status");
+        fail(res.error ?? t("admin.users.statusFailed"));
         return;
       }
-      ok(`User ${status === "suspended" ? "suspended" : "activated"}`);
+      ok(status === "suspended" ? t("admin.users.userSuspended") : t("admin.users.userActivated"));
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     } catch {
-      fail("Connection failed");
+      fail(t("errors.connectionFailed"));
     } finally {
       setActionLoading(null);
     }
@@ -346,13 +349,13 @@ export default function AdminUsersPage() {
         body: JSON.stringify({ id, deleteData: true }),
       });
       if (!res.success) {
-        fail(res.error ?? "Failed to delete user");
+        fail(res.error ?? t("admin.users.deleteFailed"));
         return;
       }
-      ok("User deleted");
+      ok(t("admin.users.deleted"));
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     } catch {
-      fail("Connection failed");
+      fail(t("errors.connectionFailed"));
     } finally {
       setActionLoading(null);
     }
@@ -367,13 +370,13 @@ export default function AdminUsersPage() {
         body: JSON.stringify({ id: user.id, status: "active" }),
       });
       if (!res.success) {
-        fail(res.error ?? "Failed to verify user");
+        fail(res.error ?? t("admin.users.verifyFailed"));
         return;
       }
-      ok(`${user.username} verified & activated`);
+      ok(t("admin.users.verified", { name: user.username }));
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     } catch {
-      fail("Connection failed");
+      fail(t("errors.connectionFailed"));
     } finally {
       setActionLoading(null);
     }
@@ -382,7 +385,7 @@ export default function AdminUsersPage() {
   /** Re-send the OTP email to a pending account (reuses the public resend flow). */
   async function resendCode(user: AdminUser) {
     if (!user.email) {
-      fail("This user has no email on file");
+      fail(t("admin.users.noEmail"));
       return;
     }
     setActionLoading(user.id);
@@ -392,12 +395,12 @@ export default function AdminUsersPage() {
         body: JSON.stringify({ email: user.email }),
       });
       if (!res.success) {
-        fail(res.error ?? "Failed to resend code");
+        fail(res.error ?? t("admin.users.resendFailed"));
         return;
       }
-      ok(`Verification code resent to ${user.email}`);
+      ok(t("admin.users.codeResent", { email: user.email }));
     } catch {
-      fail("Connection failed");
+      fail(t("errors.connectionFailed"));
     } finally {
       setActionLoading(null);
     }
@@ -405,17 +408,30 @@ export default function AdminUsersPage() {
   function runBulk(kind: "activate" | "suspend" | "delete") {
     const ids = [...selected].filter((id) => selectableIds.includes(id));
     if (ids.length === 0) return;
-    const verb = kind === "activate" ? "Activate" : kind === "suspend" ? "Suspend" : "Delete";
+    // Each kind gets its own title, message and button word: a single interpolated
+    // verb reads as English grammar and breaks anywhere the verb inflects.
+    const copy = {
+      activate: {
+        title: t("admin.users.bulkActivateTitle", { count: ids.length }),
+        message: t("admin.users.bulkActivateMessage"),
+        confirmLabel: t("admin.users.activate"),
+      },
+      suspend: {
+        title: t("admin.users.bulkSuspendTitle", { count: ids.length }),
+        message: t("admin.users.bulkSuspendMessage"),
+        confirmLabel: t("admin.users.suspend"),
+      },
+      delete: {
+        title: t("admin.users.bulkDeleteTitle", { count: ids.length }),
+        message: t("admin.users.bulkDeleteMessage"),
+        confirmLabel: t("common.delete"),
+      },
+    }[kind];
     confirm.open(
       {
-        title: `${verb} ${ids.length} user${ids.length > 1 ? "s" : ""}?`,
-        message:
-          kind === "delete"
-            ? "This permanently deletes the selected users and all their files. This cannot be undone."
-            : kind === "suspend"
-              ? "The selected users will be signed out and blocked from logging in until reactivated."
-              : "The selected users will be activated (and any pending accounts verified).",
-        confirmLabel: verb,
+        title: copy.title,
+        message: copy.message,
+        confirmLabel: copy.confirmLabel,
         danger: kind !== "activate",
       },
       async () => {
@@ -436,7 +452,7 @@ export default function AdminUsersPage() {
                       id,
                       status: kind === "suspend" ? "suspended" : "active",
                       ...(kind === "suspend"
-                        ? { suspendReason: "Bulk suspended by administrator" }
+                        ? { suspendReason: t("admin.users.bulkSuspendReason") }
                         : {}),
                     }),
                   });
@@ -448,8 +464,17 @@ export default function AdminUsersPage() {
         }
         setBulkBusy(false);
         setSelected(new Set());
-        if (failed === 0) ok(`${done} user${done > 1 ? "s" : ""} ${kind}d`);
-        else fail(`${done} succeeded, ${failed} failed`);
+        if (failed === 0) {
+          ok(
+            kind === "delete"
+              ? t("admin.users.bulkDeleted", { count: done })
+              : kind === "suspend"
+                ? t("admin.users.bulkSuspended", { count: done })
+                : t("admin.users.bulkActivated", { count: done })
+          );
+        } else {
+          fail(t("admin.users.bulkPartial", { done, failed }));
+        }
         queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       }
     );
@@ -458,14 +483,14 @@ export default function AdminUsersPage() {
     if (user.status === "active") {
       confirm.open(
         {
-          title: `Suspend ${user.username}?`,
-          message: "The user will be signed out and blocked from logging in until reactivated.",
-          confirmLabel: "Suspend user",
+          title: t("admin.users.suspendTitle", { name: user.username }),
+          message: t("admin.users.suspendMessage"),
+          confirmLabel: t("admin.users.suspendConfirm"),
           danger: true,
           reason: {
-            label: "Reason (shown to the user on login)",
-            placeholder: "Policy violation",
-            defaultValue: "Policy violation",
+            label: t("admin.users.reasonLabel"),
+            placeholder: t("admin.users.reasonPlaceholder"),
+            defaultValue: t("admin.users.reasonPlaceholder"),
           },
         },
         (reason) => suspendUser(user.id, "suspended", reason)
@@ -478,9 +503,9 @@ export default function AdminUsersPage() {
   function confirmDelete(user: AdminUser) {
     confirm.open(
       {
-        title: `Delete ${user.username}?`,
-        message: "This permanently deletes the user and all their files. This cannot be undone.",
-        confirmLabel: "Delete permanently",
+        title: t("admin.users.deleteTitle", { name: user.username }),
+        message: t("admin.users.deleteMessage"),
+        confirmLabel: t("admin.users.deleteConfirm"),
         danger: true,
       },
       () => deleteUser(user.id)
@@ -516,14 +541,14 @@ export default function AdminUsersPage() {
         body: JSON.stringify(body),
       });
       if (!res.success) {
-        fail(res.error ?? "Failed to update user");
+        fail(res.error ?? t("admin.users.updateFailed"));
         return;
       }
-      ok("User updated successfully");
+      ok(t("admin.users.updated"));
       setEditingUser(null);
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     } catch {
-      fail("Connection failed");
+      fail(t("errors.connectionFailed"));
     } finally {
       setActionLoading(null);
     }
@@ -537,13 +562,13 @@ export default function AdminUsersPage() {
         body: JSON.stringify({ userId: id }),
       });
       if (!res.success) {
-        fail(res.error ?? "Failed to impersonate");
+        fail(res.error ?? t("admin.users.impersonateFailed"));
         return;
       }
       router.push("/dashboard");
       router.refresh();
     } catch {
-      fail("Connection failed");
+      fail(t("errors.connectionFailed"));
     } finally {
       setActionLoading(null);
     }
@@ -554,18 +579,22 @@ export default function AdminUsersPage() {
     live === "live"
       ? null
       : {
-          label: live === "offline" ? "Realtime offline" : live === "connecting" ? "Connecting…" : "Reconnecting…",
+          label:
+            live === "offline"
+              ? t("admin.users.linkOffline")
+              : live === "connecting"
+                ? t("admin.users.linkConnecting")
+                : t("admin.users.linkReconnecting"),
           tone: (live === "offline" ? "muted" : "warning") as Tone,
         };
   return (
     <div className="space-y-5">
       <AdminHeader
         icon={Users}
-        kicker="Accounts"
-        title="Users"
-        lede="Everyone with a login, online first. The tiles below are the filter — tap one to narrow the table, tap it again to clear it."
+        kicker={t("admin.users.kicker")}
+        title={t("admin.users.title")}
+        lede={t("admin.users.lede")}
         live={live === "live"}
-        liveLabel="Live"
         actions={
           <>
             {linkState && (
@@ -586,7 +615,7 @@ export default function AdminUsersPage() {
               ) : (
                 <UserPlus className="h-4 w-4" aria-hidden="true" />
               )}
-              {showCreate ? "Close" : "Add user"}
+              {showCreate ? t("common.close") : t("admin.users.addUser")}
             </Button>
           </>
         }
@@ -595,37 +624,40 @@ export default function AdminUsersPage() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <AdminMetric
           icon={Users}
-          label="Total"
+          label={t("admin.users.metricTotal")}
           value={counts.total}
           tone="accent"
-          hint={`${formatBytes(storage.used)} of ${formatBytes(storage.quota)} allocated`}
+          hint={t("admin.users.metricTotalHint", {
+            used: formatBytes(storage.used),
+            total: formatBytes(storage.quota),
+          })}
           pressed={filter === "all"}
           onClick={() => setFilter("all")}
         />
         <AdminMetric
           icon={Radio}
-          label="Online now"
+          label={t("admin.users.metricOnline")}
           value={counts.online}
           tone="success"
-          hint="Seen in the last 3 minutes"
+          hint={t("admin.users.metricOnlineHint")}
           pressed={filter === "online"}
           onClick={() => setFilter(filter === "online" ? "all" : "online")}
         />
         <AdminMetric
           icon={MailWarning}
-          label="Unverified"
+          label={t("admin.users.verifyUnverified")}
           value={counts.unverified}
           tone="warning"
-          hint="Waiting on an email code"
+          hint={t("admin.users.metricUnverifiedHint")}
           pressed={filter === "unverified"}
           onClick={() => setFilter(filter === "unverified" ? "all" : "unverified")}
         />
         <AdminMetric
           icon={Ban}
-          label="Suspended"
+          label={t("admin.users.verifySuspended")}
           value={counts.suspended}
           tone="danger"
-          hint="Blocked from signing in"
+          hint={t("admin.users.metricSuspendedHint")}
           pressed={filter === "suspended"}
           onClick={() => setFilter(filter === "suspended" ? "all" : "suspended")}
         />
@@ -639,30 +671,34 @@ export default function AdminUsersPage() {
             transition={{ duration: 0.2, ease: "easeOut" }}
             className="overflow-hidden"
           >
-            <AdminPanel icon={UserPlus} title="New account" sub="The user signs in immediately; no email is sent.">
+            <AdminPanel
+              icon={UserPlus}
+              title={t("admin.users.newTitle")}
+              sub={t("admin.users.newSub")}
+            >
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <label className="grid gap-1.5">
-                  <span className="adm-field__label">Username</span>
+                  <span className="adm-field__label">{t("admin.users.username")}</span>
                   <Input
                     value={form.username}
                     onChange={(e) => setForm({ ...form, username: e.target.value })}
-                    placeholder="jane.doe"
+                    placeholder={t("admin.users.usernamePlaceholder")}
                     autoComplete="off"
                   />
                 </label>
                 <label className="grid gap-1.5">
-                  <span className="adm-field__label">Email</span>
+                  <span className="adm-field__label">{t("admin.users.email")}</span>
                   <Input
                     type="email"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    placeholder="jane@example.com"
+                    placeholder={t("admin.users.emailPlaceholder")}
                     autoComplete="off"
                   />
-                  <span className="adm-field__hint">Optional — needed for password resets.</span>
+                  <span className="adm-field__hint">{t("admin.users.emailHint")}</span>
                 </label>
                 <label className="grid gap-1.5">
-                  <span className="adm-field__label">Password</span>
+                  <span className="adm-field__label">{t("admin.users.password")}</span>
                   <Input
                     type="password"
                     value={form.password}
@@ -672,14 +708,14 @@ export default function AdminUsersPage() {
                   />
                 </label>
                 <label className="grid gap-1.5">
-                  <span className="adm-field__label">Storage quota</span>
+                  <span className="adm-field__label">{t("admin.users.storageQuota")}</span>
                   <Input
                     type="number"
                     min={1}
                     value={form.quotaGB}
                     onChange={(e) => setForm({ ...form, quotaGB: parseInt(e.target.value) || 10 })}
                   />
-                  <span className="adm-field__hint">Gigabytes.</span>
+                  <span className="adm-field__hint">{t("admin.users.gigabytes")}</span>
                 </label>
               </div>
               {formError && (
@@ -699,10 +735,10 @@ export default function AdminUsersPage() {
                   ) : (
                     <Shield className="h-4 w-4" aria-hidden="true" />
                   )}
-                  Create user
+                  {t("admin.users.createUser")}
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
             </AdminPanel>
@@ -719,10 +755,10 @@ export default function AdminUsersPage() {
               checked
               indeterminate={!allSelected}
               onChange={() => setSelected(new Set())}
-              label="Clear selection"
+              label={t("admin.ui.clearSelection")}
             />
             <span className="text-[0.8rem] font-medium">
-              <span className="adm-num">{selected.size}</span> selected
+              {t("common.selectedCount", { count: selected.size })}
             </span>
             <div className="ml-auto flex items-center gap-2">
               <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => runBulk("activate")}>
@@ -731,18 +767,18 @@ export default function AdminUsersPage() {
                 ) : (
                   <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                 )}
-                Activate
+                {t("admin.users.activate")}
               </Button>
               <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => runBulk("suspend")}>
                 <Ban className="h-4 w-4" aria-hidden="true" />
-                Suspend
+                {t("admin.users.suspend")}
               </Button>
               <Button variant="destructive" size="sm" disabled={bulkBusy} onClick={() => runBulk("delete")}>
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
-                Delete
+                {t("common.delete")}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           </>
@@ -752,8 +788,8 @@ export default function AdminUsersPage() {
               icon={Search}
               value={searchTerm}
               onChange={setSearchTerm}
-              label="Search users"
-              placeholder="Username or email…"
+              label={t("admin.users.searchLabel")}
+              placeholder={t("admin.users.searchPlaceholder")}
             />
             <label className="ml-auto inline-flex items-center gap-1.5">
               <ArrowUpDown className="h-3.5 w-3.5 text-[var(--adm-muted)]" aria-hidden="true" />
@@ -761,9 +797,9 @@ export default function AdminUsersPage() {
                 className="adm-select adm-select--sm"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as SortBy)}
-                aria-label="Sort users"
+                aria-label={t("admin.users.sortLabel")}
               >
-                {SORT_OPTIONS.map((option) => (
+                {sortOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -775,12 +811,12 @@ export default function AdminUsersPage() {
       </div>
       <AdminPanel
         icon={Users}
-        title={`${filtered.length} user${filtered.length !== 1 ? "s" : ""}`}
+        title={t("admin.users.panelTitle", { count: filtered.length })}
         sub={
           searchTerm.trim()
-            ? `Matching “${searchTerm.trim()}”`
+            ? t("admin.ui.matching", { query: searchTerm.trim() })
             : dataUpdatedAt
-              ? `Updated ${updatedAgo}s ago`
+              ? t("admin.users.updatedAgo", { seconds: updatedAgo })
               : undefined
         }
         flush
@@ -792,12 +828,10 @@ export default function AdminUsersPage() {
         ) : filtered.length === 0 ? (
           <AdminEmpty
             icon={Users}
-            title={users.length === 0 ? "No accounts" : "Nothing matches that filter"}
-            body={
-              users.length === 0
-                ? "Accounts show here with quota, presence, and session count."
-                : "Try a different name or email, or clear the tile filter above."
+            title={
+              users.length === 0 ? t("admin.users.emptyTitle") : t("admin.users.noMatchTitle")
             }
+            body={users.length === 0 ? t("admin.users.emptyBody") : t("admin.users.noMatchBody")}
             action={
               users.length > 0 ? (
                 <Button
@@ -808,7 +842,7 @@ export default function AdminUsersPage() {
                     setSearchTerm("");
                   }}
                 >
-                  Clear filters
+                  {t("admin.ui.clearFilters")}
                 </Button>
               ) : undefined
             }
@@ -823,16 +857,18 @@ export default function AdminUsersPage() {
                       checked={allSelected}
                       indeterminate={selected.size > 0}
                       onChange={toggleSelectAll}
-                      label={allSelected ? "Deselect all users" : "Select all users"}
+                      label={
+                        allSelected ? t("admin.users.deselectAll") : t("admin.users.selectAll")
+                      }
                       disabled={selectableIds.length === 0}
                     />
                   </th>
-                  <th>User</th>
-                  <th>Status</th>
-                  <th>Presence</th>
-                  <th>Storage</th>
+                  <th>{t("admin.users.colUser")}</th>
+                  <th>{t("admin.users.colStatus")}</th>
+                  <th>{t("admin.users.colPresence")}</th>
+                  <th>{t("admin.users.colStorage")}</th>
                   <th style={{ width: "15rem" }} className="text-right">
-                    Actions
+                    {t("common.actions")}
                   </th>
                 </tr>
               </thead>
@@ -870,51 +906,55 @@ export default function AdminUsersPage() {
                     {editingUser.username}
                   </h2>
                   <p className="adm-panel__sub">
-                    Joined {formatDate(editingUser.createdAt, "short")} ·{" "}
-                    {editingUser.email ?? "no email on file"}
+                    {t("admin.users.joined", {
+                      date: formatDate(editingUser.createdAt, "short"),
+                    })}{" "}
+                    · {editingUser.email ?? t("admin.users.noEmailOnFile")}
                   </p>
                 </div>
-                <IconButton icon={X} label="Close editor" onClick={() => setEditingUser(null)} />
+                <IconButton
+                  icon={X}
+                  label={t("admin.users.closeEditor")}
+                  onClick={() => setEditingUser(null)}
+                />
               </div>
 
               <div className="adm-sheet__body">
                 <label className="adm-field">
-                  <span className="adm-field__label">Username</span>
+                  <span className="adm-field__label">{t("admin.users.username")}</span>
                   <Input
                     value={editForm.username}
                     onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
-                    placeholder="Username"
+                    placeholder={t("admin.users.username")}
                   />
                 </label>
                 <label className="adm-field">
-                  <span className="adm-field__label">Email</span>
+                  <span className="adm-field__label">{t("admin.users.email")}</span>
                   <Input
                     type="email"
                     value={editForm.email}
                     onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                    placeholder="Email (optional)"
+                    placeholder={t("admin.users.emailOptional")}
                   />
-                  <span className="adm-field__hint">
-                    Clearing this removes the account&apos;s only password-reset route.
-                  </span>
+                  <span className="adm-field__hint">{t("admin.users.emailClearHint")}</span>
                 </label>
 
                 <label className="adm-field">
-                  <span className="adm-field__label">New password</span>
+                  <span className="adm-field__label">{t("admin.users.newPassword")}</span>
                   <Input
                     type="password"
                     value={editForm.password}
                     onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                    placeholder="Leave blank to keep the current one"
+                    placeholder={t("admin.users.passwordKeep")}
                     autoComplete="new-password"
                   />
                 </label>
 
                 <div className="adm-field">
-                  <span className="adm-field__label">Quotas</span>
+                  <span className="adm-field__label">{t("admin.users.quotas")}</span>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <label className="grid gap-1">
-                      <span className="adm-field__hint">Storage (GB)</span>
+                      <span className="adm-field__hint">{t("admin.users.storageGB")}</span>
                       <Input
                         type="number"
                         min={1}
@@ -925,7 +965,7 @@ export default function AdminUsersPage() {
                       />
                     </label>
                     <label className="grid gap-1">
-                      <span className="adm-field__hint">Bandwidth / month (0 = unlimited)</span>
+                      <span className="adm-field__hint">{t("admin.users.bandwidthGB")}</span>
                       <Input
                         type="number"
                         min={0}
@@ -940,17 +980,15 @@ export default function AdminUsersPage() {
                 <div className="adm-field">
                   <div className="flex items-start justify-between gap-3">
                     <span className="min-w-0">
-                      <span className="adm-field__label block">Force password reset</span>
-                      <span className="adm-field__hint">
-                        The next sign-in stops at a change-password screen.
-                      </span>
+                      <span className="adm-field__label block">{t("admin.users.forceReset")}</span>
+                      <span className="adm-field__hint">{t("admin.users.forceResetHint")}</span>
                     </span>
                     <Switch
                       checked={editForm.mustChangePassword}
                       onChange={(checked) =>
                         setEditForm({ ...editForm, mustChangePassword: checked })
                       }
-                      label="Force password reset on next login"
+                      label={t("admin.users.forceResetSwitch")}
                     />
                   </div>
                 </div>
@@ -958,7 +996,7 @@ export default function AdminUsersPage() {
                 <div className="adm-field">
                   <span className="adm-field__label">
                     <KeyRound className="mr-1 inline h-3.5 w-3.5 align-[-0.15em]" aria-hidden="true" />
-                    Login security
+                    {t("admin.users.loginSecurity")}
                   </span>
                   <UserSecurityPanel userId={editingUser.id} />
                 </div>
@@ -966,7 +1004,7 @@ export default function AdminUsersPage() {
 
               <div className="adm-sheet__foot">
                 <Button variant="ghost" size="sm" onClick={() => setEditingUser(null)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button size="sm" onClick={saveEditUser} disabled={actionLoading === editingUser.id}>
                   {actionLoading === editingUser.id ? (
@@ -974,7 +1012,7 @@ export default function AdminUsersPage() {
                   ) : (
                     <Save className="h-4 w-4" aria-hidden="true" />
                   )}
-                  Save changes
+                  {t("admin.users.saveChanges")}
                 </Button>
               </div>
             </motion.div>
@@ -1003,10 +1041,10 @@ export default function AdminUsersPage() {
             <CheckBox
               checked={selected.has(user.id)}
               onChange={() => toggleSelect(user.id)}
-              label={`Select ${user.username}`}
+              label={t("admin.users.selectOne", { name: user.username })}
             />
           ) : (
-            <span className="adm-sub" title="Master accounts are excluded from bulk actions">
+            <span className="adm-sub" title={t("admin.users.masterExcluded")}>
               —
             </span>
           )}
@@ -1031,27 +1069,32 @@ export default function AdminUsersPage() {
         </td>
         <td>
           <Chip icon={verification.icon} tone={verification.tone}>
-            {verification.label}
+            {t(verification.labelKey)}
           </Chip>
           {user.verification === "suspended" && user.suspendReason && (
             <div className="adm-sub mt-1 max-w-[11rem] truncate" title={user.suspendReason}>
               {user.suspendReason}
             </div>
           )}
-          {user.mustChangePassword && <div className="adm-sub mt-1">Must reset password</div>}
+          {user.mustChangePassword && (
+            <div className="adm-sub mt-1">{t("admin.users.mustReset")}</div>
+          )}
         </td>
 
         <td>
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[0.78rem] font-medium">
             <StatusDot presence={presence} ring={online} />
-            {PRESENCE_LABEL[presence]}
+            {t(PRESENCE_KEYS[presence])}
           </span>
           <div className="adm-sub">
             {online
-              ? `${Math.max(1, user.activeSessions)} device${Math.max(1, user.activeSessions) > 1 ? "s" : ""}`
+              ? t("admin.users.deviceCount", { count: Math.max(1, user.activeSessions) })
               : user.lastActiveAt
-                ? relTime(user.lastActiveAt, clock)
-                : `Joined ${formatDate(user.createdAt, "short")}`}
+                ? // Before the tick effect seeds the clock there is nothing true to say.
+                  clock === 0
+                  ? "—"
+                  : relativeTime(user.lastActiveAt, clock, t)
+                : t("admin.users.joined", { date: formatDate(user.createdAt, "short") })}
           </div>
         </td>
 
@@ -1069,7 +1112,7 @@ export default function AdminUsersPage() {
                 <IconButton
                   icon={isBusy ? Loader2 : CheckCircle2}
                   tone="success"
-                  label={`Verify and activate ${user.username}`}
+                  label={t("admin.users.verifyAction", { name: user.username })}
                   disabled={isBusy}
                   onClick={() => verifyNow(user)}
                   className={isBusy ? "[&>svg]:animate-spin" : undefined}
@@ -1078,7 +1121,7 @@ export default function AdminUsersPage() {
                   <IconButton
                     icon={Send}
                     tone="info"
-                    label={`Resend the verification code to ${user.username}`}
+                    label={t("admin.users.resendAction", { name: user.username })}
                     disabled={isBusy}
                     onClick={() => resendCode(user)}
                   />
@@ -1087,13 +1130,13 @@ export default function AdminUsersPage() {
             )}
             <IconButton
               icon={Eye}
-              label={`Open ${user.username}'s detail page`}
+              label={t("admin.users.openDetail", { name: user.username })}
               onClick={() => router.push(`/admin/users/${user.id}`)}
             />
             <IconButton
               icon={Pencil}
               tone="accent"
-              label={`Edit ${user.username}`}
+              label={t("admin.users.editAction", { name: user.username })}
               onClick={() => startEdit(user)}
             />
             {selectable && (
@@ -1101,21 +1144,25 @@ export default function AdminUsersPage() {
                 <IconButton
                   icon={LogIn}
                   tone="accent"
-                  label={`Sign in as ${user.username}`}
+                  label={t("admin.users.impersonateAction", { name: user.username })}
                   disabled={isBusy}
                   onClick={() => impersonate(user.id)}
                 />
                 <IconButton
                   icon={Ban}
                   tone="warning"
-                  label={user.status === "active" ? `Suspend ${user.username}` : `Reactivate ${user.username}`}
+                  label={
+                    user.status === "active"
+                      ? t("admin.users.suspendAction", { name: user.username })
+                      : t("admin.users.reactivateAction", { name: user.username })
+                  }
                   disabled={isBusy}
                   onClick={() => toggleSuspend(user)}
                 />
                 <IconButton
                   icon={Trash2}
                   tone="danger"
-                  label={`Delete ${user.username}`}
+                  label={t("admin.users.deleteAction", { name: user.username })}
                   disabled={isBusy}
                   onClick={() => confirmDelete(user)}
                 />

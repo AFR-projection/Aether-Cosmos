@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { and, desc, eq, gte, isNull, lt, or } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { shares, files, users } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { shares, files, users } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { z } from "zod";
 
 export async function GET(request: NextRequest) {

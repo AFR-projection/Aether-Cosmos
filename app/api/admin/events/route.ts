@@ -1,7 +1,7 @@
-import { requireMaster, AuthError } from "@/lib/auth/session";
-import { subscribeAdmins, type AdminRealtimeEvent } from "@/lib/realtime/events";
-import { apiError, handleApiError } from "@/lib/api/response";
-import { SECURITY_HEADERS } from "@/lib/security";
+import { requireMaster, AuthError } from "@/shared/lib/auth/session";
+import { subscribeAdmins, type AdminRealtimeEvent } from "@/shared/infrastructure/realtime/events";
+import { apiError, handleApiError } from "@/shared/api/response";
+import { SECURITY_HEADERS } from "@/shared/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

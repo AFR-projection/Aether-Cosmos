@@ -4,16 +4,16 @@
  * GET /api/admin/monitoring/brain-analytics/:brainId?days=7
  *
  * Metrics are keyed on `query_hash`, never query text. See
- * lib/monitoring/query-analytics.ts for what these numbers can and cannot tell
+ * @/shared/lib/monitoring/query-analytics.ts for what these numbers can and cannot tell
  * you — in particular, a query that matched nothing leaves no row behind, so
  * `omittedRate` (surfaced then dropped) is the honest noise signal.
  */
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { getRetrievalStats } from "@/lib/monitoring/query-analytics";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { getRetrievalStats } from "@/shared/lib/monitoring/query-analytics";
 
 const querySchema = z.object({
   days: z.coerce.number().int().min(1).max(365).default(7),

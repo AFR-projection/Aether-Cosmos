@@ -3,20 +3,21 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { apiFetch } from "@/lib/api/client";
-import { TwoFactorSection } from "@/components/account/account-security-sections";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { formatBytes, formatDate, cn } from "@/lib/utils";
-import { useState, use } from "react";
+import { apiFetch } from "@/shared/api/client";
+import { TwoFactorSection } from "@auth/presentation/components/account-security-sections";
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/primitives/card";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { cn } from "@/shared/lib/utils";
+import { relativeTime, useFormat, useT } from "@/shared/lib/i18n";
+import { auditActionLabel } from "@admin/domain/services/audit-actions";
+import { useState, useEffect, use } from "react";
 import {
   ArrowLeft, FileText, Activity, Shield,
   HardDrive, Star, Trash2, Edit, Save, X, KeyRound,
   Upload, Download, LogIn, Loader2, Eye, EyeOff, AlertCircle, LogOut, Laptop, Smartphone,
 } from "lucide-react";
-import { notify } from "@/lib/system/notify-store";
-import { formatDistanceToNow } from "date-fns";
+import { notify } from "@/shared/lib/system/notify-store";
 
 interface UserDetail {
   user: {
@@ -88,6 +89,8 @@ export default function UserDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
+  const t = useT();
+  const { formatBytes, formatDate } = useFormat();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     username: "",
@@ -101,6 +104,16 @@ export default function UserDetailPage({
   const [showPwNew, setShowPwNew] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [revokingSession, setRevokingSession] = useState<string | null>(null);
+
+  // "Active 4 minutes ago" has to keep moving, and it must not call Date.now()
+  // during render. A 30s tick is as fine-grained as this page needs; 0 until the
+  // effect runs, which is the signal to say nothing rather than something wrong.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-user-detail", id],
@@ -160,7 +173,7 @@ export default function UserDetailPage({
         setEditing(false);
         queryClient.invalidateQueries({ queryKey: ["admin-user-detail"] });
       } else {
-        setPwMsg({ type: "error", text: res.error ?? "Failed to update user" });
+        setPwMsg({ type: "error", text: res.error ?? t("admin.userDetail.updateFailed") });
       }
     } finally {
       setSaving(false);
@@ -185,7 +198,9 @@ export default function UserDetailPage({
         </Button>
         <div className="flex-1">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{user.username}</h1>
-          <p className="mt-1 text-sm text-muted-foreground/70">{user.email ?? "No email"}</p>
+          <p className="mt-1 text-sm text-muted-foreground/70">
+            {user.email ?? t("admin.userDetail.noEmail")}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <span
@@ -197,8 +212,12 @@ export default function UserDetailPage({
             )}
           >
             <span className={cn("h-1.5 w-1.5 rounded-full", user.status === "active" ? "bg-emerald-500" : "bg-red-500")} />
-            {user.status}
+            {user.status === "active"
+              ? t("admin.userDetail.statusActive")
+              : t("admin.userDetail.statusSuspended")}
           </span>
+          {/* The role is an enum the API also accepts back; `master` reads the same
+              in all three locales, so it is shown raw like the roster's chip. */}
           <span className="rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent-ink uppercase">
             {user.role}
           </span>
@@ -206,7 +225,7 @@ export default function UserDetailPage({
             variant="ghost"
             size="icon"
             className="h-9 w-9 rounded-lg text-muted-foreground/60 hover:text-accent-ink hover:bg-accent/10"
-            title={editing ? "Cancel edit" : "Edit User"}
+            title={editing ? t("admin.userDetail.cancelEdit") : t("admin.userDetail.editUser")}
             onClick={() => {
               if (editing) {
                 setEditing(false);
@@ -238,7 +257,9 @@ export default function UserDetailPage({
               </div>
               <div>
                 <p className="text-2xl font-bold">{formatBytes(user.usedBytes)}</p>
-                <p className="text-sm text-muted-foreground">of {formatBytes(user.quotaBytes)} used</p>
+                <p className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.ofQuotaUsed", { total: formatBytes(user.quotaBytes) })}
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -251,7 +272,12 @@ export default function UserDetailPage({
               </div>
               <div>
                 <p className="text-2xl font-bold">{files.length}</p>
-                <p className="text-sm text-muted-foreground">files, {folders.length} folders</p>
+                {/* Two leaves, joined here: the file count is the big number above,
+                    and the folder count keeps its own number next to its own noun. */}
+                <p className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.statFiles", { count: files.length })},{" "}
+                  {t("admin.userDetail.statFolders", { count: folders.length })}
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -264,7 +290,9 @@ export default function UserDetailPage({
               </div>
               <div>
                 <p className="text-2xl font-bold">{activity.length}</p>
-                <p className="text-sm text-muted-foreground">activity logs</p>
+                <p className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.statActivity", { count: activity.length })}
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -281,7 +309,7 @@ export default function UserDetailPage({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <HardDrive className="h-4 w-4 text-muted-foreground" />
-              Storage Usage
+              {t("admin.userDetail.storageTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -302,13 +330,15 @@ export default function UserDetailPage({
             {storageByType.length > 0 && (
               <div className="mt-6 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
-                  By File Type
+                  {t("admin.userDetail.byFileType")}
                 </p>
                 {storageByType.map((item, idx) => (
                   <div key={item.mimeType} className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{item.mimeType}</span>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-muted-foreground/60">{item.count} files</span>
+                      <span className="text-xs text-muted-foreground/60">
+                        {t("admin.userDetail.typeFiles", { count: item.count })}
+                      </span>
                       <span className="font-mono text-xs">{formatBytes(item.totalSize)}</span>
                     </div>
                   </div>
@@ -330,7 +360,7 @@ export default function UserDetailPage({
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-muted-foreground" />
-                Files ({files.length})
+                {t("admin.userDetail.filesTitle", { count: files.length })}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -349,7 +379,7 @@ export default function UserDetailPage({
                 ))}
                 {files.length > 20 && (
                   <p className="text-center text-xs text-muted-foreground/60 py-2">
-                    + {files.length - 20} more files
+                    {t("admin.userDetail.moreFiles", { count: files.length - 20 })}
                   </p>
                 )}
               </div>
@@ -366,7 +396,7 @@ export default function UserDetailPage({
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-muted-foreground" />
-                Recent Activity
+                {t("admin.userDetail.activityTitle")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -379,7 +409,9 @@ export default function UserDetailPage({
                         <Icon className="h-3.5 w-3.5 text-accent-ink" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <span className="text-sm capitalize">{log.action.replace(/_/g, " ")}</span>
+                        {/* `auditActionLabel` translates the known audit codes; unrecognised
+                            ones fall back to the raw key with underscores replaced. */}
+                        <span className="text-sm">{auditActionLabel(log.action, t)}</span>
                       </div>
                       <span className="shrink-0 text-xs text-muted-foreground/60">
                         {formatDate(log.createdAt, "short")}
@@ -403,7 +435,7 @@ export default function UserDetailPage({
           <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
             <CardTitle className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-muted-foreground" />
-              Active Sessions ({sessions.length})
+              {t("admin.userDetail.sessionsTitle", { count: sessions.length })}
             </CardTitle>
             {sessions.length > 0 && (
               <Button
@@ -412,7 +444,8 @@ export default function UserDetailPage({
                 className="h-8 gap-1.5 text-rose-600 hover:text-rose-700"
                 disabled={revokingSession !== null}
                 onClick={async () => {
-                  if (!confirm(`Sign out all devices for ${user.username}?`)) return;
+                  if (!confirm(t("admin.userDetail.revokeAllConfirm", { name: user.username })))
+                    return;
                   setRevokingSession("all");
                   try {
                     const res = await apiFetch(
@@ -420,10 +453,14 @@ export default function UserDetailPage({
                       { method: "DELETE" }
                     );
                     if (!res.success) {
-                      notify({ title: "Failed", description: res.error, tone: "warning" });
+                      notify({
+                        title: t("admin.userDetail.revokeFailed"),
+                        description: res.error,
+                        tone: "warning",
+                      });
                       return;
                     }
-                    notify({ title: "All sessions revoked", tone: "success" });
+                    notify({ title: t("admin.userDetail.revokeAllDone"), tone: "success" });
                     queryClient.invalidateQueries({ queryKey: ["admin-user-detail", user.id] });
                   } finally {
                     setRevokingSession(null);
@@ -435,7 +472,7 @@ export default function UserDetailPage({
                 ) : (
                   <LogOut className="h-3.5 w-3.5" />
                 )}
-                Revoke all
+                {t("admin.userDetail.revokeAll")}
               </Button>
             )}
           </CardHeader>
@@ -454,13 +491,15 @@ export default function UserDetailPage({
                       </div>
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
-                          {session.deviceLabel || "Unknown device"}
+                          {session.deviceLabel || t("admin.userDetail.unknownDevice")}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
                           {session.locationLabel ? `${session.locationLabel} · ` : ""}
-                          <span className="font-mono">{session.ip ?? "Unknown IP"}</span>
-                          {session.lastActiveAt
-                            ? ` · Active ${formatDistanceToNow(new Date(session.lastActiveAt), { addSuffix: true })}`
+                          <span className="font-mono">
+                            {session.ip ?? t("admin.userDetail.unknownIp")}
+                          </span>
+                          {session.lastActiveAt && now > 0
+                            ? ` · ${t("admin.userDetail.activeAgo", { ago: relativeTime(session.lastActiveAt, now, t) })}`
                             : ""}
                         </p>
                       </div>
@@ -471,7 +510,9 @@ export default function UserDetailPage({
                           {formatDate(session.createdAt, "short")}
                         </p>
                         <p className="text-[10px] text-muted-foreground/60">
-                          Expires {formatDate(session.expiresAt, "short")}
+                          {t("admin.userDetail.expires", {
+                            date: formatDate(session.expiresAt, "short"),
+                          })}
                         </p>
                       </div>
                       <Button
@@ -479,7 +520,7 @@ export default function UserDetailPage({
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-rose-500"
                         disabled={revokingSession !== null}
-                        title="Revoke session"
+                        title={t("admin.userDetail.revokeOne")}
                         onClick={async () => {
                           setRevokingSession(session.id);
                           try {
@@ -488,10 +529,14 @@ export default function UserDetailPage({
                               { method: "DELETE" }
                             );
                             if (!res.success) {
-                              notify({ title: "Failed", description: res.error, tone: "warning" });
+                              notify({
+                                title: t("admin.userDetail.revokeFailed"),
+                                description: res.error,
+                                tone: "warning",
+                              });
                               return;
                             }
-                            notify({ title: "Session revoked", tone: "success" });
+                            notify({ title: t("admin.userDetail.revokeOneDone"), tone: "success" });
                             queryClient.invalidateQueries({ queryKey: ["admin-user-detail", user.id] });
                           } finally {
                             setRevokingSession(null);
@@ -509,7 +554,9 @@ export default function UserDetailPage({
                 );
               })}
               {sessions.length === 0 && (
-                <p className="py-4 text-center text-sm text-muted-foreground">No active sessions</p>
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  {t("admin.userDetail.noSessions")}
+                </p>
               )}
             </div>
           </CardContent>
@@ -527,7 +574,9 @@ export default function UserDetailPage({
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Edit className="h-4 w-4 text-muted-foreground" />
-                Edit {isOwnAccount ? "your account" : user.username}
+                {isOwnAccount
+                  ? t("admin.userDetail.editOwnTitle")
+                  : t("admin.userDetail.editTitle", { name: user.username })}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -535,19 +584,23 @@ export default function UserDetailPage({
                 {/* Identity */}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">Username</label>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">
+                      {t("admin.userDetail.username")}
+                    </label>
                     <Input
                       value={form.username}
                       onChange={(e) => setForm({ ...form, username: e.target.value })}
-                      placeholder="Username"
+                      placeholder={t("admin.userDetail.username")}
                     />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">Email</label>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">
+                      {t("admin.userDetail.email")}
+                    </label>
                     <Input
                       value={form.email}
                       onChange={(e) => setForm({ ...form, email: e.target.value })}
-                      placeholder="Email (optional)"
+                      placeholder={t("admin.userDetail.emailOptional")}
                     />
                   </div>
                 </div>
@@ -555,7 +608,9 @@ export default function UserDetailPage({
                 {/* Limits */}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">Storage quota (GB)</label>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">
+                      {t("admin.userDetail.quotaGB")}
+                    </label>
                     <Input
                       type="number"
                       min={1}
@@ -564,7 +619,9 @@ export default function UserDetailPage({
                     />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">Bandwidth (GB, 0 = unlimited)</label>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground/80">
+                      {t("admin.userDetail.bandwidthGB")}
+                    </label>
                     <Input
                       type="number"
                       min={0}
@@ -578,14 +635,14 @@ export default function UserDetailPage({
                 <div className="rounded-xl border border-border/40 bg-muted/10 p-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <KeyRound className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">Password</span>
+                    <span className="text-sm font-medium">{t("admin.userDetail.password")}</span>
                   </div>
                   <div className="relative">
                     <Input
                       type={showPwNew ? "text" : "password"}
                       value={form.password}
                       onChange={(e) => setForm({ ...form, password: e.target.value })}
-                      placeholder="Leave blank to keep current password"
+                      placeholder={t("admin.userDetail.passwordKeep")}
                       className="pr-10"
                     />
                     <button
@@ -597,7 +654,7 @@ export default function UserDetailPage({
                     </button>
                   </div>
                   {form.password && form.password.length < 8 && (
-                    <p className="text-xs text-orange-500">Use at least 8 characters.</p>
+                    <p className="text-xs text-orange-500">{t("admin.userDetail.passwordShort")}</p>
                   )}
                 </div>
 
@@ -608,7 +665,7 @@ export default function UserDetailPage({
                     onChange={(e) => setForm({ ...form, mustChangePassword: e.target.checked })}
                     className="h-4 w-4 rounded border-border"
                   />
-                  Force password reset on next login
+                  {t("admin.userDetail.forceReset")}
                 </label>
 
                 {pwMsg && pwMsg.type === "error" && (
@@ -619,11 +676,11 @@ export default function UserDetailPage({
 
                 <div className="flex justify-end gap-2">
                   <Button variant="secondary" onClick={() => setEditing(false)}>
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                   <Button onClick={saveUser} disabled={saving || (!!form.password && form.password.length < 8)}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Save className="h-4 w-4 mr-1.5" />}
-                    Save Changes
+                    {t("common.save")}
                   </Button>
                 </div>
               </div>
@@ -645,7 +702,7 @@ export default function UserDetailPage({
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Shield className="h-4 w-4 text-muted-foreground" />
-                Two-factor authentication
+                {t("admin.userDetail.twoFactorTitle")}
               </CardTitle>
             </CardHeader>
             <CardContent>

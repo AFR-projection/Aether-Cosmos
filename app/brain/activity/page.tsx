@@ -1,11 +1,12 @@
 "use client";
 
 import { Bot, ScrollText, User } from "lucide-react";
-import { BrainShell } from "@/components/brain/brain-shell";
-import { BrainErrorState, BrainLoading } from "@/components/brain/brain-states";
-import { cn, formatDate, formatTime } from "@/lib/utils";
-import { BRAIN_OPERATION_COPY } from "@/lib/brain/ui-constants";
-import { useActiveBrain, useBrainAudit, type BrainAuditEntry } from "@/hooks/use-brain";
+import { BrainShell } from "@brain/presentation/components/brain-shell";
+import { BrainErrorState, BrainLoading } from "@brain/presentation/components/brain-states";
+import { cn } from "@/shared/lib/utils";
+import { useFormat, useT } from "@/shared/lib/i18n";
+import { brainOperationLabel } from "@brain/domain/ui-constants";
+import { useActiveBrain, useBrainAudit, type BrainAuditEntry } from "@brain/presentation/hooks/use-brain";
 
 /**
  * Agent activity timeline (§33) read straight from brain_audit_logs, so it shows
@@ -35,15 +36,18 @@ function detailLine(metadata: Record<string, unknown> | null): string | null {
 
 /**
  * Groups the feed by calendar day. Purely presentational — the entries and their
- * order are exactly what the endpoint returned.
+ * order are exactly what the endpoint returned. The group key is a locale-free
+ * `toDateString()` so the grouping never changes with the language; the heading
+ * is formatted from `iso` at render time.
  */
 function groupByDay(entries: BrainAuditEntry[]) {
-  const groups: { day: string; entries: BrainAuditEntry[] }[] = [];
+  const groups: { key: string; iso: string; entries: BrainAuditEntry[] }[] = [];
   for (const entry of entries) {
-    const day = formatDate(entry.createdAt, "medium").split(",")[0] ?? entry.createdAt;
+    const parsed = new Date(entry.createdAt);
+    const key = Number.isNaN(parsed.getTime()) ? entry.createdAt : parsed.toDateString();
     const last = groups[groups.length - 1];
-    if (last && last.day === day) last.entries.push(entry);
-    else groups.push({ day, entries: [entry] });
+    if (last && last.key === key) last.entries.push(entry);
+    else groups.push({ key, iso: entry.createdAt, entries: [entry] });
   }
   return groups;
 }
@@ -51,16 +55,18 @@ function groupByDay(entries: BrainAuditEntry[]) {
 export default function BrainActivityPage() {
   const { brain } = useActiveBrain();
   const audit = useBrainAudit(brain?.id, 100);
+  const t = useT();
+  const { formatMonthDay, formatTime } = useFormat();
 
   return (
     <BrainShell
-      title="Activity"
-      description="Every write, and every agent read, against this brain. Append-only."
+      title={t("brain.activity.title")}
+      description={t("brain.activity.description")}
     >
-      {audit.isLoading && <BrainLoading label="Loading activity" rows={5} />}
+      {audit.isLoading && <BrainLoading label={t("brain.activity.loading")} rows={5} />}
       {audit.isError && (
         <BrainErrorState
-          message="Could not load the activity log."
+          message={t("brain.activity.loadFailed")}
           onRetry={() => void audit.refetch()}
         />
       )}
@@ -69,8 +75,8 @@ export default function BrainActivityPage() {
         (audit.data.entries.length > 0 ? (
           <div className="space-y-1">
             {groupByDay(audit.data.entries).map((group) => (
-              <section key={group.day}>
-                <h2 className="brain-timeline__day">{group.day}</h2>
+              <section key={group.key}>
+                <h2 className="brain-timeline__day">{formatMonthDay(group.iso)}</h2>
                 <ol className="brain-timeline">
                   {group.entries.map((entry) => {
                     const detail = detailLine(entry.metadata);
@@ -106,7 +112,7 @@ export default function BrainActivityPage() {
                           <span className="min-w-0 flex-1">
                             <span className="flex flex-wrap items-center gap-2">
                               <span className="text-sm font-medium text-foreground">
-                                {BRAIN_OPERATION_COPY[entry.operation] ?? entry.operation}
+                                {brainOperationLabel(entry.operation, t)}
                               </span>
                               {agentName && (
                                 <span className="brain-chip brain-chip--on">{agentName}</span>
@@ -141,11 +147,8 @@ export default function BrainActivityPage() {
             <span className="brain-empty__icon">
               <ScrollText className="h-5 w-5" aria-hidden="true" />
             </span>
-            <p className="brain-empty__title">No activity recorded</p>
-            <p className="brain-empty__body">
-              Once you or an agent writes to this brain, it shows up here — append-only, newest
-              first.
-            </p>
+            <p className="brain-empty__title">{t("brain.activity.emptyTitle")}</p>
+            <p className="brain-empty__body">{t("brain.activity.emptyBody")}</p>
           </div>
         ))}
     </BrainShell>

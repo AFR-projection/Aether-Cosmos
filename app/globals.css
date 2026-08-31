@@ -253,6 +253,15 @@ html[data-theme="dark"] {
   --color-viewer-stage: var(--viewer-stage);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* One named face per platform, then a generic terminator. Geist stays first,
+     so Latin glyphs, numerals and the existing metrics are untouched; a CJK
+     face is only reached for characters Geist does not have.
+     PingFang SC macOS/iOS · Hiragino Sans GB older macOS ·
+     Microsoft YaHei Windows · Noto Sans CJK SC / Noto Sans SC / Source Han
+     Sans SC Linux and Android · WenQuanYi Micro Hei minimal Linux images. */
+  --font-cjk-sc: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC",
+    "WenQuanYi Micro Hei", sans-serif;
 }
 
 /* ── Semantic colour: fill vs ink ─────────────────────────────────────────
@@ -278,6 +287,15 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Simplified Chinese only. Full-width glyphs sit taller than Geist's Latin
+   metrics, so the line-height is loosened a notch to stop descenders from
+   touching the row below in dense lists and table rows. Latin locales never
+   match this selector, so their rendering is byte-identical to before. */
+:root[data-locale="zh-CN"] body {
+  font-family: var(--font-geist-sans), var(--font-cjk-sc);
+  line-height: 1.65;
 }
 
 /* ── Mobile-native utilities ─────────────────────────────────────────────
@@ -2236,16 +2254,59 @@ body {
   font-weight: 600;
 }
 
+/*
+ * 2-Step Code entry.
+ *
+ * The slot row is sized by the account's own code length, so this has to stay
+ * legible from 6 to 10 slots inside a ~300px card: the gap tightens past 8 slots
+ * rather than letting the row wrap or overflow, which would break the read of
+ * "one row = one code".
+ */
 .auth-code-display {
   display: grid;
   justify-items: center;
   gap: 0.7rem;
-  min-height: 5.4rem;
   margin-bottom: 1.2rem;
-  padding: 1rem;
+  padding: 0.9rem 1rem 1rem;
   border: 1px solid var(--auth-line);
   border-radius: 1.15rem;
   background: rgba(255, 255, 255, 0.025);
+  transition: border-color 200ms ease, background-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.auth-code-display__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.auth-code-display__label,
+.auth-code-display__meta {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.auth-code-display__label {
+  color: var(--auth-subtle);
+}
+
+/* Tabular figures so the counter does not jitter as digits are added. */
+.auth-code-display__meta {
+  color: var(--auth-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+
+.auth-code-display--complete {
+  border-color: rgba(161, 170, 255, 0.42);
+  background: rgba(161, 170, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(161, 170, 255, 0.08);
 }
 
 .auth-code-display--error {
@@ -2259,7 +2320,11 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.65rem;
-  min-height: 1rem;
+  min-height: 1.35rem;
+}
+
+.auth-code-dots--dense {
+  gap: 0.42rem;
 }
 
 .auth-code-dots--error {
@@ -2267,11 +2332,13 @@ body {
 }
 
 .auth-code-dot {
+  flex: 0 0 auto;
   width: 0.58rem;
   height: 0.58rem;
   border: 1px solid rgba(157, 167, 190, 0.48);
   border-radius: 999px;
-  transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+  transition: background-color 180ms ease, border-color 180ms ease,
+    transform 180ms ease, box-shadow 180ms ease;
 }
 
 .auth-code-dot--filled {
@@ -2281,17 +2348,64 @@ body {
   transform: scale(1.12);
 }
 
+/*
+ * The slot the next digit will land in. Position is the one thing the dots row
+ * cannot otherwise show once a code is partly typed, and it is what tells a user
+ * with a 6-digit code that six slots is the whole code, not a truncated view.
+ */
+.auth-code-dot--next {
+  border-color: rgba(161, 170, 255, 0.75);
+  box-shadow: 0 0 0 0.18rem rgba(161, 170, 255, 0.14);
+  animation: auth-code-pulse 1.6s ease-in-out infinite;
+}
+
 .auth-code-dot--error {
   border-color: var(--auth-danger);
   background: var(--auth-danger);
   box-shadow: 0 0 0.7rem rgba(255, 155, 164, 0.5);
 }
 
+@keyframes auth-code-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0.18rem rgba(161, 170, 255, 0.14);
+  }
+  50% {
+    box-shadow: 0 0 0 0.3rem rgba(161, 170, 255, 0.05);
+  }
+}
+
+/* Fixed height: the status line swaps between progress and an error, and a
+   reflowing card under the user's finger is its own usability problem. */
+.auth-code-status {
+  display: grid;
+  place-items: center;
+  min-height: 2.1rem;
+  width: 100%;
+  padding-inline: 0.25rem;
+}
+
 .auth-code-caption {
+  margin: 0;
   color: var(--auth-subtle);
   font-family: var(--font-geist-mono), monospace;
   font-size: 0.68rem;
-  letter-spacing: 0.06em;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.auth-code-caption__aside {
+  opacity: 0.7;
+}
+
+/* `.auth-error-text` alone would lose to `.auth-code-caption` on source order —
+   both are single-class selectors — leaving the error message subtle grey. */
+.auth-code-caption.auth-error-text {
+  color: var(--auth-danger);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .auth-numpad {
@@ -2646,11 +2760,32 @@ body {
     border-radius: 0.8rem;
     font-size: 1.15rem;
   }
+
+  /* A 10-slot row has to survive a 320px card without wrapping. */
+  .auth-code-dots {
+    gap: 0.5rem;
+  }
+
+  .auth-code-dots--dense {
+    gap: 0.34rem;
+  }
+
+  .auth-code-dot {
+    width: 0.52rem;
+    height: 0.52rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .auth-page__orb,
-  .auth-code-display--error {
+  .auth-code-display--error,
+  .auth-code-dots--error {
+    animation: none;
+  }
+
+  /* The next-slot marker keeps its ring — only the pulse is dropped, so the
+     position is still conveyed without motion. */
+  .auth-code-dot--next {
     animation: none;
   }
 }

@@ -29,7 +29,7 @@ const store = vi.hoisted(() => ({
   selects: 0,
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   function selectChain() {
     const api = {
       from: () => api,
@@ -70,8 +70,8 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-const { consumeAuthorizationCode } = await import("@/lib/oauth/codes");
-const { refreshAccessToken } = await import("@/lib/oauth/tokens");
+const { consumeAuthorizationCode } = await import("@/shared/lib/auth/oauth/codes");
+const { refreshAccessToken } = await import("@/shared/lib/auth/oauth/tokens");
 
 function s256(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");

@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { requireBrainContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { requireBrainContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
 import {
   buildBrainGraphSnapshot,
   GRAPH_EDGE_LIMIT_DEFAULT,
   GRAPH_EDGE_LIMIT_MAX,
   GRAPH_NODE_LIMIT_DEFAULT,
   GRAPH_NODE_LIMIT_MAX,
-} from "@/lib/brain/graph-snapshot";
+} from "@brain/application/queries/graph-snapshot";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

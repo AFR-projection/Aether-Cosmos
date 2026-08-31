@@ -1,18 +1,18 @@
 import { NextRequest } from "next/server";
 import { and, desc, eq, gt, ne } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { sessions } from "@/lib/db/schema";
+import { db } from "@/shared/infrastructure/db";
+import { sessions } from "@/shared/infrastructure/db/schema";
 import {
   requireAuth,
   destroySession,
   getClientIp,
   deviceLabelFromUa,
   deviceKindFromUa,
-} from "@/lib/auth/session";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { logActivity } from "@/lib/auth/audit";
-import { publishToUser, publishToAdmins } from "@/lib/realtime/events";
+} from "@/shared/lib/auth/session";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { publishToUser, publishToAdmins } from "@/shared/infrastructure/realtime/events";
 
 function truncateId(id: string): string {
   if (id.length <= 10) return id;

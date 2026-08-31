@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { revokeConnectedApp } from "@/lib/oauth/tokens";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { revokeConnectedApp } from "@/shared/lib/auth/oauth/tokens";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

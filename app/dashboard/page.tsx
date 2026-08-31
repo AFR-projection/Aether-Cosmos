@@ -22,11 +22,12 @@ import {
   TriangleAlert,
   Users,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { apiFetch } from "@/lib/api/client";
-import { APP_NAME } from "@/lib/app-version";
-import { cn, formatBytes, formatDate } from "@/lib/utils";
-import { getAccentColor, getGradientFallback, getFileTypeIcon } from "@/lib/file-type-utils";
+import { Button } from "@/ui/primitives/button";
+import { apiFetch } from "@/shared/api/client";
+import { APP_NAME } from "@/shared/lib/app-version";
+import { cn } from "@/shared/lib/utils";
+import { getAccentColor, getGradientFallback, getFileTypeIcon } from "@/shared/lib/file-type-utils";
+import { useFormat, useT, type TranslationKey, type Translator } from "@/shared/lib/i18n";
 
 const activityIcons: Record<string, LucideIcon> = {
   upload: Cloud,
@@ -37,12 +38,16 @@ const activityIcons: Record<string, LucideIcon> = {
   restore: RefreshCw,
 };
 
-function filePresentation(file: FileItem): { icon: React.ElementType; label: string; tone: string } {
-  if (file.isNote) return { icon: Activity, label: "Note", tone: "note" };
+function filePresentation(
+  file: FileItem,
+  t: Translator
+): { icon: React.ElementType; label: string; tone: string } {
+  if (file.isNote) return { icon: Activity, label: t("common.note"), tone: "note" };
   const Icon = getFileTypeIcon(file.mimeType ?? "");
   const accentClass = getAccentColor(file.mimeType ?? "");
   const tone = accentClass.replace("text-", "").replace("-500", "").replace("-400", "");
-  return { icon: Icon, label: file.mimeType?.split("/")[0] ?? "File", tone };
+  // The MIME top-level type ("image", "video") is a protocol token, not prose.
+  return { icon: Icon, label: file.mimeType?.split("/")[0] ?? t("common.file"), tone };
 }
 
 interface DashboardStats {
@@ -82,16 +87,21 @@ interface DashboardData {
 }
 
 
-function actionCopy(action: string) {
-  const copy: Record<string, string> = {
-    upload: "Uploaded a file",
-    download: "Downloaded a file",
-    delete: "Moved a file to recycle bin",
-    login: "Signed in to the workspace",
-    create: "Created a new item",
-    restore: "Restored a file",
-  };
-  return copy[action] ?? action.replace(/[-_]/g, " ");
+/** Activity `action` column → dictionary key. Typed, so a rename fails the build. */
+const ACTION_KEYS: Record<string, TranslationKey> = {
+  upload: "dashboard.action.upload",
+  download: "dashboard.action.download",
+  delete: "dashboard.action.delete",
+  login: "dashboard.action.login",
+  create: "dashboard.action.create",
+  restore: "dashboard.action.restore",
+};
+
+function actionCopy(action: string, t: Translator) {
+  const key = ACTION_KEYS[action];
+  // An unmapped action falls back to its own de-underscored name: a technical
+  // token, which reads the same in every locale.
+  return key ? t(key) : action.replace(/[-_]/g, " ");
 }
 
 function metadataName(metadata: unknown) {
@@ -100,13 +110,20 @@ function metadataName(metadata: unknown) {
   return typeof name === "string" ? name : null;
 }
 
-function getStorageState(stats: DashboardStats) {
-  if (!stats.storageQuota) return { pct: 0, tone: "neutral", label: "Quota not configured" };
+/** The label is returned as a key so the caller translates it in its own locale. */
+function getStorageState(stats: DashboardStats): {
+  pct: number;
+  tone: string;
+  labelKey: TranslationKey;
+} {
+  if (!stats.storageQuota)
+    return { pct: 0, tone: "neutral", labelKey: "dashboard.quotaNotConfigured" };
   const pct = Math.max(0, Math.min(100, (stats.storageUsed / stats.storageQuota) * 100));
   const threshold = Math.min(100, Math.max(50, stats.storageWarningThreshold ?? 85));
-  if (pct >= threshold) return { pct, tone: "critical", label: "Capacity needs attention" };
-  if (pct >= threshold - 20) return { pct, tone: "warning", label: "Approaching capacity threshold" };
-  return { pct, tone: "healthy", label: "Capacity is healthy" };
+  if (pct >= threshold) return { pct, tone: "critical", labelKey: "dashboard.capacityAttention" };
+  if (pct >= threshold - 20)
+    return { pct, tone: "warning", labelKey: "dashboard.capacityApproaching" };
+  return { pct, tone: "healthy", labelKey: "dashboard.capacityHealthy" };
 }
 
 function PanelHeading({
@@ -130,22 +147,23 @@ function PanelHeading({
 }
 
 function DashboardHeader({ isRefreshing }: { isRefreshing: boolean }) {
+  const t = useT();
   return (
     <header className="dashboard-header">
       <div>
-        <p className="dashboard-kicker"><span aria-hidden="true" /> Workspace overview</p>
-        <h1>Your storage, in focus.</h1>
-        <p>Everything important—capacity, recent work, and activity—in one calm view.</p>
+        <p className="dashboard-kicker"><span aria-hidden="true" /> {t("dashboard.kicker")}</p>
+        <h1>{t("dashboard.title")}</h1>
+        <p>{t("dashboard.subtitle")}</p>
       </div>
 
       <div className="dashboard-header__actions">
         <span className="dashboard-refresh" aria-live="polite">
           <RefreshCw className={cn(isRefreshing && "animate-spin")} aria-hidden="true" />
-          {isRefreshing ? "Refreshing" : "Auto-refreshes every 30s"}
+          {isRefreshing ? t("dashboard.refreshing") : t("dashboard.autoRefresh")}
         </span>
         <Button asChild size="lg" className="dashboard-open-files">
           <Link href="/files">
-            Open files
+            {t("dashboard.openFiles")}
             <ArrowUpRight aria-hidden="true" />
           </Link>
         </Button>
@@ -155,6 +173,8 @@ function DashboardHeader({ isRefreshing }: { isRefreshing: boolean }) {
 }
 
 function StorageHero({ stats }: { stats: DashboardStats }) {
+  const t = useT();
+  const { formatBytes, formatNumber } = useFormat();
   const state = getStorageState(stats);
   const remaining = Math.max(0, stats.storageRemaining);
 
@@ -163,23 +183,27 @@ function StorageHero({ stats }: { stats: DashboardStats }) {
       <div className="dashboard-storage__copy">
         <div className="dashboard-storage__eyebrow">
           <span className="dashboard-storage__signal" aria-hidden="true" />
-          Live capacity
+          {t("dashboard.liveCapacity")}
         </div>
-        <h2 id="storage-overview-heading">Storage overview</h2>
-        <p>{state.label}. Your workspace updates automatically as files change.</p>
+        <h2 id="storage-overview-heading">{t("dashboard.storageOverview")}</h2>
+        <p>{t("dashboard.storageState", { state: t(state.labelKey) })}</p>
 
         <div className="dashboard-storage__value">
           <strong>{formatBytes(stats.storageUsed)}</strong>
-          <span>used of {stats.storageQuota ? formatBytes(stats.storageQuota) : "unlimited storage"}</span>
+          <span>
+            {t("dashboard.usedOf", {
+              total: stats.storageQuota ? formatBytes(stats.storageQuota) : t("dashboard.unlimited"),
+            })}
+          </span>
         </div>
 
         <div className="dashboard-storage__details">
           <div>
-            <span>Available</span>
+            <span>{t("dashboard.available")}</span>
             <strong>{stats.storageQuota ? formatBytes(remaining) : "—"}</strong>
           </div>
           <div>
-            <span>Threshold</span>
+            <span>{t("dashboard.threshold")}</span>
             <strong>{stats.storageQuota ? `${stats.storageWarningThreshold ?? 85}%` : "—"}</strong>
           </div>
         </div>
@@ -188,13 +212,17 @@ function StorageHero({ stats }: { stats: DashboardStats }) {
           <p className="dashboard-storage__notice" role="status">
             <TriangleAlert aria-hidden="true" />
             {state.tone === "critical"
-              ? "Storage is at or over the configured warning threshold."
-              : "You are getting closer to the configured storage threshold."}
+              ? t("dashboard.noticeCritical")
+              : t("dashboard.noticeWarning")}
           </p>
         )}
       </div>
 
-      <div className="dashboard-capacity" role="img" aria-label={`${Math.round(state.pct)} percent of storage capacity used`}>
+      <div
+        className="dashboard-capacity"
+        role="img"
+        aria-label={t("dashboard.capacityLabel", { percent: formatNumber(Math.round(state.pct)) })}
+      >
         <svg viewBox="0 0 120 120" aria-hidden="true">
           <circle className="dashboard-capacity__track" cx="60" cy="60" r="48" pathLength="1" />
           <motion.circle
@@ -209,8 +237,8 @@ function StorageHero({ stats }: { stats: DashboardStats }) {
           />
         </svg>
         <div className="dashboard-capacity__center">
-          <strong>{Math.round(state.pct)}<span>%</span></strong>
-          <span>in use</span>
+          <strong>{formatNumber(Math.round(state.pct))}<span>%</span></strong>
+          <span>{t("dashboard.inUse")}</span>
         </div>
       </div>
     </section>
@@ -218,15 +246,34 @@ function StorageHero({ stats }: { stats: DashboardStats }) {
 }
 
 function InventoryPanel({ stats }: { stats: DashboardStats }) {
+  const t = useT();
+  const { formatNumber } = useFormat();
   const metrics = [
-    { label: "Files", value: stats.totalFiles.toLocaleString(), icon: FileText, note: "Across your workspace" },
-    { label: "Folders", value: stats.totalFolders.toLocaleString(), icon: FolderOpen, note: "Organized spaces" },
-    { label: "Capacity", value: stats.storageQuota ? `${Math.round((stats.storageUsed / stats.storageQuota) * 100)}%` : "—", icon: Gauge, note: "Current use" },
+    {
+      label: t("dashboard.metricFiles"),
+      value: formatNumber(stats.totalFiles),
+      icon: FileText,
+      note: t("dashboard.metricFilesNote"),
+    },
+    {
+      label: t("dashboard.metricFolders"),
+      value: formatNumber(stats.totalFolders),
+      icon: FolderOpen,
+      note: t("dashboard.metricFoldersNote"),
+    },
+    {
+      label: t("dashboard.metricCapacity"),
+      value: stats.storageQuota
+        ? `${formatNumber(Math.round((stats.storageUsed / stats.storageQuota) * 100))}%`
+        : "—",
+      icon: Gauge,
+      note: t("dashboard.metricCapacityNote"),
+    },
   ];
 
   return (
     <section className="dashboard-panel dashboard-inventory" aria-labelledby="inventory-heading">
-      <PanelHeading id="inventory-heading" icon={LayoutGrid} title="Workspace inventory" />
+      <PanelHeading id="inventory-heading" icon={LayoutGrid} title={t("dashboard.inventory")} />
       <div className="dashboard-inventory__grid">
         {metrics.map((metric) => {
           const Icon = metric.icon;
@@ -245,19 +292,25 @@ function InventoryPanel({ stats }: { stats: DashboardStats }) {
 }
 
 function RecentFilesPanel({ files }: { files: FileItem[] }) {
+  const t = useT();
+  const { formatBytes, formatDate } = useFormat();
   return (
     <section className="dashboard-panel dashboard-files" aria-labelledby="recent-files-heading">
       <PanelHeading
         icon={FileText}
         id="recent-files-heading"
-        title="Recent files"
-        action={<Link href="/files" className="dashboard-panel__link">View all <ArrowRight aria-hidden="true" /></Link>}
+        title={t("dashboard.recentFiles")}
+        action={
+          <Link href="/files" className="dashboard-panel__link">
+            {t("dashboard.viewAll")} <ArrowRight aria-hidden="true" />
+          </Link>
+        }
       />
 
       {files.length ? (
         <div className="dashboard-files__list">
           {files.slice(0, 6).map((file, index) => {
-            const presentation = filePresentation(file);
+            const presentation = filePresentation(file, t);
             const Icon = presentation.icon;
             return (
               <motion.div
@@ -280,16 +333,23 @@ function RecentFilesPanel({ files }: { files: FileItem[] }) {
           })}
         </div>
       ) : (
-        <EmptyPanel icon={Cloud} title="No recent files" description="Files you upload appear here." actionLabel="Go to files" />
+        <EmptyPanel
+          icon={Cloud}
+          title={t("dashboard.noRecentFiles")}
+          description={t("dashboard.noRecentFilesBody")}
+          actionLabel={t("dashboard.goToFiles")}
+        />
       )}
     </section>
   );
 }
 
 function ActivityPanel({ items }: { items: ActivityItem[] }) {
+  const t = useT();
+  const { formatDate } = useFormat();
   return (
     <section className="dashboard-panel dashboard-activity" aria-labelledby="activity-heading">
-      <PanelHeading id="activity-heading" icon={Activity} title="Activity stream" />
+      <PanelHeading id="activity-heading" icon={Activity} title={t("dashboard.activityStream")} />
 
       {items.length ? (
         <ol className="dashboard-activity__list">
@@ -306,7 +366,7 @@ function ActivityPanel({ items }: { items: ActivityItem[] }) {
                 <div className="dashboard-activity__item">
                   <span className="dashboard-activity__icon" aria-hidden="true"><Icon /></span>
                   <span className="dashboard-activity__content">
-                    <strong>{actionCopy(item.action)}</strong>
+                    <strong>{actionCopy(item.action, t)}</strong>
                     {name && <small>{name}</small>}
                   </span>
                   <time dateTime={item.createdAt}>{formatDate(item.createdAt, "short")}</time>
@@ -316,25 +376,31 @@ function ActivityPanel({ items }: { items: ActivityItem[] }) {
           })}
         </ol>
       ) : (
-        <EmptyPanel icon={Sparkles} title="No activity" description="Uploads, downloads, and changes show here." />
+        <EmptyPanel
+          icon={Sparkles}
+          title={t("dashboard.noActivity")}
+          description={t("dashboard.noActivityBody")}
+        />
       )}
     </section>
   );
 }
 
 function SystemPulse({ stats }: { stats: NonNullable<DashboardData["globalStats"]> }) {
+  const t = useT();
+  const { formatBytes, formatNumber } = useFormat();
   const signals = [
-    { label: "Users", value: stats.totalUsers.toLocaleString(), icon: Users },
-    { label: "Files", value: stats.totalFiles.toLocaleString(), icon: FileText },
-    { label: "Stored", value: formatBytes(stats.totalStorage), icon: HardDrive },
+    { label: t("dashboard.signalUsers"), value: formatNumber(stats.totalUsers), icon: Users },
+    { label: t("dashboard.signalFiles"), value: formatNumber(stats.totalFiles), icon: FileText },
+    { label: t("dashboard.signalStored"), value: formatBytes(stats.totalStorage), icon: HardDrive },
   ];
 
   return (
     <section className="dashboard-system" aria-labelledby="system-pulse-heading">
       <div>
-        <p className="dashboard-kicker"><span aria-hidden="true" /> Admin signal</p>
-        <h2 id="system-pulse-heading">System pulse</h2>
-        <p>A quick view of the whole {APP_NAME} workspace.</p>
+        <p className="dashboard-kicker"><span aria-hidden="true" /> {t("dashboard.adminSignal")}</p>
+        <h2 id="system-pulse-heading">{t("dashboard.systemPulse")}</h2>
+        <p>{t("dashboard.systemPulseBody", { app: APP_NAME })}</p>
       </div>
       <div className="dashboard-system__metrics">
         {signals.map((signal) => {
@@ -348,7 +414,7 @@ function SystemPulse({ stats }: { stats: NonNullable<DashboardData["globalStats"
         })}
       </div>
       <Button asChild variant="secondary" size="sm">
-        <Link href="/admin">Open admin <ArrowUpRight aria-hidden="true" /></Link>
+        <Link href="/admin">{t("dashboard.openAdmin")} <ArrowUpRight aria-hidden="true" /></Link>
       </Button>
     </section>
   );
@@ -378,8 +444,9 @@ function EmptyPanel({
 }
 
 function DashboardSkeleton() {
+  const t = useT();
   return (
-    <div className="dashboard-page" aria-busy="true" aria-label="Loading dashboard">
+    <div className="dashboard-page" aria-busy="true" aria-label={t("dashboard.loading")}>
       <div className="dashboard-skeleton dashboard-skeleton--header" />
       <div className="dashboard-skeleton-grid">
         <div className="dashboard-skeleton dashboard-skeleton--hero" />
@@ -394,16 +461,17 @@ function DashboardSkeleton() {
 }
 
 function DashboardError({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
+  const t = useT();
   return (
     <div className="dashboard-page">
       <section className="dashboard-error" role="alert">
         <span aria-hidden="true"><TriangleAlert /></span>
         <div>
-          <h1>Dashboard is taking a moment.</h1>
-          <p>We could not load your latest workspace overview. Your files are safe—try refreshing the view.</p>
+          <h1>{t("dashboard.errorTitle")}</h1>
+          <p>{t("dashboard.errorBody")}</p>
           <Button type="button" onClick={onRetry} disabled={retrying}>
             <RefreshCw className={cn(retrying && "animate-spin")} aria-hidden="true" />
-            Try again
+            {t("errorPages.tryAgain")}
           </Button>
         </div>
       </section>

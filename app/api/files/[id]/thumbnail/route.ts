@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/session";
-import { resolveFileAccess } from "@/lib/auth/permissions";
-import { downloadFromR2Stream } from "@/lib/storage/r2";
-import { apiError } from "@/lib/api/response";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { resolveFileAccess } from "@/shared/lib/auth/permissions";
+import { downloadFromR2Stream } from "@files/infrastructure/storage/r2";
+import { apiError } from "@/shared/api/response";
 
 const THUMB_SIZES = [150, 300, 600, 1200] as const;
 type ThumbSize = (typeof THUMB_SIZES)[number];

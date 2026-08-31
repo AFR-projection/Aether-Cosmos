@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/auth/session";
-import { resolvePublicOrigin } from "@/lib/env/runtime";
-import { validateOAuthClientRedirect } from "@/lib/oauth/clients";
-import { parseScopes } from "@/lib/oauth/constants";
-import { oauthError } from "@/lib/oauth/http";
+import { getSessionUser } from "@/shared/lib/auth/session";
+import { resolvePublicOrigin } from "@/shared/lib/env/runtime";
+import { validateOAuthClientRedirect } from "@/shared/lib/auth/oauth/clients";
+import { parseScopes } from "@/shared/lib/auth/oauth/constants";
+import { oauthError } from "@/shared/lib/auth/oauth/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

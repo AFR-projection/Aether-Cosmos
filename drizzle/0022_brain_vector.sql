@@ -14,7 +14,7 @@
 -- AFTER the column is backfilled, so index construction never blocks writes and never
 -- indexes a mostly-NULL column.
 
--- pgvector. Available on Neon; no-op if already enabled.
+-- pgvector. Available on most managed PostgreSQL providers; no-op if already enabled.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Dense embedding + its provenance. NULL until a provider is configured and the embed

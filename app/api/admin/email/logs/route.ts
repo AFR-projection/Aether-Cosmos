@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { getRecentEmailLogs } from "@/lib/email/log";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { getRecentEmailLogs } from "@/shared/infrastructure/email/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

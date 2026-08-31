@@ -1,17 +1,17 @@
 import { NextRequest } from "next/server";
 import { count } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import {
   getAdminSettings,
   updateAdminSettings,
   type AdminSettings,
-} from "@/lib/admin-settings";
-import { readCleanupState } from "@/lib/system/cleanup-state";
+} from "@/shared/lib/settings/admin-settings";
+import { readCleanupState } from "@/shared/lib/system/cleanup-state";
 
 export type { AdminSettings };
 
@@ -19,7 +19,7 @@ export type { AdminSettings };
  * Every key here is optional and the object is `.strip()`ed, so a client can PATCH
  * one field without resending the rest and cannot smuggle in an unknown key.
  * Ranges are deliberately NOT enforced here — `normalizeSettings` in
- * lib/admin-settings.ts clamps every field on the way in, which is the one place
+ * @/shared/lib/settings/admin-settings.ts clamps every field on the way in, which is the one place
  * that also protects writes coming from anywhere else.
  */
 const patchSchema = z

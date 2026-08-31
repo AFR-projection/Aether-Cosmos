@@ -1,21 +1,21 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { shares, files } from "@/lib/db/schema";
-import { downloadFromR2Stream } from "@/lib/storage/r2";
-import { apiError, handleApiError } from "@/lib/api/response";
-import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
-import { claimShareAccess, shareExpired, shareResumeIsFree } from "@/lib/shares/access";
-import { isPossibleShareToken } from "@/lib/shares/token";
+import { db } from "@/shared/infrastructure/db";
+import { shares, files } from "@/shared/infrastructure/db/schema";
+import { downloadFromR2Stream } from "@files/infrastructure/storage/r2";
+import { apiError, handleApiError } from "@/shared/api/response";
+import { getSafeMimeType, shouldForceDownload } from "@/shared/lib/security/mime";
+import { claimShareAccess, shareExpired, shareResumeIsFree } from "@shares/application/access";
+import { isPossibleShareToken } from "@shares/domain/token";
 import {
   isContinuationRange,
   parseRangeHeader,
   rangeLength,
   toReadableStream,
-} from "@/lib/storage/http-range";
-import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
-import { checkRateLimit } from "@/lib/security";
-import { getClientIpFromRequest } from "@/lib/access-tracking";
+} from "@files/infrastructure/storage/http-range";
+import { recordBandwidth, BandwidthQuotaError } from "@/shared/lib/billing/bandwidth";
+import { checkRateLimit } from "@/shared/lib/security";
+import { getClientIpFromRequest } from "@/shared/lib/access-tracking";
 
 /**
  * Public content path for a share link. Anonymous, so every ceiling here is the

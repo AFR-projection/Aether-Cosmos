@@ -1,4 +1,4 @@
-import { FileBrowser } from "@/components/files/file-browser";
+import { FileBrowser } from "@files/presentation/components/files/file-browser";
 
 export default async function FilesPage({
   searchParams,

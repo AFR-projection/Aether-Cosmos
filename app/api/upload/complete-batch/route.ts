@@ -1,27 +1,27 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { getClientIp } from "@/lib/auth/session";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
+import { db } from "@/shared/infrastructure/db";
+import { files } from "@/shared/infrastructure/db/schema";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
 import {
   objectExists,
   downloadFromR2Bytes,
   completeMultipartUpload,
   abortMultipartUpload,
-} from "@/lib/storage/r2";
-import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
-import { validateFileMagicBytes } from "@/lib/security/file-validation";
-import { enqueueJob } from "@/lib/queue";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { recalculateUsedBytes } from "@/lib/db";
-import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
-import { publishToUser } from "@/lib/realtime/events";
-import { getAdminSettings } from "@/lib/admin-settings";
-import { UPLOAD_RATE_MULTIPLIER } from "@/lib/upload/limits";
+} from "@files/infrastructure/storage/r2";
+import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { validateFileMagicBytes } from "@/shared/lib/security/file-validation";
+import { enqueueJob } from "@/shared/infrastructure/queue";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
+import { publishToUser } from "@/shared/infrastructure/realtime/events";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
+import { UPLOAD_RATE_MULTIPLIER } from "@files/application/commands/limits";
 
 const encryptionMetaSchema = z.object({
   salt: z.string().min(1),

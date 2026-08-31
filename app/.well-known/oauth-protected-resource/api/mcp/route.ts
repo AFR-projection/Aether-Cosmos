@@ -1,5 +1,5 @@
-import { buildProtectedResourceMetadata } from "@/lib/oauth/metadata";
-import { resolvePublicOrigin } from "@/lib/env/runtime";
+import { buildProtectedResourceMetadata } from "@/shared/lib/auth/oauth/metadata";
+import { resolvePublicOrigin } from "@/shared/lib/env/runtime";
 
 export const dynamic = "force-dynamic";
 

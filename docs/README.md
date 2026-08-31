@@ -63,7 +63,7 @@ docs/
 | | |
 |---|---|
 | **Version** | 0.4.0 |
-| **Automated tests** | 2382 passing, 35 skipped (120 test files, 3 skipped) |
+| **Automated tests** | 2502 passing, 35 skipped (125 test files, 3 skipped) |
 | **Typecheck / lint** | `tsc --noEmit` and `eslint` clean |
 | **Storage platform** | In production use by the maintainer |
 | **Second Brain 1.0** | Memories, versions, graph, MCP — covered by tests |

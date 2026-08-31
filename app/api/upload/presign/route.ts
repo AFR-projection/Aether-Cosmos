@@ -1,19 +1,19 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { files, users } from "@/lib/db/schema";
-import { getClientIp } from "@/lib/auth/session";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions";
+import { db } from "@/shared/infrastructure/db";
+import { files, users } from "@/shared/infrastructure/db/schema";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId, resolveFolderAccess } from "@/shared/lib/auth/permissions";
 import {
   buildR2Key,
   getPresignedUploadUrl,
-} from "@/lib/storage/r2";
-import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getAdminSettings, isUploadAllowed, maxUploadBytes } from "@/lib/admin-settings";
-import { UPLOAD_RATE_MULTIPLIER } from "@/lib/upload/limits";
+} from "@files/infrastructure/storage/r2";
+import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { getAdminSettings, isUploadAllowed, maxUploadBytes } from "@/shared/lib/settings/admin-settings";
+import { UPLOAD_RATE_MULTIPLIER } from "@files/application/commands/limits";
 
 const encryptionMetaSchema = z.object({
   salt: z.string().min(1),

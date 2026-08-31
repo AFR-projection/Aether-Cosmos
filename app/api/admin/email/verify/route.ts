@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { mailSenders } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { validateCsrf } from "@/lib/security";
-import { apiError, apiSuccess, handleApiError } from "@/lib/api/response";
-import { decryptSecret } from "@/lib/email/crypto";
-import { verifyCredentials, evictTransport } from "@/lib/email/mailer";
+import { db } from "@/shared/infrastructure/db";
+import { mailSenders } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiError, apiSuccess, handleApiError } from "@/shared/api/response";
+import { decryptSecret } from "@/shared/infrastructure/email/crypto";
+import { verifyCredentials, evictTransport } from "@/shared/infrastructure/email/mailer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

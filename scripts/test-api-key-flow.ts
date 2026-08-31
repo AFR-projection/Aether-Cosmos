@@ -4,8 +4,8 @@
  */
 import "./load-env";
 import { eq } from "drizzle-orm";
-import { db } from "../lib/db";
-import { users } from "../lib/db/schema";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
 import {
   authenticateApiKey,
   createApiKey,
@@ -14,7 +14,7 @@ import {
   deleteMasterApiKey,
   keyHasScope,
   keyHasAdminArea,
-} from "../lib/auth/api-key";
+} from "@/shared/lib/auth/api-key";
 
 const BASE = (process.argv[2] ?? "http://localhost:3000").replace(/\/$/, "");
 

@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
-import { loadEmbeddingConfig } from "@/lib/brain/embedding/config";
-import { detectEmbeddingDimension } from "@/lib/brain/embedding/detect";
-import { OpenRouterEmbeddingError } from "@/lib/brain/embedding/openrouter";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
+import { loadEmbeddingConfig } from "@brain/infrastructure/providers/config";
+import { detectEmbeddingDimension } from "@brain/infrastructure/providers/detect";
+import { OpenRouterEmbeddingError } from "@brain/infrastructure/providers/openrouter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

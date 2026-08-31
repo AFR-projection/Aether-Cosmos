@@ -36,10 +36,10 @@ import {
   Skeleton,
   StatusDot,
   type Tone,
-} from "@/components/admin/admin-ui";
-import { auditAction } from "@/lib/admin/audit-actions";
-import { apiFetch } from "@/lib/api/client";
-import { formatBytes, formatDate } from "@/lib/utils";
+} from "@admin/presentation/components/admin-ui";
+import { auditAction, auditActionLabel } from "@admin/domain/services/audit-actions";
+import { apiFetch } from "@/shared/api/client";
+import { useFormat, useT, type TranslationKey, type Translator } from "@/shared/lib/i18n";
 
 interface AdminStats {
   users: { total: number; active: number; suspended: number };
@@ -86,6 +86,26 @@ interface AdminStats {
 // never color-alone). Do not reorder: colors follow entity slots, not rank.
 const MIME_COLORS = ["#059669", "#2563eb", "#d97706", "#7c3aed", "#dc2626", "#0891b2"];
 
+/**
+ * The stats endpoint names each slice in English ("Images", "Documents"). It is a
+ * closed set of six, so the chart translates it on the way in — that keeps the API
+ * response shape stable for anything else reading it, and an unrecognised name
+ * still shows through rather than disappearing.
+ */
+const CATEGORY_KEYS: Record<string, TranslationKey> = {
+  Images: "admin.overview.category.images",
+  Videos: "admin.overview.category.videos",
+  Audio: "admin.overview.category.audio",
+  Documents: "admin.overview.category.documents",
+  Archives: "admin.overview.category.archives",
+  Other: "admin.overview.category.other",
+};
+
+function categoryLabel(category: string, t: Translator): string {
+  const key = CATEGORY_KEYS[category];
+  return key ? t(key) : category;
+}
+
 /** Storage capacity reads danger past 90% and warning past 75% of the pool. */
 function capacityTone(ratio: number): Tone {
   if (ratio >= 0.9) return "danger";
@@ -94,6 +114,8 @@ function capacityTone(ratio: number): Tone {
 }
 
 export default function AdminOverviewPage() {
+  const t = useT();
+  const { formatBytes, formatDate, formatMonthDay, formatNumber } = useFormat();
   const { data: stats, isLoading } = useQuery({
     queryKey: ["admin-stats"],
     queryFn: async () => {
@@ -111,20 +133,26 @@ export default function AdminOverviewPage() {
   const storagePct = ratio * 100;
   const free = Math.max(quota - used, 0);
   const growth = stats?.storageGrowth ?? [];
-  const categories = stats?.byCategory ?? [];
+  // The pie labels itself from this array, so the translated name travels with the
+  // slice instead of being looked up again inside the tooltip.
+  const categories = (stats?.byCategory ?? []).map((entry) => ({
+    ...entry,
+    label: categoryLabel(entry.category, t),
+  }));
   const topUsers = stats?.topUsers ?? [];
   const recent = stats?.recentActivity ?? [];
   const byType = stats?.activity.byType ?? [];
+  const pct = formatNumber(storagePct, { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
   return (
     <div className="space-y-5">
       <AdminHeader
         icon={Gauge}
-        kicker="Overview"
-        title="System overview"
-        lede="What the platform is doing right now — accounts, storage, traffic, and the services behind them. Every figure refreshes on its own every 15 seconds."
+        kicker={t("admin.nav.overview")}
+        title={t("admin.overview.title")}
+        lede={t("admin.overview.lede")}
         live
-        liveLabel="Live · 15s"
+        liveLabel={t("admin.overview.live")}
       />
 
       {stats?.system && <SystemHealth system={stats.system} />}
@@ -135,89 +163,89 @@ export default function AdminOverviewPage() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <AdminMetric
           icon={Users}
-          label="Users"
+          label={t("admin.nav.users")}
           value={stats?.users.total ?? 0}
           tone="accent"
-          hint={`${stats?.users.active ?? 0} active · ${stats?.users.suspended ?? 0} suspended`}
+          hint={`${t("admin.overview.hintActive", { count: stats?.users.active ?? 0 })} · ${t("admin.overview.hintSuspended", { count: stats?.users.suspended ?? 0 })}`}
         />
         <AdminMetric
           icon={FileText}
-          label="Files"
+          label={t("admin.overview.files")}
           value={stats?.files.total ?? 0}
           tone="info"
-          hint={`${stats?.files.notes ?? 0} notes · ${stats?.folders ?? 0} folders`}
+          hint={`${t("admin.overview.hintNotes", { count: stats?.files.notes ?? 0 })} · ${t("admin.overview.hintFolders", { count: stats?.folders ?? 0 })}`}
         />
         <AdminMetric
           icon={HardDrive}
-          label="Storage used"
+          label={t("admin.overview.storageUsed")}
           value={formatBytes(used)}
           tone={capacityTone(ratio)}
-          hint={`${storagePct.toFixed(1)}% of ${formatBytes(quota)} allocated`}
+          hint={t("admin.overview.storageUsedHint", { percent: pct, total: formatBytes(quota) })}
         />
         <AdminMetric
           icon={Share2}
-          label="Share links"
+          label={t("admin.overview.shareLinks")}
           value={stats?.shares ?? 0}
           tone="warning"
-          hint="Public links in circulation"
+          hint={t("admin.overview.shareLinksHint")}
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <AdminMetric
           icon={Shield}
-          label="Logins"
+          label={t("admin.overview.logins")}
           value={stats?.activity.logins ?? 0}
           tone="success"
-          hint="Last 7 days"
+          hint={t("admin.overview.last7Days")}
         />
         <AdminMetric
           icon={Upload}
-          label="Uploads"
+          label={t("admin.overview.uploads")}
           value={stats?.activity.uploads ?? 0}
           tone="info"
-          hint="Last 7 days"
+          hint={t("admin.overview.last7Days")}
         />
         <AdminMetric
           icon={Download}
-          label="Downloads"
+          label={t("admin.overview.downloads")}
           value={stats?.activity.downloads ?? 0}
           tone="accent"
-          hint="Last 7 days"
+          hint={t("admin.overview.last7Days")}
         />
         <AdminMetric
           icon={KeyRound}
-          label="Sessions"
+          label={t("admin.overview.sessions")}
           value={stats?.sessions ?? 0}
           tone="muted"
-          hint="Signed in right now"
+          hint={t("admin.overview.sessionsHint")}
         />
       </div>
 
       <AdminPanel
         icon={HardDrive}
-        title="Storage pool"
-        sub="Bytes stored against the total quota handed out to accounts"
+        title={t("admin.overview.poolTitle")}
+        sub={t("admin.overview.poolSub")}
         tone={capacityTone(ratio)}
         tools={
           <Chip tone={capacityTone(ratio)} mono>
-            {storagePct.toFixed(1)}%
+            {pct}%
           </Chip>
         }
       >
         <Meter value={ratio} tone={ratio >= 0.9 ? "danger" : "accent"} />
         <div className="mt-3 grid grid-cols-3 gap-3">
-          <Figure label="Used" value={formatBytes(used)} />
-          <Figure label="Free" value={formatBytes(free)} />
-          <Figure label="Utilisation" value={`${storagePct.toFixed(1)}%`} />
+          <Figure label={t("admin.overview.figUsed")} value={formatBytes(used)} />
+          <Figure label={t("admin.overview.figFree")} value={formatBytes(free)} />
+          <Figure label={t("admin.overview.figUtilisation")} value={`${pct}%`} />
         </div>
       </AdminPanel>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <AdminPanel
           icon={TrendingUp}
-          title="Upload growth"
-          sub="Files added per day over the last 30 days"
+          title={t("admin.overview.growthTitle")}
+          sub={t("admin.overview.growthSub")}
         >
           {growth.length > 0 ? (
             <div className="h-56">
@@ -232,7 +260,7 @@ export default function AdminOverviewPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis
                     dataKey="day"
-                    tickFormatter={formatChartDay}
+                    tickFormatter={(value) => chartDay(value, formatMonthDay)}
                     tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                     tickLine={false}
                     axisLine={{ stroke: "var(--border)" }}
@@ -269,13 +297,17 @@ export default function AdminOverviewPage() {
           ) : (
             <AdminEmpty
               icon={TrendingUp}
-              title="No uploads in the last 30 days"
-              body="The curve draws itself as soon as files start arriving."
+              title={t("admin.overview.growthEmptyTitle")}
+              body={t("admin.overview.growthEmptyBody")}
             />
           )}
         </AdminPanel>
 
-        <AdminPanel icon={Database} title="Storage by type" sub="Where the bytes actually sit">
+        <AdminPanel
+          icon={Database}
+          title={t("admin.overview.mixTitle")}
+          sub={t("admin.overview.mixSub")}
+        >
           {categories.length > 0 ? (
             <div className="flex flex-col items-center gap-4 sm:flex-row">
               <div className="h-48 w-full sm:w-1/2">
@@ -284,7 +316,7 @@ export default function AdminOverviewPage() {
                     <Pie
                       data={categories}
                       dataKey="bytes"
-                      nameKey="category"
+                      nameKey="label"
                       innerRadius={48}
                       outerRadius={72}
                       paddingAngle={2}
@@ -312,7 +344,7 @@ export default function AdminOverviewPage() {
                         className="h-2.5 w-2.5 shrink-0 rounded-full"
                         style={{ background: MIME_COLORS[i % MIME_COLORS.length] }}
                       />
-                      <span className="truncate text-[0.78rem] capitalize">{c.category}</span>
+                      <span className="truncate text-[0.78rem]">{c.label}</span>
                       <span className="adm-num text-[var(--adm-muted)]">{c.count}</span>
                     </span>
                     <span className="adm-num shrink-0 text-[var(--adm-muted)]">
@@ -325,8 +357,8 @@ export default function AdminOverviewPage() {
           ) : (
             <AdminEmpty
               icon={Database}
-              title="No files"
-              body="Uploads split the pool by file category here."
+              title={t("admin.overview.mixEmptyTitle")}
+              body={t("admin.overview.mixEmptyBody")}
             />
           )}
         </AdminPanel>
@@ -335,9 +367,9 @@ export default function AdminOverviewPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <AdminPanel
           icon={TrendingUp}
-          title="Heaviest accounts"
-          sub="Ranked by bytes stored, not by file count"
-          tools={<PanelLink href="/admin/users">All users</PanelLink>}
+          title={t("admin.overview.topTitle")}
+          sub={t("admin.overview.topSub")}
+          tools={<PanelLink href="/admin/users">{t("admin.overview.allUsers")}</PanelLink>}
         >
           {topUsers.length > 0 ? (
             <ol className="space-y-2.5">
@@ -370,17 +402,17 @@ export default function AdminOverviewPage() {
           ) : (
             <AdminEmpty
               icon={Users}
-              title="No accounts"
-              body="Accounts that store data rank here by bytes used."
+              title={t("admin.overview.topEmptyTitle")}
+              body={t("admin.overview.topEmptyBody")}
             />
           )}
         </AdminPanel>
 
         <AdminPanel
           icon={Activity}
-          title="Latest events"
-          sub="The eight most recent entries in the audit log"
-          tools={<PanelLink href="/admin/logs">Full log</PanelLink>}
+          title={t("admin.overview.eventsTitle")}
+          sub={t("admin.overview.eventsSub")}
+          tools={<PanelLink href="/admin/logs">{t("admin.overview.fullLog")}</PanelLink>}
           flush
         >
           {recent.length > 0 ? (
@@ -401,9 +433,9 @@ export default function AdminOverviewPage() {
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[0.78rem] font-medium">
-                          {meta.label}
+                          {auditActionLabel(log.action, t)}
                         </span>
-                        <span className="adm-sub block truncate">{meta.description}</span>
+                        <span className="adm-sub block truncate">{t(meta.descriptionKey)}</span>
                       </span>
                       <span className="adm-num shrink-0 text-[var(--adm-muted)]">
                         {formatDate(log.createdAt, "short")}
@@ -417,8 +449,8 @@ export default function AdminOverviewPage() {
             <div className="p-4">
               <AdminEmpty
                 icon={Activity}
-                title="No logs"
-                body="Sign-ins, uploads and administrative changes land here."
+                title={t("admin.logs.emptyTitle")}
+                body={t("admin.overview.eventsEmptyBody")}
               />
             </div>
           )}
@@ -428,8 +460,8 @@ export default function AdminOverviewPage() {
       {byType.length > 0 && (
         <AdminPanel
           icon={BarChart3}
-          title="Activity breakdown"
-          sub="Every logged action type over the last 7 days"
+          title={t("admin.overview.breakdownTitle")}
+          sub={t("admin.overview.breakdownSub")}
         >
           <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-4">
             {byType.map((item) => {
@@ -440,14 +472,16 @@ export default function AdminOverviewPage() {
                   href={`/admin/logs?action=${encodeURIComponent(item.action)}`}
                   className="adm-tile"
                   data-tone={meta.tone}
-                  title={meta.description}
+                  title={t(meta.descriptionKey)}
                 >
                   <span className="adm-tile__icon">
                     <meta.icon aria-hidden="true" />
                   </span>
                   <span className="min-w-0">
                     <span className="adm-tile__value adm-num">{item.count}</span>
-                    <span className="adm-tile__label block truncate">{meta.label}</span>
+                    <span className="adm-tile__label block truncate">
+                      {auditActionLabel(item.action, t)}
+                    </span>
                   </span>
                   <ArrowUpRight
                     className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--adm-muted)]"
@@ -516,35 +550,43 @@ function OverviewSkeleton() {
  * off — so "something is wrong" is visible without reading a word.
  */
 function SystemHealth({ system }: { system: NonNullable<AdminStats["system"]> }) {
+  const t = useT();
   const services: { label: string; icon: LucideIcon; tone: Tone; value: string; note?: string }[] = [
     {
-      label: "Database",
+      label: t("admin.overview.svcDatabase"),
       icon: Database,
       tone: system.database === "connected" ? "success" : "danger",
-      value: system.database === "connected" ? "Connected" : "Down",
+      value: system.database === "connected"
+        ? t("admin.overview.svcConnected")
+        : t("admin.overview.svcDown"),
     },
     {
-      label: "Cache",
+      label: t("admin.overview.svcCache"),
       icon: Zap,
       tone:
         system.redis === "connected" ? "success" : system.redis === "disabled" ? "muted" : "danger",
       value:
-        system.redis === "connected" ? "Connected" : system.redis === "disabled" ? "Disabled" : "Down",
-      note: system.redis === "disabled" ? "Jobs run in-process" : undefined,
+        system.redis === "connected"
+          ? t("admin.overview.svcConnected")
+          : system.redis === "disabled"
+            ? t("admin.overview.svcDisabled")
+            : t("admin.overview.svcDown"),
+      note: system.redis === "disabled" ? t("admin.overview.svcCacheNote") : undefined,
     },
     {
-      label: "Web server",
+      label: t("admin.overview.svcWeb"),
       icon: Server,
       tone: "success",
-      value: `Up ${formatUptime(system.uptimeSeconds)}`,
-      note: `Node ${system.nodeVersion}`,
+      value: t("admin.overview.svcUp", { duration: formatUptime(system.uptimeSeconds, t) }),
+      note: t("admin.overview.svcNode", { version: system.nodeVersion }),
     },
     {
-      label: "Memory",
+      label: t("admin.overview.svcMemory"),
       icon: Cpu,
       tone: "info",
+      // `MB` is a size unit, read the same in all three locales.
       value: `${system.memoryUsedMB} MB`,
-      note: `Heap ${system.memoryHeapMB} MB`,
+      note: t("admin.overview.svcHeap", { size: `${system.memoryHeapMB} MB` }),
     },
   ];
 
@@ -554,14 +596,16 @@ function SystemHealth({ system }: { system: NonNullable<AdminStats["system"]> })
   return (
     <AdminPanel
       icon={Server}
-      title="System health"
-      sub={`Environment: ${system.env}`}
+      title={t("admin.overview.healthTitle")}
+      sub={t("admin.overview.healthEnv", { env: system.env })}
       tone={healthy ? "success" : "danger"}
       variant={healthy ? undefined : "danger"}
       tools={
         <Chip tone={healthy ? "success" : "danger"}>
           <StatusDot tone={healthy ? "success" : "danger"} ring={healthy} />
-          {healthy ? "All systems operational" : `${down.length} service down`}
+          {healthy
+            ? t("admin.overview.healthOk")
+            : t("admin.overview.healthDown", { count: down.length })}
         </Chip>
       }
     >
@@ -585,21 +629,26 @@ function SystemHealth({ system }: { system: NonNullable<AdminStats["system"]> })
 
 /* ── Chart helpers ──────────────────────────────────────────────────────────── */
 
-/** "2026-07-13" → "Jul 13" for compact, readable axis ticks. */
-function formatChartDay(value: unknown): string {
+/**
+ * `"2026-07-13"` → `Jul 13`, `13 Jul` or `7月13日` depending on the reader. The
+ * formatter is passed in rather than looked up: this runs inside a Recharts
+ * `tickFormatter`, which is not a component and cannot hold a hook.
+ */
+function chartDay(value: unknown, formatMonthDay: (date: Date | string) => string): string {
   const s = String(value);
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s.slice(5);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatMonthDay(d);
 }
 
-function formatUptime(seconds: number): string {
+/** The two coarsest units that still say something about how long the server has been up. */
+function formatUptime(seconds: number, t: Translator): string {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  if (d > 0) return t("admin.overview.uptimeDays", { days: d, hours: h });
+  if (h > 0) return t("admin.overview.uptimeHours", { hours: h, minutes: m });
+  return t("admin.overview.uptimeMinutes", { minutes: m });
 }
 
 /** Theme-aware tooltip — reads surface/border/ink tokens so it's legible in
@@ -613,17 +662,21 @@ function UploadTooltip({
   payload?: Array<{ value?: number }>;
   label?: string | number;
 }) {
+  const t = useT();
+  const { formatMonthDay } = useFormat();
   if (!active || !payload?.length) return null;
   const value = payload[0]?.value ?? 0;
   return (
     <div className="adm-tooltip">
-      <p className="adm-sub">{formatChartDay(label)}</p>
+      <p className="adm-sub">{chartDay(label, formatMonthDay)}</p>
       <p className="mt-0.5 flex items-center gap-1.5 text-[0.8rem] font-semibold">
         <span
           className="inline-block h-2 w-4 rounded-full"
           style={{ background: "var(--accent)" }}
         />
-        <span className="adm-num">{value}</span> upload{value === 1 ? "" : "s"}
+        {/* The count sits inside the phrase, so the tabular-figure class comes off:
+            no language puts the number in the same place. */}
+        {t("admin.overview.uploadCount", { count: value })}
       </p>
     </div>
   );
@@ -636,11 +689,12 @@ function CategoryTooltip({
   active?: boolean;
   payload?: Array<{ name?: string; value?: number; payload?: { fill?: string } }>;
 }) {
+  const { formatBytes } = useFormat();
   if (!active || !payload?.length) return null;
   const item = payload[0];
   return (
     <div className="adm-tooltip">
-      <p className="flex items-center gap-1.5 text-[0.8rem] font-semibold capitalize">
+      <p className="flex items-center gap-1.5 text-[0.8rem] font-semibold">
         <span
           className="inline-block h-2.5 w-2.5 rounded-full"
           style={{ background: item.payload?.fill }}

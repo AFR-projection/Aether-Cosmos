@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { folders } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { resolveFolderAccess } from "@/lib/auth/permissions";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { folders } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { resolveFolderAccess } from "@/shared/lib/auth/permissions";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 
 /**
  * The ancestor chain for a folder, so `/files?folder=<id>` can show where it is.

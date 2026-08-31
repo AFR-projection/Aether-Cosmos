@@ -8,10 +8,10 @@ Common failure modes and how to fix them.
 
 **`npm run dev` fails with "Cannot connect to database"**
 
-- Confirm `DATABASE_URL` in `.env` points at a reachable PostgreSQL instance (Neon,
-  local Docker, or a dev server).
+- Confirm `DATABASE_URL` in `.env` points at a reachable PostgreSQL instance (managed
+  provider, local Docker, or a dev server).
 - Test the connection: `psql "$DATABASE_URL" -c "SELECT 1"` or any SQL client.
-- If using Neon, check your IP is allowed in the Neon dashboard.
+- If using a managed provider with IP restrictions, check your IP is allowed in the dashboard.
 
 **Redis connection error**
 
@@ -90,9 +90,9 @@ Usual causes:
 
 **Database connection fails**
 
-1. Verify `DATABASE_URL` in `/opt/aether-cosmos/.env` points at the right Neon
+1. Verify `DATABASE_URL` in `/opt/aether-cosmos/.env` points at the right database
    project — `aether env` opens it and re-validates on save.
-2. Check the Neon dashboard **IP Allow** list includes the VPS public IP.
+2. Check your provider's dashboard **IP Allow** list includes the VPS public IP.
 3. Test the connection: `psql "$DATABASE_URL" -c "SELECT 1"` from the VPS.
 
 **Worker reports `FAIL` with errors in the log**

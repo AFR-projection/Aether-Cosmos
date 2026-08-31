@@ -10,9 +10,9 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { suggestQueryImprovements } from "@/lib/monitoring/query-analytics";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { suggestQueryImprovements } from "@/shared/lib/monitoring/query-analytics";
 
 const querySchema = z.object({
   days: z.coerce.number().int().min(1).max(365).default(30),

@@ -2,10 +2,11 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { apiFetch } from "@/lib/api/client";
-import { cn, formatDate } from "@/lib/utils";
+import { apiFetch } from "@/shared/api/client";
+import { cn } from "@/shared/lib/utils";
 import { Mail, Check, X, Loader2, Eye, Pencil, FolderOpen } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/ui/primitives/button";
+import { apiErrorMessage, useFormat, useT } from "@/shared/lib/i18n";
 
 interface Invitation {
   id: string;
@@ -21,13 +22,17 @@ interface ApiResponse {
 }
 
 export default function InvitationsPage() {
+  const t = useT();
+  const { formatDate } = useFormat();
   const queryClient = useQueryClient();
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["invitations"],
     queryFn: async () => {
       const res = await apiFetch<ApiResponse>("/api/invitations");
-      if (!res.success || !res.data) throw new Error(res.error ?? "Failed to load");
+      if (!res.success || !res.data) {
+        throw new Error(apiErrorMessage(res, t, "invitations.loadFailed"));
+      }
       return res.data;
     },
   });
@@ -38,7 +43,7 @@ export default function InvitationsPage() {
         method: "POST",
         body: JSON.stringify({ invitationId, action }),
       });
-      if (!res.success) throw new Error(res.error ?? "Failed to respond");
+      if (!res.success) throw new Error(apiErrorMessage(res, t, "sharedWithMe.respondFailed"));
       return res;
     },
     onSuccess: () => {
@@ -59,13 +64,13 @@ export default function InvitationsPage() {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
         <Mail className="h-8 w-8 text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">Could not load invitations.</p>
+        <p className="text-sm text-muted-foreground">{t("invitations.loadFailed")}</p>
         <button
           onClick={() => void refetch()}
           disabled={isFetching}
           className="text-sm text-accent-ink underline underline-offset-2 hover:opacity-80"
         >
-          Try again
+          {t("errorPages.tryAgain")}
         </button>
       </div>
     );
@@ -80,11 +85,9 @@ export default function InvitationsPage() {
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/10">
             <Mail className="h-4 w-4 text-accent-ink" />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Folder Invitations</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("invitations.title")}</h1>
         </div>
-        <p className="text-sm text-muted-foreground ml-12">
-          Pending invitations from other users.
-        </p>
+        <p className="text-sm text-muted-foreground ml-12">{t("invitations.intro")}</p>
       </header>
 
       {invitations.length === 0 ? (
@@ -93,10 +96,8 @@ export default function InvitationsPage() {
             <Mail className="h-9 w-9 text-muted-foreground/20" />
           </div>
           <div>
-            <p className="font-medium text-foreground/80">No pending invitations</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Invitations from other users show here.
-            </p>
+            <p className="font-medium text-foreground/80">{t("invitations.emptyTitle")}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t("invitations.emptyBody")}</p>
           </div>
         </div>
       ) : (
@@ -131,14 +132,14 @@ export default function InvitationsPage() {
                       )}
                     >
                       {inv.role === "edit" ? (
-                        <><Pencil className="h-3 w-3" /> Edit</>
+                        <><Pencil className="h-3 w-3" /> {t("shares.permission.edit")}</>
                       ) : (
-                        <><Eye className="h-3 w-3" /> View</>
+                        <><Eye className="h-3 w-3" /> {t("shares.permission.view")}</>
                       )}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mb-3">
-                    Invited by <span className="font-medium">{inv.invitedByUsername}</span> · {formatDate(inv.createdAt, "short")}
+                    {t("invitations.invitedBy", { user: inv.invitedByUsername })} · {formatDate(inv.createdAt, "short")}
                   </p>
                   <div className="flex gap-2">
                     <Button
@@ -148,7 +149,7 @@ export default function InvitationsPage() {
                       className="h-8 gap-1.5 px-3"
                     >
                       <Check className="h-3.5 w-3.5" />
-                      Accept
+                      {t("sharedWithMe.accept")}
                     </Button>
                     <Button
                       size="sm"
@@ -158,7 +159,7 @@ export default function InvitationsPage() {
                       className="h-8 gap-1.5 px-3 text-muted-foreground hover:text-foreground"
                     >
                       <X className="h-3.5 w-3.5" />
-                      Decline
+                      {t("sharedWithMe.decline")}
                     </Button>
                   </div>
                 </div>

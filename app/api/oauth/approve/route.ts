@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth/session";
-import { validateOAuthClientRedirect } from "@/lib/oauth/clients";
-import { createAuthorizationCode } from "@/lib/oauth/codes";
-import { parseScopes, clampScopesToRole } from "@/lib/oauth/constants";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { validateOAuthClientRedirect } from "@/shared/lib/auth/oauth/clients";
+import { createAuthorizationCode } from "@/shared/lib/auth/oauth/codes";
+import { parseScopes, clampScopesToRole } from "@/shared/lib/auth/oauth/constants";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

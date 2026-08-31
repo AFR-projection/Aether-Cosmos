@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { MAX_QUOTA_BYTES } from "@/lib/admin/user-update";
+import { MAX_QUOTA_BYTES } from "@admin/domain/services/user-update";
 
 /**
  * Guard rails on the two admin user-edit endpoints.
@@ -26,7 +26,7 @@ const store = vi.hoisted(() => ({
   activity: [] as { action: string; metadata?: Record<string, unknown> }[],
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   function selectChain(projection?: unknown) {
     // Only the "how many masters are left" query passes a projection; everything
     // else selects whole user rows.
@@ -68,17 +68,17 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-vi.mock("@/lib/db/schema", async (importOriginal) => importOriginal());
+vi.mock("@/shared/infrastructure/db/schema", async (importOriginal) => importOriginal());
 
-vi.mock("@/lib/auth/api-key", () => ({ requireMasterOrApiKey: vi.fn() }));
+vi.mock("@/shared/lib/auth/api-key", () => ({ requireMasterOrApiKey: vi.fn() }));
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn() };
 });
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return {
     ...actual,
     getClientIp: vi.fn(() => "127.0.0.1"),
@@ -88,27 +88,27 @@ vi.mock("@/lib/auth/session", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/auth/password", () => ({
+vi.mock("@/shared/lib/auth/password", () => ({
   hashPassword: vi.fn(async (password: string) => `hashed:${password}`),
 }));
 
-vi.mock("@/lib/auth/audit", () => ({
+vi.mock("@/shared/lib/auth/audit", () => ({
   logActivity: vi.fn(async (_actor: unknown, action: string, extra?: { metadata?: Record<string, unknown> }) => {
     store.activity.push({ action, metadata: extra?.metadata });
   }),
 }));
 
-vi.mock("@/lib/cache/redis", () => ({ cacheDelPattern: vi.fn(async () => undefined) }));
-vi.mock("@/lib/realtime/events", () => ({ publishToAdmins: vi.fn(async () => undefined) }));
-vi.mock("@/lib/storage/r2", () => ({ deleteR2Object: vi.fn(async () => undefined) }));
-vi.mock("@/lib/admin-settings", () => ({
+vi.mock("@/shared/infrastructure/cache/redis", () => ({ cacheDelPattern: vi.fn(async () => undefined) }));
+vi.mock("@/shared/infrastructure/realtime/events", () => ({ publishToAdmins: vi.fn(async () => undefined) }));
+vi.mock("@files/infrastructure/storage/r2", () => ({ deleteR2Object: vi.fn(async () => undefined) }));
+vi.mock("@/shared/lib/settings/admin-settings", () => ({
   getAdminSettings: vi.fn(async () => ({})),
   defaultQuotaBytes: vi.fn(() => 1024),
 }));
 
-const { requireMasterOrApiKey } = await import("@/lib/auth/api-key");
-const { validateCsrf } = await import("@/lib/security");
-const { destroyAllUserSessions } = await import("@/lib/auth/session");
+const { requireMasterOrApiKey } = await import("@/shared/lib/auth/api-key");
+const { validateCsrf } = await import("@/shared/lib/security");
+const { destroyAllUserSessions } = await import("@/shared/lib/auth/session");
 
 const TARGET = "6f1a1b1e-1c2d-4e3f-8a4b-5c6d7e8f9a01";
 /** 14 chars, four character classes — passes the real strength policy. */
@@ -346,7 +346,7 @@ describe("PATCH /api/admin/users/[id] — existing guards still hold", () => {
   });
 
   it("is master-gated", async () => {
-    const { AuthError } = await import("@/lib/auth/session");
+    const { AuthError } = await import("@/shared/lib/auth/session");
     vi.mocked(requireMasterOrApiKey).mockRejectedValue(new AuthError("Forbidden", 403));
     const response = await patchOne({ username: "renamed" });
 

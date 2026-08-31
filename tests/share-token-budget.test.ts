@@ -58,7 +58,7 @@ function tableOf(table: unknown): string {
   return "unknown";
 }
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   function rowsFor(table: string): Row[] {
     if (table === "shares") return store.share ? [store.share] : [];
     if (table === "files") return store.file ? [store.file] : [];
@@ -113,11 +113,11 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-// The atomic claim itself is unit-tested in `lib/shares/access.test.ts`. Here it is a
+// The atomic claim itself is unit-tested in `src/features/shares/application/access.test.ts`. Here it is a
 // spy, so a test can say "this link is spent" without simulating SQL — but the two
 // read-only predicates stay real, because the routes' 410/403 wording depends on them.
-vi.mock("@/lib/shares/access", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/shares/access")>();
+vi.mock("@shares/application/access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@shares/application/access")>();
   return {
     ...actual,
     claimShareAccess: vi.fn(async (shareId: string) => {
@@ -131,7 +131,7 @@ vi.mock("@/lib/shares/access", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@files/infrastructure/storage/r2", () => ({
   downloadFromR2Stream: vi.fn(async (_key: string, byteRange?: string) => {
     store.ranges.push(byteRange);
     return {
@@ -149,19 +149,19 @@ vi.mock("@/lib/storage/r2", () => ({
   }),
 }));
 
-vi.mock("@/lib/access-tracking", () => ({
+vi.mock("@/shared/lib/access-tracking", () => ({
   getClientIpFromRequest: () => "203.0.113.9",
   parseUserAgent: () => ({ device: "desktop", browser: "test", os: "test" }),
   getIpLocation: async () => null,
 }));
 
-vi.mock("@/lib/realtime/events", () => ({ publishToUser: vi.fn(async () => {}) }));
-vi.mock("@/lib/activity/activity-scope-server", () => ({
+vi.mock("@/shared/infrastructure/realtime/events", () => ({ publishToUser: vi.fn(async () => {}) }));
+vi.mock("@/shared/lib/activity/activity-scope-server", () => ({
   getOrCreateActivityScope: vi.fn(async () => ({ id: "scope-1" })),
 }));
-vi.mock("@/lib/search/tiptap-text", () => ({ tiptapToPlainText: () => "plain" }));
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/search/tiptap-text", () => ({ tiptapToPlainText: () => "plain" }));
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return {
     ...actual,
     checkRateLimit: vi.fn(async (key: string) => {
@@ -171,8 +171,8 @@ vi.mock("@/lib/security", async (importOriginal) => {
   };
 });
 
-const { claimShareAccess, SHARE_RESUME_WINDOW_MS } = await import("@/lib/shares/access");
-const { downloadFromR2Stream } = await import("@/lib/storage/r2");
+const { claimShareAccess, SHARE_RESUME_WINDOW_MS } = await import("@shares/application/access");
+const { downloadFromR2Stream } = await import("@files/infrastructure/storage/r2");
 const infoRoute = await import("@/app/api/shared/[token]/route");
 const previewRoute = await import("@/app/api/shared/[token]/preview/route");
 

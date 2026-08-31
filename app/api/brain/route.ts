@@ -1,17 +1,17 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getClientIp } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
-import { requireBrainOwner } from "@/lib/brain/access";
-import { enforceBrainRateLimit } from "@/lib/brain/http";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
+import { requireBrainOwner } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit } from "@brain/infrastructure/http";
 import {
   createBrain,
   getOrCreateDefaultBrain,
   listBrains,
   MAX_BRAINS_PER_USER,
-} from "@/lib/brain/brain-service";
+} from "@brain/application/commands/brain-service";
 
 /** GET /api/brain — the caller's brains; the default one is created on first call. */
 export async function GET(request: NextRequest) {

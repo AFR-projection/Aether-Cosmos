@@ -4,9 +4,10 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeft, ShieldPlus } from "lucide-react";
-import { apiFetch } from "@/lib/api/client";
-import { Numpad } from "@/components/auth/numpad";
-import { AuthShell } from "@/components/auth/auth-shell";
+import { apiFetch } from "@/shared/api/client";
+import { Numpad } from "@auth/presentation/components/numpad";
+import { AuthShell } from "@auth/presentation/components/auth-shell";
+import { apiErrorMessage, useT } from "@/shared/lib/i18n";
 
 const STEP_CODE_MIN = 6;
 const STEP_CODE_MAX = 10;
@@ -27,6 +28,7 @@ export default function StepCodeSetupPage() {
   const [confirmCode, setConfirmCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     const token = sessionStorage.getItem("auth_step_token");
@@ -50,7 +52,7 @@ export default function StepCodeSetupPage() {
     }
 
     if (newCode !== confirmCode) {
-      setError("Codes do not match. Please enter the same code again.");
+      setError(t("auth.setup.mismatch"));
       setConfirmCode("");
       return;
     }
@@ -64,8 +66,10 @@ export default function StepCodeSetupPage() {
       });
 
       if (!res.success) {
-        setError(res.error ?? "Setup failed");
-        if (res.error?.toLowerCase().includes("session expired")) {
+        setError(apiErrorMessage(res, t, "auth.setup.failed"));
+        // Keyed off the stable code, not the message text: the staged token is
+        // gone, so the only way forward is a fresh sign-in.
+        if (res.code === "STEP_CODE_EXPIRED") {
           window.setTimeout(() => router.replace("/login"), 1200);
         }
         return;
@@ -74,6 +78,7 @@ export default function StepCodeSetupPage() {
       const data = res.data;
       sessionStorage.removeItem("auth_step_token");
       sessionStorage.removeItem("auth_step_enrollment");
+      sessionStorage.removeItem("auth_step_length");
 
       if (data?.requires2fa && data.pendingToken) {
         sessionStorage.setItem("auth_pending_token", data.pendingToken);
@@ -99,7 +104,7 @@ export default function StepCodeSetupPage() {
       router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : home);
       router.refresh();
     } catch {
-      setError("Connection failed");
+      setError(t("errors.network"));
     } finally {
       setLoading(false);
     }
@@ -113,11 +118,19 @@ export default function StepCodeSetupPage() {
     <AuthShell
       step="step-code"
       icon={<ShieldPlus />}
-      title={isConfirming ? "Confirm your code" : "Create your code"}
-      description={isConfirming ? "Enter it one more time so we know it is yours." : "Choose a code you can remember, but others cannot guess."}
-      visualKicker="STORAGE / PERSONAL KEY"
-      visualTitle={<>Make access<br /><em>uniquely yours.</em></>}
-      visualDescription="This code becomes a private signal between you and your workspace. Keep it memorable, never predictable."
+      title={isConfirming ? t("auth.setup.titleConfirm") : t("auth.setup.titleChoose")}
+      description={
+        isConfirming ? t("auth.setup.descriptionConfirm") : t("auth.setup.descriptionChoose")
+      }
+      visualKicker={t("auth.setup.visualKicker")}
+      visualTitle={
+        <>
+          {t("auth.setup.visualTitleTop")}
+          <br />
+          <em>{t("auth.setup.visualTitleEm")}</em>
+        </>
+      }
+      visualDescription={t("auth.setup.visualDescription")}
     >
       <motion.div
         initial={{ opacity: 0, y: 12 }}
@@ -127,11 +140,11 @@ export default function StepCodeSetupPage() {
         <div className="auth-setup-note">
           <div className="auth-setup-note__heading">
             <span className="auth-setup-note__signal" aria-hidden="true" />
-            <span>{isConfirming ? "One last check" : "A code worth remembering"}</span>
+            <span>{isConfirming ? t("auth.setup.noteConfirm") : t("auth.setup.noteChoose")}</span>
           </div>
           <ul>
-            <li>{STEP_CODE_MIN}–{STEP_CODE_MAX} digits, numbers only</li>
-            <li>Avoid repeats, sequences, and important dates</li>
+            <li>{t("auth.setup.ruleDigits", { min: STEP_CODE_MIN, max: STEP_CODE_MAX })}</li>
+            <li>{t("auth.setup.ruleAvoid")}</li>
           </ul>
         </div>
 
@@ -146,10 +159,19 @@ export default function StepCodeSetupPage() {
           onSubmit={handleSubmit}
           minLength={STEP_CODE_MIN}
           maxLength={STEP_CODE_MAX}
+          /*
+           * Free length while choosing; locked to the chosen length while
+           * confirming, so the second entry has to be the same shape as the
+           * first and a typo shows up as an unfilled slot rather than a
+           * "codes do not match" after the fact.
+           */
+          exactLength={isConfirming ? newCode.length : null}
+          label={isConfirming ? t("auth.setup.labelConfirm") : t("auth.setup.labelNew")}
           error={Boolean(error)}
           loading={loading}
           message={error}
-          submitLabel={isConfirming ? "Set secure code" : "Continue"}
+          submitLabel={isConfirming ? t("auth.setup.submit") : t("auth.continue")}
+          loadingLabel={t("auth.setup.submitting")}
         />
 
         <button
@@ -166,7 +188,7 @@ export default function StepCodeSetupPage() {
           className="auth-secondary-link"
         >
           <ArrowLeft aria-hidden="true" />
-          {isConfirming ? "Change code" : "Back to sign in"}
+          {isConfirming ? t("auth.setup.changeCode") : t("auth.backToSignIn")}
         </button>
       </motion.div>
     </AuthShell>

@@ -1,16 +1,16 @@
 import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import * as schema from "../lib/db/schema";
-import { activityLogs, archiveJobs, fileVersions, files, folders, otpTokens, sessions, uploadSessions, users } from "../lib/db/schema";
-import { headObject, listMultipartUploads, listR2Objects, abortMultipartUpload } from "../lib/storage/r2";
-import { assertFileUploadTransition, assertUploadSessionTransition } from "../lib/storage/upload-state";
+import * as schema from "@/shared/infrastructure/db/schema";
+import { activityLogs, archiveJobs, fileVersions, files, folders, otpTokens, sessions, uploadSessions, users } from "@/shared/infrastructure/db/schema";
+import { headObject, listMultipartUploads, listR2Objects, abortMultipartUpload } from "@files/infrastructure/storage/r2";
+import { assertFileUploadTransition, assertUploadSessionTransition } from "@files/infrastructure/storage/upload-state";
 import {
   claimCleanupRun,
   recordCleanupResult,
   type CleanupResult,
   type CleanupSource,
-} from "../lib/system/cleanup-state";
+} from "@/shared/lib/system/cleanup-state";
 
 type Db = PostgresJsDatabase<typeof schema>;
 
@@ -118,7 +118,7 @@ async function cleanupLogs(db: Db, days: number) {
 
 /**
  * Purge auth sessions whose `expiresAt` is in the past. Every session reader
- * filters on `expiresAt > now` (see lib/auth/session.ts and the admin/session
+ * filters on `expiresAt > now` (see @/shared/lib/auth/session.ts and the admin/session
  * routes), so an expired row is already invisible to the app, to admins, to
  * everyone — deleting it changes no behaviour, it only stops the table growing
  * without bound. One DELETE, no per-row work, so it needs no batching.
@@ -167,7 +167,7 @@ const RECONCILIATION_GRACE_MS = 24 * 60 * 60 * 1000;
 const ORPHAN_OBJECT_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Reconcile Neon state with R2. This is deliberately conservative: an object
+ * Reconcile database state with R2. This is deliberately conservative: an object
  * is only considered orphaned after a grace period, and missing READY objects
  * are made unavailable instead of being silently ignored.
  */

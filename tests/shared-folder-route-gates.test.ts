@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import type { Folder } from "@/lib/db/schema";
-import type { FolderAccess } from "@/lib/auth/permissions";
+import type { Folder } from "@/shared/infrastructure/db/schema";
+import type { FolderAccess } from "@/shared/lib/auth/permissions";
 
 /**
  * Route-level authorization gates for shared FOLDERS — the routes the reported incident
@@ -18,7 +18,7 @@ const dbCalls = vi.hoisted(() => ({ updates: 0, inserts: 0, deletes: 0, executes
 /** FIFO of results for successive `db.select()` chains; empty queue answers `[]`. */
 const selectQueue = vi.hoisted(() => ({ rows: [] as unknown[][] }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   type Q = {
     set: (...a: unknown[]) => Q;
     where: (...a: unknown[]) => Q;
@@ -72,24 +72,24 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn(), checkUserApiRateLimit: vi.fn() };
 });
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return { ...actual, requireAuth: vi.fn(), getClientIp: vi.fn(() => "127.0.0.1") };
 });
 
-vi.mock("@/lib/auth/api-key", () => ({
+vi.mock("@/shared/lib/auth/api-key", () => ({
   requireAuthOrApiKey: vi.fn(),
   requireMasterOrApiKey: vi.fn(),
 }));
 
 // `shareRefusal` stays real: the wording is what tells a member why the button did nothing.
-vi.mock("@/lib/auth/permissions", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/permissions")>();
+vi.mock("@/shared/lib/auth/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/permissions")>();
   return {
     ...actual,
     resolveFolderAccess: vi.fn(),
@@ -97,20 +97,20 @@ vi.mock("@/lib/auth/permissions", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/cache/redis", () => ({
+vi.mock("@/shared/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/shared/infrastructure/cache/redis", () => ({
   cacheGet: vi.fn().mockResolvedValue(null),
   cacheSet: vi.fn().mockResolvedValue(undefined),
   cacheDelPattern: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@files/infrastructure/storage/r2", () => ({
   deleteR2Object: vi.fn().mockResolvedValue(undefined),
   deleteR2Objects: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/storage/deletion-service", () => ({
+vi.mock("@files/infrastructure/storage/deletion-service", () => ({
   createFolderDeletionJob: vi.fn().mockResolvedValue(null),
 }));
-vi.mock("@/lib/admin-settings", () => ({
+vi.mock("@/shared/lib/settings/admin-settings", () => ({
   getAdminSettings: vi.fn().mockResolvedValue({ rateLimitPerMinute: 1000 }),
 }));
 
@@ -122,11 +122,11 @@ const SUBFOLDER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const OUTSIDE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const INVITATION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
-const { validateCsrf, checkUserApiRateLimit } = await import("@/lib/security");
-const { requireAuth } = await import("@/lib/auth/session");
-const { requireAuthOrApiKey } = await import("@/lib/auth/api-key");
-const { resolveFolderAccess } = await import("@/lib/auth/permissions");
-const { deleteR2Objects } = await import("@/lib/storage/r2");
+const { validateCsrf, checkUserApiRateLimit } = await import("@/shared/lib/security");
+const { requireAuth } = await import("@/shared/lib/auth/session");
+const { requireAuthOrApiKey } = await import("@/shared/lib/auth/api-key");
+const { resolveFolderAccess } = await import("@/shared/lib/auth/permissions");
+const { deleteR2Objects } = await import("@files/infrastructure/storage/r2");
 const foldersRoute = await import("@/app/api/folders/route");
 const membersRoute = await import("@/app/api/folders/[id]/members/route");
 const invitationsRoute = await import("@/app/api/invitations/route");

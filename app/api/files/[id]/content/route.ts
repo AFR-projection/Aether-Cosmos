@@ -1,23 +1,23 @@
 import { NextRequest } from "next/server";
 import { createHash } from "crypto";
 import { eq } from "drizzle-orm";
-import { db, recalculateUsedBytes } from "@/lib/db";
-import { files, users } from "@/lib/db/schema";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { getAccessibleFile, getEffectiveUserId, fileRefusal } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
-import { getAdminSettings } from "@/lib/admin-settings";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { readBoundedText } from "@/lib/api/read-body";
-import { objectExists, putR2Object } from "@/lib/storage/r2";
-import { snapshotFileVersion } from "@/lib/files/versions";
-import { cacheDelPattern } from "@/lib/cache/redis";
+import { db, recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { files, users } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { getAccessibleFile, getEffectiveUserId, fileRefusal } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { readBoundedText } from "@/shared/api/read-body";
+import { objectExists, putR2Object } from "@files/infrastructure/storage/r2";
+import { snapshotFileVersion } from "@files/application/commands/versions";
+import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 import {
   TEXT_EDIT_MAX_BYTES,
   isTextEditable,
   withinTextEditBounds,
-} from "@/lib/files/text-edit-limits";
+} from "@files/domain/services/text-edit-limits";
 
 /**
  * Save edited text back over a stored file.

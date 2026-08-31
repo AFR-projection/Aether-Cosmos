@@ -36,13 +36,13 @@ const store = vi.hoisted(() => ({
   authCalls: 0,
 }));
 
-vi.mock("@/lib/security", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/security")>()),
+vi.mock("@/shared/lib/security", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/shared/lib/security")>()),
   validateCsrf: vi.fn(async () => store.csrfOk),
 }));
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return {
     ...actual,
     requireAuth: vi.fn(async () => {
@@ -53,11 +53,11 @@ vi.mock("@/lib/auth/session", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/oauth/clients", () => ({
+vi.mock("@/shared/lib/auth/oauth/clients", () => ({
   validateOAuthClientRedirect: vi.fn(async () => store.clientResult),
 }));
 
-vi.mock("@/lib/oauth/codes", () => ({
+vi.mock("@/shared/lib/auth/oauth/codes", () => ({
   createAuthorizationCode: vi.fn(async (input: Row) => {
     store.issued.push(input);
     return "oac_test_code";

@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { signMultipartParts } from "@/lib/storage/upload-service";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { signMultipartParts } from "@files/infrastructure/storage/upload-service";
 
 const schema = z.object({
   partNumbers: z.array(z.number().int().positive()).min(1).max(100),

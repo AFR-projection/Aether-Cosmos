@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions";
-import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getAdminSettings, isUploadAllowed, maxUploadBytes } from "@/lib/admin-settings";
-import { initUpload } from "@/lib/storage/upload-service";
-import { UPLOAD_RATE_MULTIPLIER } from "@/lib/upload/limits";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId, resolveFolderAccess } from "@/shared/lib/auth/permissions";
+import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { getAdminSettings, isUploadAllowed, maxUploadBytes } from "@/shared/lib/settings/admin-settings";
+import { initUpload } from "@files/infrastructure/storage/upload-service";
+import { UPLOAD_RATE_MULTIPLIER } from "@files/application/commands/limits";
 
 const encryptionMetaSchema = z.object({
   salt: z.string().min(1),

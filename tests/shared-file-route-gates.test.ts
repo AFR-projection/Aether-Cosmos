@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import type { File, Folder } from "@/lib/db/schema";
-import type { FileAccess, FolderAccess } from "@/lib/auth/permissions";
+import type { File, Folder } from "@/shared/infrastructure/db/schema";
+import type { FileAccess, FolderAccess } from "@/shared/lib/auth/permissions";
 
 /**
  * Route-level authorization gates for shared files.
  *
  * A `view` member deleted a shared folder and it disappeared from the OWNER's account. The
- * capability model that prevents it lives in `lib/auth/permissions.ts` (unit-tested in
+ * capability model that prevents it lives in `src/shared/lib/auth/permissions.ts` (unit-tested in
  * `folder-permissions.test.ts`); what is pinned HERE is that every mutating route actually
  * consults it and stops BEFORE touching the database — a gate that returns 403 after the
  * UPDATE has run is not a gate.
@@ -18,7 +18,7 @@ import type { FileAccess, FolderAccess } from "@/lib/auth/permissions";
 
 const dbCalls = vi.hoisted(() => ({ updates: 0, inserts: 0, deletes: 0 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   type Q = {
     set: (...a: unknown[]) => Q;
     where: (...a: unknown[]) => Q;
@@ -66,8 +66,8 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return {
     ...actual,
     validateCsrf: vi.fn(),
@@ -75,20 +75,20 @@ vi.mock("@/lib/security", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return { ...actual, requireAuth: vi.fn(), getClientIp: vi.fn(() => "127.0.0.1") };
 });
 
-vi.mock("@/lib/auth/api-key", () => ({
+vi.mock("@/shared/lib/auth/api-key", () => ({
   requireAuthOrApiKey: vi.fn(),
   requireMasterOrApiKey: vi.fn(),
 }));
 
 // The refusal wording stays real — the routes must return the user-facing reason, not a
 // generic "Forbidden" that reads like a bug.
-vi.mock("@/lib/auth/permissions", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/permissions")>();
+vi.mock("@/shared/lib/auth/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/permissions")>();
   return {
     ...actual,
     resolveFileAccess: vi.fn(),
@@ -98,25 +98,25 @@ vi.mock("@/lib/auth/permissions", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/cache/redis", () => ({
+vi.mock("@/shared/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/shared/infrastructure/cache/redis", () => ({
   cacheGet: vi.fn().mockResolvedValue(null),
   cacheSet: vi.fn().mockResolvedValue(undefined),
   cacheDelPattern: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@files/infrastructure/storage/r2", () => ({
   buildR2Key: vi.fn(() => "k"),
   copyR2Object: vi.fn().mockResolvedValue(undefined),
   deleteR2Object: vi.fn().mockResolvedValue(undefined),
   deleteR2Objects: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/webhooks/dispatch", () => ({
+vi.mock("@/shared/infrastructure/webhooks/dispatch", () => ({
   dispatchWebhookEvent: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/admin-settings", () => ({
+vi.mock("@/shared/lib/settings/admin-settings", () => ({
   getAdminSettings: vi.fn().mockResolvedValue({ rateLimitPerMinute: 1000 }),
 }));
-vi.mock("@/lib/search/tiptap-text", () => ({ tiptapToPlainText: vi.fn(() => "") }));
+vi.mock("@/shared/lib/search/tiptap-text", () => ({ tiptapToPlainText: vi.fn(() => "") }));
 
 // Zod 4 validates the RFC 9562 version + variant nibbles, so these have to be *real* v4
 // UUIDs ("...-4xxx-8xxx-...") or the routes 400 on parsing and never reach the gate.
@@ -126,13 +126,13 @@ const FILE_ID = "44444444-4444-4444-8444-444444444444";
 const FILE_ID_2 = "55555555-5555-4555-8555-555555555555";
 const FOLDER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-const { validateCsrf, checkUserApiRateLimit } = await import("@/lib/security");
-const { requireAuth } = await import("@/lib/auth/session");
-const { requireAuthOrApiKey } = await import("@/lib/auth/api-key");
+const { validateCsrf, checkUserApiRateLimit } = await import("@/shared/lib/security");
+const { requireAuth } = await import("@/shared/lib/auth/session");
+const { requireAuthOrApiKey } = await import("@/shared/lib/auth/api-key");
 const { resolveFileAccess, resolveFolderAccess, resolveWritableDestination } = await import(
-  "@/lib/auth/permissions"
+  "@/shared/lib/auth/permissions"
 );
-const { deleteR2Objects, deleteR2Object } = await import("@/lib/storage/r2");
+const { deleteR2Objects, deleteR2Object } = await import("@files/infrastructure/storage/r2");
 const filesRoute = await import("@/app/api/files/route");
 const batchRoute = await import("@/app/api/files/batch/route");
 

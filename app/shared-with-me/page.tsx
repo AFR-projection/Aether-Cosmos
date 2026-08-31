@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence, MotionConfig } from "framer-motion";
+import type { LucideIcon } from "lucide-react";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -19,10 +20,10 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { apiFetch } from "@/lib/api/client";
-import { formatDate } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
+import { apiFetch } from "@/shared/api/client";
+import { useFormat, useT, type TranslationKey } from "@/shared/lib/i18n";
+import { Button } from "@/ui/primitives/button";
+import { EmptyState } from "@/ui/primitives/empty-state";
 
 interface Invitation {
   id: string;
@@ -49,21 +50,23 @@ type SortKey = "recent" | "name" | "owner";
 /**
  * One wording for each access level, used by both the invitation rows and the
  * folder cards — the old page said "Edit" in one place and "Can Edit" in the
- * other for the same permission.
+ * other for the same permission. The words live in `common` so every
+ * folder-permission surface reads the same in every locale.
  */
 const ROLE = {
-  edit: { label: "Can edit", icon: Pencil },
-  view: { label: "View only", icon: Eye },
-} as const;
+  edit: { labelKey: "common.canEdit", icon: Pencil },
+  view: { labelKey: "common.viewOnly", icon: Eye },
+} as const satisfies Record<"edit" | "view", { labelKey: TranslationKey; icon: LucideIcon }>;
 
 function RoleChip({ role }: { role: "view" | "edit" }) {
-  const { label, icon: Icon } = ROLE[role];
+  const t = useT();
+  const { labelKey, icon: Icon } = ROLE[role];
   // Icon plus word, never colour alone: the accent tint on "Can edit" is a
   // second signal, not the only one.
   return (
     <span className="shr-role" data-role={role}>
       <Icon aria-hidden="true" />
-      {label}
+      {t(labelKey)}
     </span>
   );
 }
@@ -73,6 +76,8 @@ function initial(name: string) {
 }
 
 export default function SharedWithMePage() {
+  const t = useT();
+  const { formatNumber } = useFormat();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
@@ -144,24 +149,23 @@ export default function SharedWithMePage() {
       <div className="shr-page">
         <header className="shr-header">
           <div className="shr-header__copy">
-            <p className="shr-kicker"><span aria-hidden="true" /> Collaboration</p>
-            <h1>Shared with me</h1>
-            <p>
-              Folders other people have given you access to. Invitations arrive here first — accept
-              one and the folder joins the list below.
-            </p>
+            <p className="shr-kicker"><span aria-hidden="true" /> {t("sharedWithMe.kicker")}</p>
+            <h1>{t("sharedWithMe.title")}</h1>
+            <p>{t("sharedWithMe.intro")}</p>
           </div>
 
           <div className="shr-tally">
             <div className="shr-tally__item">
-              <span className="shr-tally__value">{sharedQuery.isLoading ? "—" : shared.length}</span>
-              <span className="shr-tally__label">Folders</span>
+              <span className="shr-tally__value">
+                {sharedQuery.isLoading ? "—" : formatNumber(shared.length)}
+              </span>
+              <span className="shr-tally__label">{t("sharedWithMe.tallyFolders")}</span>
             </div>
             <div className="shr-tally__item" data-tone={pendingCount > 0 ? "accent" : undefined}>
               <span className="shr-tally__value">
-                {invitationsQuery.isLoading ? "—" : pendingCount}
+                {invitationsQuery.isLoading ? "—" : formatNumber(pendingCount)}
               </span>
-              <span className="shr-tally__label">Pending</span>
+              <span className="shr-tally__label">{t("sharedWithMe.tallyPending")}</span>
             </div>
           </div>
         </header>
@@ -183,11 +187,11 @@ export default function SharedWithMePage() {
                 <span className="shr-panel__icon" aria-hidden="true"><Mail /></span>
                 <div>
                   <h2 className="shr-panel__title" id="invitations-heading">
-                    Pending invitations
+                    {t("sharedWithMe.pendingTitle")}
                   </h2>
-                  <p className="shr-panel__sub">Accept to add the folder, decline to remove it.</p>
+                  <p className="shr-panel__sub">{t("sharedWithMe.pendingSub")}</p>
                 </div>
-                <span className="shr-count">{pendingCount}</span>
+                <span className="shr-count">{formatNumber(pendingCount)}</span>
               </div>
 
               <div className="shr-panel__body shr-panel__body--flush">
@@ -195,10 +199,12 @@ export default function SharedWithMePage() {
                   <p className="shr-note" data-tone="danger" role="alert">
                     <AlertCircle aria-hidden="true" />
                     <span>
-                      {respondMutation.error instanceof Error
-                        ? respondMutation.error.message
-                        : "Could not respond to that invitation."}{" "}
-                      Nothing changed — try again.
+                      {t("sharedWithMe.respondError", {
+                        reason:
+                          respondMutation.error instanceof Error
+                            ? respondMutation.error.message
+                            : t("sharedWithMe.respondFailed"),
+                      })}
                     </span>
                   </p>
                 )}
@@ -228,9 +234,9 @@ export default function SharedWithMePage() {
         >
           <div className="shr-panel__head">
             <span className="shr-panel__icon" aria-hidden="true"><FolderOpen /></span>
-            <h2 className="shr-panel__title" id="shared-heading">Shared folders</h2>
+            <h2 className="shr-panel__title" id="shared-heading">{t("sharedWithMe.sharedFolders")}</h2>
             {!sharedQuery.isLoading && shared.length > 0 && (
-              <span className="shr-count">{shared.length}</span>
+              <span className="shr-count">{formatNumber(shared.length)}</span>
             )}
 
             {showTools && (
@@ -241,19 +247,19 @@ export default function SharedWithMePage() {
                     type="search"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Folder or owner…"
-                    aria-label="Search shared folders"
+                    placeholder={t("sharedWithMe.searchPlaceholder")}
+                    aria-label={t("sharedWithMe.searchLabel")}
                   />
                 </div>
                 <select
                   className="shr-select"
                   value={sort}
                   onChange={(event) => setSort(event.target.value as SortKey)}
-                  aria-label="Sort shared folders"
+                  aria-label={t("sharedWithMe.sortLabel")}
                 >
-                  <option value="recent">Recently shared</option>
-                  <option value="name">Folder name</option>
-                  <option value="owner">Owner</option>
+                  <option value="recent">{t("sharedWithMe.sortRecent")}</option>
+                  <option value="name">{t("sharedWithMe.sortName")}</option>
+                  <option value="owner">{t("sharedWithMe.sortOwner")}</option>
                 </select>
               </div>
             )}
@@ -261,7 +267,7 @@ export default function SharedWithMePage() {
 
           <div className="shr-panel__body">
             {sharedQuery.isLoading ? (
-              <div className="shr-grid" aria-busy="true" aria-label="Loading shared folders">
+              <div className="shr-grid" aria-busy="true" aria-label={t("sharedWithMe.loadingFolders")}>
                 {[0, 1, 2, 3].map((i) => (
                   <div key={i} className="skeleton shr-skel shr-skel--card" />
                 ))}
@@ -269,8 +275,8 @@ export default function SharedWithMePage() {
             ) : sharedQuery.isError ? (
               <div className="shr-empty" role="alert">
                 <AlertCircle aria-hidden="true" />
-                <p>Could not load your shared folders</p>
-                <span>The list is still there — this was a problem fetching it.</span>
+                <p>{t("sharedWithMe.loadError")}</p>
+                <span>{t("sharedWithMe.loadErrorHint")}</span>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -278,28 +284,28 @@ export default function SharedWithMePage() {
                   disabled={sharedQuery.isFetching}
                 >
                   <RefreshCw className={sharedQuery.isFetching ? "animate-spin" : undefined} aria-hidden="true" />
-                  Try again
+                  {t("errorPages.tryAgain")}
                 </Button>
               </div>
             ) : shared.length === 0 ? (
               <EmptyState
                 icon={Inbox}
-                title="Nothing shared with you"
-                description="When a teammate shares a folder, the invitation shows up above. Accepted folders then live here."
+                title={t("sharedWithMe.emptyTitle")}
+                description={t("sharedWithMe.emptyBody")}
                 action={
                   <Button asChild variant="secondary">
-                    <Link href="/files">Open my files</Link>
+                    <Link href="/files">{t("sharedWithMe.openMyFiles")}</Link>
                   </Button>
                 }
               />
             ) : visible.length === 0 ? (
               <div className="shr-empty">
                 <Search aria-hidden="true" />
-                <p>No folder matches “{query.trim()}”</p>
-                <span>Try the owner’s name, or clear the search to see all {shared.length}.</span>
+                <p>{t("sharedWithMe.noMatch", { query: query.trim() })}</p>
+                <span>{t("sharedWithMe.noMatchHint", { count: formatNumber(shared.length) })}</span>
                 <Button variant="secondary" size="sm" onClick={() => setQuery("")}>
                   <X aria-hidden="true" />
-                  Clear search
+                  {t("sharedWithMe.clearSearch")}
                 </Button>
               </div>
             ) : (
@@ -330,6 +336,8 @@ function InvitationRow({
   acting: "accept" | "reject" | null;
   onRespond: (action: "accept" | "reject") => void;
 }) {
+  const t = useT();
+  const { formatDate } = useFormat();
   return (
     <li className="shr-invite">
       <span className="shr-invite__icon" aria-hidden="true"><Mail /></span>
@@ -339,9 +347,9 @@ function InvitationRow({
           {invitation.folderName}
         </p>
         <p className="shr-invite__meta">
-          <span>
-            From <strong>{invitation.invitedByUsername}</strong>
-          </span>
+          {/* The inviter's name is no longer bolded inside the sentence: the
+              emphasis span cannot survive a clause that reorders in id/zh-CN. */}
+          <span>{t("sharedWithMe.from", { user: invitation.invitedByUsername })}</span>
           <span aria-hidden="true">·</span>
           <span>{formatDate(invitation.createdAt, "short")}</span>
         </p>
@@ -354,28 +362,28 @@ function InvitationRow({
           size="sm"
           onClick={() => onRespond("accept")}
           disabled={acting !== null}
-          aria-label={`Accept invitation to ${invitation.folderName}`}
+          aria-label={t("sharedWithMe.acceptLabel", { folder: invitation.folderName })}
         >
           {acting === "accept" ? (
             <Loader2 className="animate-spin" aria-hidden="true" />
           ) : (
             <Check aria-hidden="true" />
           )}
-          Accept
+          {t("sharedWithMe.accept")}
         </Button>
         <Button
           size="sm"
           variant="secondary"
           onClick={() => onRespond("reject")}
           disabled={acting !== null}
-          aria-label={`Decline invitation to ${invitation.folderName}`}
+          aria-label={t("sharedWithMe.declineLabel", { folder: invitation.folderName })}
         >
           {acting === "reject" ? (
             <Loader2 className="animate-spin" aria-hidden="true" />
           ) : (
             <X aria-hidden="true" />
           )}
-          Decline
+          {t("sharedWithMe.decline")}
         </Button>
       </div>
     </li>
@@ -384,6 +392,8 @@ function InvitationRow({
 
 /** A folder someone else owns. The whole card is the link; hover only changes colour. */
 function FolderCard({ item }: { item: SharedEntry }) {
+  const t = useT();
+  const { formatDate } = useFormat();
   return (
     <Link href={`/shared-with-me/${item.folderId}`} className="shr-card">
       <div className="shr-card__top">
@@ -399,12 +409,14 @@ function FolderCard({ item }: { item: SharedEntry }) {
 
       <div className="shr-card__meta">
         <span className="shr-card__owner" aria-hidden="true">{initial(item.ownerUsername)}</span>
+        {/* The separating space stays in JSX rather than inside the dictionary
+            value, where a trailing space is invisible and easily lost. */}
         <span className="shr-card__who">
-          <span className="sr-only">Owned by </span>
+          <span className="sr-only">{t("sharedWithMe.ownedBy")} </span>
           {item.ownerUsername}
         </span>
         <span className="shr-card__when">
-          <span className="sr-only">shared </span>
+          <span className="sr-only">{t("sharedWithMe.sharedOn")} </span>
           {formatDate(item.sharedAt, "short")}
         </span>
       </div>

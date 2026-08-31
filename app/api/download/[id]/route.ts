@@ -1,49 +1,13 @@
 import { NextRequest } from "next/server";
 import { Readable } from "stream";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp } from "@/lib/auth/session";
-import { getAccessibleFile } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { getPresignedDownloadUrl, objectExists, downloadFromR2Stream, encodeContentDispositionFilename } from "@/lib/storage/r2";
-import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
-import { apiError, handleApiError } from "@/lib/api/response";
-
-// Dangerous extensions that should NEVER be rendered inline, always forced download
-const FORCED_DOWNLOAD_EXTENSIONS = new Set([
-  "exe", "bat", "cmd", "com", "msi", "scr", "pif", "vbs", "vbe", "wsf", "wsh",
-  "sh", "bash", "csh", "ksh", "zsh", "fish",
-  "php", "phtml", "php3", "php4", "php5", "php7",
-  "pl", "py", "rb", "js", "mjs", "cjs",
-  "ps1", "psm1", "psd1",
-  "jsp", "jspx", "asp", "aspx", "ascx", "ashx", "asmx",
-  "htaccess", "htpasswd",
-  "env", "git", "svn", "hg",
-  "svg", "html", "htm", "xhtml",
-  "xml", "xsl", "xslt",
-  "jar", "war", "ear",
-  "dll", "so", "dylib", "bin",
-  "reg", "inf", "ini",
-  "iso", "img", "vmdk",
-]);
-
-function getExtension(filename: string): string {
-  const parts = filename.split(".");
-  return parts.length > 1 ? (parts.pop()?.toLowerCase() ?? "") : "";
-}
-
-function getSafeMimeType(mimeType: string, filename: string): string {
-  const ext = getExtension(filename);
-
-  if (FORCED_DOWNLOAD_EXTENSIONS.has(ext)) {
-    return "application/octet-stream";
-  }
-
-  if (mimeType === "image/svg+xml" || ext === "svg") {
-    return "application/octet-stream";
-  }
-
-  return mimeType;
-}
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { getAccessibleFile } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { getPresignedDownloadUrl, objectExists, downloadFromR2Stream, encodeContentDispositionFilename } from "@files/infrastructure/storage/r2";
+import { recordBandwidth, BandwidthQuotaError } from "@/shared/lib/billing/bandwidth";
+import { apiError, handleApiError } from "@/shared/api/response";
+import { getSafeMimeType } from "@/shared/lib/security/mime";
 
 export async function GET(
   request: NextRequest,

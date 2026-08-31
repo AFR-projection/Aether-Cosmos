@@ -1,21 +1,21 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { getClientIp } from "@/lib/auth/session";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { objectExists, downloadFromR2Bytes } from "@/lib/storage/r2";
-import { validateCsrf } from "@/lib/security";
-import { validateFileMagicBytes } from "@/lib/security/file-validation";
-import { checkSuspiciousActivity, logSuspiciousActivity } from "@/lib/security/suspicious-activity";
-import { enqueueJob } from "@/lib/queue";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { recalculateUsedBytes } from "@/lib/db";
-import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
-import { publishToUser } from "@/lib/realtime/events";
+import { db } from "@/shared/infrastructure/db";
+import { files } from "@/shared/infrastructure/db/schema";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { objectExists, downloadFromR2Bytes } from "@files/infrastructure/storage/r2";
+import { validateCsrf } from "@/shared/lib/security";
+import { validateFileMagicBytes } from "@/shared/lib/security/file-validation";
+import { checkSuspiciousActivity, logSuspiciousActivity } from "@/shared/lib/security/suspicious-activity";
+import { enqueueJob } from "@/shared/infrastructure/queue";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
+import { publishToUser } from "@/shared/infrastructure/realtime/events";
 
 const encryptionMetaSchema = z.object({
   salt: z.string().min(1),

@@ -3,13 +3,14 @@
 import { Suspense, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { Network } from "lucide-react";
-import { GraphView } from "@/components/brain/graph/graph-view";
-import { useBrains } from "@/hooks/use-brain";
+import { GraphView } from "@brain/presentation/components/graph/graph-view";
+import { useBrains } from "@brain/presentation/hooks/use-brain";
+import { useT } from "@/shared/lib/i18n";
 import {
   getActiveBrainId,
   getServerActiveBrainId,
   subscribeActiveBrain,
-} from "@/lib/brain/active-brain";
+} from "@brain/domain/active-brain";
 
 /**
  * The standalone graph workspace — what the pop-out button opens.
@@ -28,6 +29,7 @@ function Workspace() {
   const params = useSearchParams();
   const requested = params.get("brain");
   const focus = params.get("focus");
+  const t = useT();
 
   const { data, isLoading } = useBrains();
   const brains = data?.brains;
@@ -49,16 +51,17 @@ function Workspace() {
 
   const brain = brains?.find((item) => item.id === brainId);
 
+  // `t` is a dependency, not a constant: switching language must retitle the window.
   useEffect(() => {
-    document.title = brain ? `${brain.name} · Graph` : "Graph workspace";
-  }, [brain]);
+    document.title = brain
+      ? t("brain.graph.docTitle", { name: brain.name })
+      : t("brain.graph.workspaceTitle");
+  }, [brain, t]);
 
   if (!brainId && !isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center px-8 text-center">
-        <p className="text-sm text-muted-foreground">
-          No brain to graph. Open the graph from the app and use the pop-out button.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("brain.graph.noBrainWorkspace")}</p>
       </div>
     );
   }
@@ -67,13 +70,15 @@ function Workspace() {
 }
 
 export default function GraphWorkspacePage() {
+  const t = useT();
+
   return (
     <main className="flex h-screen w-screen flex-col overflow-hidden bg-[#0d1117]">
       <Suspense
         fallback={
           <div className="flex h-full w-full items-center justify-center gap-2 text-xs text-muted-foreground">
             <Network className="h-4 w-4 animate-pulse" aria-hidden="true" />
-            Loading graph…
+            {t("brain.graph.loadingWorkspace")}
           </div>
         }
       >

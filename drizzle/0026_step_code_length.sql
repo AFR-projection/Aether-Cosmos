@@ -1,0 +1,30 @@
+-- Migration: 0026_step_code_length
+-- Date: 2026-08-28
+--
+-- Adds `users.step_code_length` — the digit count of an account's 2-Step Code.
+--
+-- Why a column at all: the code is argon2-hashed, so its length cannot be read
+-- back from `step_code_hash`. The login numpad therefore had no way to know how
+-- long the code was and drew the entire allowed range (10 slots) for everyone. A
+-- user whose code is 6 digits saw four slots that could never fill, which reads
+-- as "you typed too few digits" on the one screen where doubt is expensive.
+--
+-- Nullable on purpose, with no backfill here:
+--   * Existing codes were hashed without recording their length, and there is no
+--     way to derive it from the hash — a guessed value would be worse than none,
+--     because the pad would then insist on the wrong number of digits.
+--   * Null is a defined state the UI already handles: it falls back to the old
+--     flexible 6–10 pad.
+--   * app/api/auth/login/route.ts backfills the real value the first time the
+--     account signs in and the entered code verifies — at that moment the length
+--     is known to be correct, so the pad self-heals per user with no downtime and
+--     no admin action. Every path that writes `step_code_hash` also writes this
+--     column from now on, and every path that clears the hash clears it too.
+--
+-- Apply:    npx tsx scripts/apply-migration.ts drizzle/0026_step_code_length.sql
+-- Rollback: npx tsx scripts/apply-migration.ts drizzle/0026_step_code_length_rollback.sql
+--
+-- Transaction-safe: adding a nullable column with no default is a catalog-only
+-- change in PostgreSQL (no table rewrite, no long lock).
+
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "step_code_length" integer;

@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
-import { requireAuthOrApiKey, keyHasScope, type SessionUserFromApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { buildApiV1Docs } from "@/lib/api/v1-docs";
-import { buildMasterApiDocs } from "@/lib/api/master-v1-docs";
-import { appPublicUrl } from "@/lib/env/runtime";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import type { SessionUser } from "@/lib/auth/session";
+import { requireAuthOrApiKey, keyHasScope, type SessionUserFromApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { buildApiV1Docs } from "@/shared/api/v1-docs";
+import { buildMasterApiDocs } from "@/shared/api/master-v1-docs";
+import { appPublicUrl } from "@/shared/lib/env/runtime";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import type { SessionUser } from "@/shared/lib/auth/session";
 
 function isApiKeySession(user: SessionUser): user is SessionUserFromApiKey {
   return "authMethod" in user && user.authMethod === "api_key";

@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
-import { requireBrainContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
-import { logBrainAudit } from "@/lib/brain/audit";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
+import { requireBrainContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
+import { logBrainAudit } from "@brain/infrastructure/audit";
 import {
   createProject,
   listProjects,
   MAX_PROJECTS_PER_BRAIN,
-} from "@/lib/brain/project-service";
+} from "@brain/application/commands/project-service";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

@@ -12,5 +12,12 @@ out/
 .DS_Store
 Thumbs.db
 
+# Playwright output (default paths — playwright.config.ts sets no outputDir)
+test-results/
+playwright-report/
+
 # WhatsApp session credentials - never commit
 wa-sessions/
+
+# Local agent/editor settings
+.claude/settings.local.json

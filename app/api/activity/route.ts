@@ -1,13 +1,13 @@
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { activityLogs, activityActionEnum, files, folders } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { getOrCreateActivityScope, getOwnedActivityScope } from "@/lib/activity/activity-scope-server";
-import { validateCsrf } from "@/lib/security";
-import { apiError, apiSuccess, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { activityLogs, activityActionEnum, files, folders } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { getOrCreateActivityScope, getOwnedActivityScope } from "@/shared/lib/activity/activity-scope-server";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiError, apiSuccess, handleApiError } from "@/shared/api/response";
 
 const querySchema = z.object({
   action: z.string().optional(),

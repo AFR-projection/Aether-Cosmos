@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { abortMultipartUpload, deleteR2Object } from "@/lib/storage/r2";
+import { db } from "@/shared/infrastructure/db";
+import { files } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { abortMultipartUpload, deleteR2Object } from "@files/infrastructure/storage/r2";
 
 const schema = z.object({
   fileId: z.string().uuid(),

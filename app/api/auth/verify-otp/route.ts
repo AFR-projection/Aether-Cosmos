@@ -1,14 +1,15 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { validateCsrf, checkRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { verifyOTP, normalizeEmail } from "@/lib/email/email-service";
-import { createSession, getClientIp } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { publishToAdmins } from "@/lib/realtime/events";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { validateCsrf, checkRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { readBoundedJson } from "@/shared/api/read-body";
+import { verifyOTP, normalizeEmail } from "@/shared/infrastructure/email/email-service";
+import { createSession, getClientIp } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { publishToAdmins } from "@/shared/infrastructure/realtime/events";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
 
     const ip = getClientIp(request);
-    const body = verifySchema.parse(await request.json());
+    const body = verifySchema.parse(await readBoundedJson(request));
     const email = normalizeEmail(body.email);
 
     // Per-code attempts are capped in verifyOTP; these caps bound guessing that

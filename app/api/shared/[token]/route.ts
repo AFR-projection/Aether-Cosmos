@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { shares, files, activityLogs, fileContents } from "@/lib/db/schema";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getClientIpFromRequest, parseUserAgent, getIpLocation } from "@/lib/access-tracking";
-import { publishToUser } from "@/lib/realtime/events";
-import { tiptapToPlainText } from "@/lib/search/tiptap-text";
-import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
-import { checkRateLimit } from "@/lib/security";
-import { claimShareAccess, shareBudgetExhausted, shareExpired } from "@/lib/shares/access";
-import { isPossibleShareToken } from "@/lib/shares/token";
-import { readBoundedJson, bodyErrorResponse } from "@/lib/api/body";
+import { db } from "@/shared/infrastructure/db";
+import { shares, files, activityLogs, fileContents } from "@/shared/infrastructure/db/schema";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { getClientIpFromRequest, parseUserAgent, getIpLocation } from "@/shared/lib/access-tracking";
+import { publishToUser } from "@/shared/infrastructure/realtime/events";
+import { tiptapToPlainText } from "@/shared/lib/search/tiptap-text";
+import { getOrCreateActivityScope } from "@/shared/lib/activity/activity-scope-server";
+import { checkRateLimit } from "@/shared/lib/security";
+import { claimShareAccess, shareBudgetExhausted, shareExpired } from "@shares/application/access";
+import { isPossibleShareToken } from "@shares/domain/token";
+import { readBoundedJson, bodyErrorResponse } from "@/shared/api/body";
 
 /** A Tiptap document is prose, not a payload. */
 const MAX_NOTE_BODY_BYTES = 2 * 1024 * 1024;
@@ -27,14 +27,18 @@ export async function GET(
     const { token } = await params;
     // Same answer as a token that does not exist, so this is not an oracle — it
     // just keeps an unbounded path segment out of the query and the cache key.
-    if (!isPossibleShareToken(token)) return apiError("Share not found", 404);
+    if (!isPossibleShareToken(token)) {
+      return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
+    }
 
     const ip = getClientIpFromRequest(request);
     const viewLimit = await checkRateLimit(`share_view:${ip}`, VIEW_MAX_PER_MINUTE, 60_000);
-    if (!viewLimit.allowed) return apiError("Too many requests. Slow down.", 429);
+    if (!viewLimit.allowed) {
+      return apiError("Too many requests. Slow down.", 429, { code: "SHARE_RATE_LIMITED" });
+    }
 
     const [share] = await db.select().from(shares).where(eq(shares.token, token)).limit(1);
-    if (!share) return apiError("Share not found", 404);
+    if (!share) return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
 
     const [file] = await db
       .select()
@@ -42,11 +46,11 @@ export async function GET(
       .where(and(eq(files.id, share.fileId), isNull(files.deletedAt), eq(files.status, "ready")))
       .limit(1);
 
-    if (!file) return apiError("File not found", 404);
+    if (!file) return apiError("File not found", 404, { code: "SHARE_FILE_MISSING" });
 
     // Duration Check
     if (shareExpired(share)) {
-      return apiError("Share link expired", 410);
+      return apiError("Share link expired", 410, { code: "SHARE_EXPIRED" });
     }
 
     /**
@@ -61,7 +65,9 @@ export async function GET(
     if (file.isNote) {
       const claimed = await claimShareAccess(share.id);
       if (!claimed) {
-        return apiError("Share link has reached maximum access limit", 403);
+        return apiError("Share link has reached maximum access limit", 403, {
+          code: "SHARE_LIMIT_REACHED",
+        });
       }
       updatedShare = claimed;
 
@@ -72,7 +78,9 @@ export async function GET(
         .limit(1);
       noteContent = content?.contentJson ?? null;
     } else if (shareBudgetExhausted(share)) {
-      return apiError("Share link has reached maximum access limit", 403);
+      return apiError("Share link has reached maximum access limit", 403, {
+        code: "SHARE_LIMIT_REACHED",
+      });
     }
 
 
@@ -153,7 +161,9 @@ export async function PUT(
 ) {
   try {
     const { token } = await params;
-    if (!isPossibleShareToken(token)) return apiError("Share not found", 404);
+    if (!isPossibleShareToken(token)) {
+      return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
+    }
 
     // Rate limit: per share token, and per caller — the token limit alone let one
     // client spread writes across guessed tokens, and built the Redis key out of
@@ -161,11 +171,15 @@ export async function PUT(
     const editorIp = getClientIpFromRequest(request);
     const ipLimit = await checkRateLimit(`share_edit_ip:${editorIp}`, EDIT_MAX_PER_MINUTE, 60_000);
     if (!ipLimit.allowed) {
-      return apiError("Too many edit requests. Slow down.", 429);
+      return apiError("Too many edit requests. Slow down.", 429, {
+        code: "SHARE_EDIT_RATE_LIMITED",
+      });
     }
     const rateLimitCheck = await checkRateLimit(`share_edit:${token}`, EDIT_MAX_PER_MINUTE, 60_000);
     if (!rateLimitCheck.allowed) {
-      return apiError("Too many edit requests. Slow down.", 429);
+      return apiError("Too many edit requests. Slow down.", 429, {
+        code: "SHARE_EDIT_RATE_LIMITED",
+      });
     }
 
     let body: { content?: unknown };
@@ -177,21 +191,23 @@ export async function PUT(
       throw error;
     }
     if (body.content == null || typeof body.content !== "object") {
-      return apiError("Missing note content", 400);
+      return apiError("Missing note content", 400, { code: "SHARE_NOTE_CONTENT_MISSING" });
     }
 
     const [share] = await db.select().from(shares).where(eq(shares.token, token)).limit(1);
-    if (!share) return apiError("Share not found", 404);
+    if (!share) return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
 
     if (share.permission !== "edit") {
-      return apiError("This share is view-only", 403);
+      return apiError("This share is view-only", 403, { code: "SHARE_VIEW_ONLY" });
     }
 
     if (shareExpired(share)) {
-      return apiError("Share link expired", 410);
+      return apiError("Share link expired", 410, { code: "SHARE_EXPIRED" });
     }
     if (shareBudgetExhausted(share)) {
-      return apiError("Share link has reached maximum access limit", 403);
+      return apiError("Share link has reached maximum access limit", 403, {
+        code: "SHARE_LIMIT_REACHED",
+      });
     }
 
     const [file] = await db
@@ -200,8 +216,10 @@ export async function PUT(
       .where(and(eq(files.id, share.fileId), isNull(files.deletedAt), eq(files.status, "ready")))
       .limit(1);
 
-    if (!file) return apiError("File not found", 404);
-    if (!file.isNote) return apiError("Only notes can be edited via share", 400);
+    if (!file) return apiError("File not found", 404, { code: "SHARE_FILE_MISSING" });
+    if (!file.isNote) {
+      return apiError("Only notes can be edited via share", 400, { code: "SHARE_NOT_A_NOTE" });
+    }
 
     // Keep the searchable plaintext in sync with the note body.
     await db

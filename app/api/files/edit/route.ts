@@ -2,23 +2,23 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import sharp from "sharp";
 import { eq } from "drizzle-orm";
-import { db, recalculateUsedBytes } from "@/lib/db";
-import { files, users } from "@/lib/db/schema";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
+import { db, recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { files, users } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
 import {
   getAccessibleFile,
   getEffectiveUserId,
   fileRefusal,
   fileDomainOwnerId,
   resolveWritableDestination,
-} from "@/lib/auth/permissions";
-import { objectExists, downloadFromR2Stream, putR2Object, buildR2Key } from "@/lib/storage/r2";
-import { validateCsrf } from "@/lib/security";
-import { enqueueJob, getQueue } from "@/lib/queue";
-import { logActivity } from "@/lib/auth/audit";
-import { snapshotFileVersion } from "@/lib/files/versions";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { readStreamBounded, StreamTooLargeError } from "@/lib/storage/read-bounded";
+} from "@/shared/lib/auth/permissions";
+import { objectExists, downloadFromR2Stream, putR2Object, buildR2Key } from "@files/infrastructure/storage/r2";
+import { validateCsrf } from "@/shared/lib/security";
+import { enqueueJob, getQueue } from "@/shared/infrastructure/queue";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { snapshotFileVersion } from "@files/application/commands/versions";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { readStreamBounded, StreamTooLargeError } from "@/shared/lib/stream/read-bounded";
 import {
   EDIT_INPUT_MAX_PIXELS,
   EDIT_MAX_DIMENSION,
@@ -26,7 +26,7 @@ import {
   EDIT_SOURCE_MAX_BYTES,
   TRIM_MAX_SECONDS,
   withinOutputBounds,
-} from "@/lib/files/edit-limits";
+} from "@files/domain/services/edit-limits";
 import {
   DEFAULT_EDIT_QUALITY,
   canReencodeInPlace,
@@ -36,12 +36,12 @@ import {
   encoderForFormat,
   renameForExtension,
   sharpGeometry,
-} from "@/lib/files/media-edit";
+} from "@files/domain/services/media-edit";
 
 /**
  * Every dimension is bounded here rather than left to sharp: the numbers below
  * describe an allocation, and `resize` with `fit: "inside"` will happily enlarge to
- * whatever it is given. See `lib/files/edit-limits.ts`.
+ * whatever it is given. See `src/features/files/domain/services/edit-limits.ts`.
  */
 const dimension = z.number().int().positive().max(EDIT_MAX_DIMENSION);
 

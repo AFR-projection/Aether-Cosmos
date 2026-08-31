@@ -1,29 +1,31 @@
 import { NextRequest } from "next/server";
 import { eq, or } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users, type User } from "@/lib/db/schema";
-import { verifyPassword, verifyDecoyPassword } from "@/lib/auth/password";
+import { db } from "@/shared/infrastructure/db";
+import { users, type User } from "@/shared/infrastructure/db/schema";
+import { verifyPassword, verifyDecoyPassword } from "@/shared/lib/auth/password";
 import {
   getClientIp,
   destroySession,
   getSessionUser,
   AuthError,
-} from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { peekRateLimit, checkRateLimit, resetRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { notifyUser } from "@/lib/email/notify-user";
-import { getAdminSettings, loginLockoutPolicy, type LoginLockoutPolicy } from "@/lib/admin-settings";
-import { completeLogin } from "@/lib/auth/login-complete";
-import { verifyTotpCode, consumeRecoveryCode } from "@/lib/security/totp";
+} from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { peekRateLimit, checkRateLimit, resetRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { readBoundedJson } from "@/shared/api/read-body";
+import { notifyUser } from "@/shared/infrastructure/email/notify-user";
+import { getAdminSettings, loginLockoutPolicy, type LoginLockoutPolicy } from "@/shared/lib/settings/admin-settings";
+import { completeLogin } from "@/shared/lib/auth/login-complete";
+import { verifyTotpCode, consumeRecoveryCode } from "@/shared/lib/security/totp";
 import {
   createStagedToken,
   verifyStagedToken,
   verifyStepCode,
+  normalizeStepCodeLength,
   STEP_CODE_MAX_ATTEMPTS,
   STEP_CODE_LOCKOUT_MS,
-} from "@/lib/security/step-code";
+} from "@/shared/lib/security/step-code";
 
 /**
  * Login is a three-layer sequence:
@@ -114,6 +116,13 @@ async function loadStagedUser(userId: string): Promise<User | null> {
 /**
  * What the client must do after the password layer. Returned as a discriminated
  * response so the UI never has to infer the next screen from absence of data.
+ *
+ * `stepCodeLength` lets the numpad draw exactly the account's own number of slots
+ * instead of the whole 6–10 range. It is only ever included on the branch where
+ * the password has already been verified for this account, and the layer is still
+ * capped at 5 attempts before a 15-minute lockout, so the length narrows nothing
+ * an attacker holding the password could actually exploit. Null (an account whose
+ * length was never recorded) keeps the flexible pad.
  */
 async function nextAfterPassword(user: User) {
   const settings = await getAdminSettings().catch(() => null);
@@ -123,6 +132,7 @@ async function nextAfterPassword(user: User) {
     return {
       requiresStepCode: true as const,
       stepCodeEnrollment: false as const,
+      stepCodeLength: normalizeStepCodeLength(user.stepCodeLength),
       stepToken: createStagedToken(user.id, "password"),
     };
   }
@@ -133,6 +143,7 @@ async function nextAfterPassword(user: User) {
     return {
       requiresStepCode: true as const,
       stepCodeEnrollment: true as const,
+      stepCodeLength: null,
       stepToken: createStagedToken(user.id, "password"),
     };
   }
@@ -161,7 +172,7 @@ export async function POST(request: NextRequest) {
       return apiError(msgIpThrottle(policy.windowMinutes), 429, { code: "IP_RATE_LIMIT" });
     }
 
-    const body = await request.json();
+    const body = await readBoundedJson(request);
     const { identifier, password, stepCode, stepToken, totpCode, recoveryCode, pendingToken } =
       loginSchema.parse(body);
 
@@ -296,10 +307,24 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if ((user.stepCodeFailedAttempts ?? 0) > 0) {
+      // A correct code is the only moment its length is known for certain, so it
+      // is also the only safe place to record it for accounts enrolled before
+      // `step_code_length` existed. Written together with the attempt reset to
+      // keep this to a single UPDATE, and skipped entirely when neither needs it.
+      const recordedLength = normalizeStepCodeLength(user.stepCodeLength);
+      const lengthNeedsBackfill = recordedLength !== stepCode.length;
+      const attemptsNeedReset = (user.stepCodeFailedAttempts ?? 0) > 0;
+
+      if (attemptsNeedReset || lengthNeedsBackfill) {
         await db
           .update(users)
-          .set({ stepCodeFailedAttempts: 0, stepCodeLockedUntil: null, updatedAt: new Date() })
+          .set({
+            ...(attemptsNeedReset
+              ? { stepCodeFailedAttempts: 0, stepCodeLockedUntil: null }
+              : {}),
+            ...(lengthNeedsBackfill ? { stepCodeLength: stepCode.length } : {}),
+            updatedAt: new Date(),
+          })
           .where(eq(users.id, user.id));
       }
 
@@ -457,7 +482,7 @@ export async function DELETE() {
     }
     await destroySession();
     if (user) {
-      const { publishToAdmins } = await import("@/lib/realtime/events");
+      const { publishToAdmins } = await import("@/shared/infrastructure/realtime/events");
       void publishToAdmins({ type: "user_updated", userId: user.id, at: Date.now() });
     }
     return apiSuccess({ message: "Logged out" });

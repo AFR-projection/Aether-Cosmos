@@ -1,14 +1,14 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/session";
-import { resolveFileAccess } from "@/lib/auth/permissions";
-import { downloadFromR2Stream } from "@/lib/storage/r2";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { resolveFileAccess } from "@/shared/lib/auth/permissions";
+import { downloadFromR2Stream } from "@files/infrastructure/storage/r2";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import {
   ARCHIVE_INSPECT_MAX_BYTES,
   archiveErrorResponse,
   archiveTooLargeResponse,
   readArchiveBuffer,
-} from "@/lib/storage/archive-read";
+} from "@files/infrastructure/storage/archive-read";
 import JSZip from "jszip";
 
 export async function GET(

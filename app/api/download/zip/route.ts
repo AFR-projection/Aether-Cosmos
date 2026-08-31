@@ -3,17 +3,17 @@ import { Readable, PassThrough } from "stream";
 import { ZipArchive } from "archiver";
 import { z } from "zod";
 import { inArray, and, eq, isNull } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp } from "@/lib/auth/session";
-import { resolveFileAccess, getEffectiveUserId } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { downloadFromR2Stream } from "@/lib/storage/r2";
-import { validateCsrf } from "@/lib/security";
-import { apiError, handleApiError } from "@/lib/api/response";
-import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
-import { archiveSegment, uniqueArchivePath } from "@/lib/storage/archive-path";
+import { db } from "@/shared/infrastructure/db";
+import { files } from "@/shared/infrastructure/db/schema";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { resolveFileAccess, getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { downloadFromR2Stream } from "@files/infrastructure/storage/r2";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiError, handleApiError } from "@/shared/api/response";
+import { recordBandwidth, BandwidthQuotaError } from "@/shared/lib/billing/bandwidth";
+import { archiveSegment, uniqueArchivePath } from "@files/infrastructure/storage/archive-path";
 
 const MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 const schema = z.object({

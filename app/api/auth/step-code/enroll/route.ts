@@ -1,20 +1,20 @@
 import { NextRequest } from "next/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { getClientIp } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { completeLogin } from "@/lib/auth/login-complete";
-import { getAdminSettings, loginLockoutPolicy } from "@/lib/admin-settings";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { completeLogin } from "@/shared/lib/auth/login-complete";
+import { getAdminSettings, loginLockoutPolicy } from "@/shared/lib/settings/admin-settings";
 import {
   createStagedToken,
   verifyStagedToken,
   validateStepCode,
   hashStepCode,
   getStepCodeRules,
-} from "@/lib/security/step-code";
+} from "@/shared/lib/security/step-code";
 
 /**
  * Mid-login enrolment for the 2-Step Code.
@@ -75,6 +75,9 @@ export async function POST(request: NextRequest) {
       .update(users)
       .set({
         stepCodeHash: await hashStepCode(body.newCode),
+        // Recorded so the login numpad can draw this account's own slot count.
+        // Written from the validated code, never from client-supplied metadata.
+        stepCodeLength: body.newCode.length,
         stepCodeUpdatedAt: new Date(),
         stepCodeFailedAttempts: 0,
         stepCodeLockedUntil: null,

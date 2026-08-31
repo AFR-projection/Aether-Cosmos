@@ -262,7 +262,7 @@ echo
 echo -e "    ${BOLD}DEPLOY_DOMAIN${NC}          the domain whose A record already points to ${BOLD}${PUBLIC_IP}${NC}"
 echo -e "    ${BOLD}NEXT_PUBLIC_APP_URL${NC}    https://<the same domain>"
 echo -e "    ${BOLD}CERTBOT_EMAIL${NC}          your email (for SSL expiry notifications)"
-echo -e "    ${BOLD}DATABASE_URL${NC}           the Neon connection string, one full line ${DIM}(…sslmode=require)${NC}"
+echo -e "    ${BOLD}DATABASE_URL${NC}           the PostgreSQL connection string, one full line ${DIM}(…sslmode=require)${NC}"
 echo -e "    ${BOLD}R2_*${NC}                   Account ID, Access Key ID, Secret, bucket, public URL"
 echo -e "    ${BOLD}MASTER_USERNAME${NC}        admin username"
 echo -e "    ${BOLD}MASTER_PASSWORD${NC}        admin password, min 10 characters"

@@ -1,19 +1,19 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
-import { publishToUser } from "@/lib/realtime/events";
-import { requireBrainContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
-import { logBrainAudit } from "@/lib/brain/audit";
-import { createMemory, listMemories, searchMemories } from "@/lib/brain/memory-service";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
+import { publishToUser } from "@/shared/infrastructure/realtime/events";
+import { requireBrainContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
+import { logBrainAudit } from "@brain/infrastructure/audit";
+import { createMemory, listMemories, searchMemories } from "@brain/application/commands/memory-service";
 import {
   MEMORY_PAGE_MAX,
   MEMORY_PAGE_SIZE,
   MEMORY_SEARCH_MAX,
   MEMORY_SOURCE_TYPES,
   MEMORY_TYPES,
-} from "@/lib/brain/constants";
+} from "@brain/domain/constants";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

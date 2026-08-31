@@ -1,4 +1,4 @@
-import { getSessionUserForPage } from "@/lib/auth/session-page";
+import { getSessionUserForPage } from "@/shared/lib/auth/session-page";
 import { redirect } from "next/navigation";
 
 /**

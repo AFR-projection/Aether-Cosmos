@@ -81,7 +81,7 @@ run_wizard() {
   prompt_into "Admin email (Let's Encrypt notifications)" CERTBOT_EMAIL "admin@${DEPLOY_DOMAIN}"
 
   section "Database  ·  2 of 4"
-  echo -e "  ${DIM}Copy the connection string from the Neon dashboard — one whole line.${NC}"
+  echo -e "  ${DIM}Copy the connection string from your PostgreSQL provider — one whole line.${NC}"
   echo
   prompt_into "DATABASE_URL" DATABASE_URL
   require_nonempty "DATABASE_URL" DATABASE_URL

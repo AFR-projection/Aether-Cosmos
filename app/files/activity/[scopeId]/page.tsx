@@ -1,7 +1,7 @@
-import { ActivityPage } from "@/components/files/activity-page";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { requireAuth } from "@/lib/auth/session";
-import { getOwnedActivityScope } from "@/lib/activity/activity-scope-server";
+import { ActivityPage } from "@files/presentation/components/files/activity-page";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getOwnedActivityScope } from "@/shared/lib/activity/activity-scope-server";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 

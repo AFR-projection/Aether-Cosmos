@@ -1,24 +1,24 @@
 import { NextRequest } from "next/server";
 import { inArray } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { files, type File } from "@/lib/db/schema";
-import { getClientIp, requireAuth, type SessionUser } from "@/lib/auth/session";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
+import { db } from "@/shared/infrastructure/db";
+import { files, type File } from "@/shared/infrastructure/db/schema";
+import { getClientIp, requireAuth, type SessionUser } from "@/shared/lib/auth/session";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
 import {
   resolveFileAccess,
   resolveWritableDestination,
   fileDomainOwnerId,
   fileRefusal,
   type FileAccess,
-} from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { deleteR2Objects } from "@/lib/storage/r2";
-import { validateCsrf } from "@/lib/security";
-import { cacheDelPattern } from "@/lib/cache/redis";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { recalculateUsedBytes } from "@/lib/db";
-import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
+} from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { deleteR2Objects } from "@files/infrastructure/storage/r2";
+import { validateCsrf } from "@/shared/lib/security";
+import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
 
 const patchSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),

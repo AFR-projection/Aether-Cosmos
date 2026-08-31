@@ -1,14 +1,14 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getClientIp } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
-import { requireBrainOwnerContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
-import { logBrainAudit } from "@/lib/brain/audit";
-import { createBrainAgent, listAgentsForBrain, MAX_AGENTS_PER_USER } from "@/lib/brain/agent-service";
-import { BRAIN_API_SCOPES, DEFAULT_BRAIN_AGENT_SCOPES } from "@/lib/brain/constants";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
+import { requireBrainOwnerContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
+import { logBrainAudit } from "@brain/infrastructure/audit";
+import { createBrainAgent, listAgentsForBrain, MAX_AGENTS_PER_USER } from "@brain/application/commands/agent-service";
+import { BRAIN_API_SCOPES, DEFAULT_BRAIN_AGENT_SCOPES } from "@brain/domain/constants";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { desc, eq, and, isNull, ilike } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { activityLogs, users, activityActionEnum } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { validateCsrf } from "@/lib/security";
-import { apiError, apiSuccess, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { activityLogs, users, activityActionEnum } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiError, apiSuccess, handleApiError } from "@/shared/api/response";
 
 const logsSchema = z.object({
   userId: z.string().uuid().optional(),

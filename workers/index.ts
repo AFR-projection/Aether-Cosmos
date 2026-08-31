@@ -1,8 +1,8 @@
 // Not "dotenv/config": dotenv is a devDependency and the worker image installs with
 // `npm ci --omit=dev`, so that import crashed the container before its first line and
 // restart-looped it through an entire deploy. The loader uses dotenv when it is there
-// and reads .env itself when it is not — see lib/env/load-env.ts.
-import "../lib/env/load-env";
+// and reads .env itself when it is not — see @/shared/lib/env/load-env.ts.
+import "@/shared/lib/env/load-env";
 import { Worker } from "bullmq";
 import { and, eq, inArray, sql as drizzleSql } from "drizzle-orm";
 import sharp from "sharp";
@@ -14,7 +14,7 @@ import os from "os";
 import path from "path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "../lib/db/schema";
+import * as schema from "@/shared/infrastructure/db/schema";
 import {
   archiveJobItems,
   archiveJobs,
@@ -24,8 +24,8 @@ import {
   folders,
   users,
   webhooks,
-} from "../lib/db/schema";
-import { QUEUE_NAME } from "../lib/queue";
+} from "@/shared/infrastructure/db/schema";
+import { QUEUE_NAME } from "@/shared/infrastructure/queue";
 import {
   AUDIO_EXTRACT_TARGETS,
   buildExtractAudioArgs,
@@ -36,15 +36,15 @@ import {
   extractedAudioName,
   isMissingAudioStreamError,
   type AudioExtractTarget,
-} from "../lib/files/media-edit";
-import { EDIT_INPUT_MAX_PIXELS } from "../lib/files/edit-limits";
-import { WEBHOOK_USER_AGENT } from "../lib/webhooks/constants";
-import { fetchWebhook } from "../lib/webhooks/ssrf";
+} from "@files/domain/services/media-edit";
+import { EDIT_INPUT_MAX_PIXELS } from "@files/domain/services/edit-limits";
+import { WEBHOOK_USER_AGENT } from "@/shared/infrastructure/webhooks/constants";
+import { fetchWebhook } from "@/shared/infrastructure/webhooks/ssrf";
 import { runScheduledCleanups } from "./cleanup";
-import { enrichBrain, enrichMemory, ENRICH_SWEEP_LIMIT } from "../lib/brain/enrich/enrich-service";
-import { relateJobId, runRelateBrainJob, runRelateMemoryJob } from "../lib/brain/graph/relate-jobs";
-import { runEmbedBrainJob, runEmbedMemoryJob } from "../lib/brain/embedding/embed-jobs";
-import { getEmbeddingProvider } from "../lib/brain/embedding/resolve";
+import { enrichBrain, enrichMemory, ENRICH_SWEEP_LIMIT } from "@brain/application/jobs/enrich-service";
+import { relateJobId, runRelateBrainJob, runRelateMemoryJob } from "@brain/application/commands/relate-jobs";
+import { runEmbedBrainJob, runEmbedMemoryJob } from "@brain/infrastructure/providers/embed-jobs";
+import { getEmbeddingProvider } from "@brain/infrastructure/providers/resolve";
 import { Queue } from "bullmq";
 import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
@@ -55,7 +55,8 @@ import {
   downloadFromR2Stream,
   headObject,
   uploadR2Stream,
-} from "../lib/storage/r2";
+} from "@files/infrastructure/storage/r2";
+import { renderPdfFirstPage } from "@files/infrastructure/storage/pdf-thumbnail";
 
 const execFileAsync = promisify(execFile);
 
@@ -169,10 +170,9 @@ async function generateImageThumbnails(fileId: string, buffer: Buffer): Promise<
 }
 
 async function generateVideoThumbnail(fileId: string, r2Key: string): Promise<boolean> {
-  const buffer = await downloadFromR2(r2Key);
   const fs = await import("fs/promises");
   const tmpIn = tmpPath(`${fileId}-input`);
-  await fs.writeFile(tmpIn, buffer);
+  await downloadR2ToFile(r2Key, tmpIn);
 
   let generated300 = false;
   try {
@@ -205,19 +205,29 @@ async function generateVideoThumbnail(fileId: string, r2Key: string): Promise<bo
 }
 
 async function generatePdfThumbnail(fileId: string, r2Key: string): Promise<boolean> {
-  // ffmpeg cannot decode PDFs — real renderer lands with pdfjs (Phase 1).
-  // Return false so thumbnailKey is never set to a nonexistent object.
-  void fileId;
-  void r2Key;
-  return false;
+  const buffer = await downloadFromR2(r2Key);
+  const firstPage = await renderPdfFirstPage(buffer);
+
+  for (const size of THUMB_SIZES) {
+    const thumbnail = await sharp(firstPage)
+      .resize(size, size, {
+        fit: "inside",
+        withoutEnlargement: true,
+        background: "#ffffff",
+      })
+      .webp({ quality: 82, effort: 4 })
+      .toBuffer();
+    await uploadToR2(`thumbnails/${fileId}_${size}.webp`, thumbnail, "image/webp");
+  }
+
+  return true;
 }
 
 async function generateAudioThumbnail(fileId: string, r2Key: string): Promise<boolean> {
-  const buffer = await downloadFromR2(r2Key);
   const fs = await import("fs/promises");
   const tmpIn = tmpPath(`${fileId}-input`);
   const tmpOut = tmpPath(`${fileId}-cover.jpg`);
-  await fs.writeFile(tmpIn, buffer);
+  await downloadR2ToFile(r2Key, tmpIn);
 
   try {
     // Try to extract embedded album art
@@ -842,7 +852,7 @@ async function runEnrichBrain(brainId: string, limit?: number): Promise<void> {
 /**
  * Compute derived relationships for one memory.
  *
- * The work itself lives in `lib/brain/graph/relate-jobs`, which is reachable from a
+ * The work itself lives in `@brain/application/commands/relate-jobs`, which is reachable from a
  * test; this wrapper is the operational shell around it — one log line of counts
  * (never memory text) and a rethrow so BullMQ retries.
  */
@@ -906,7 +916,7 @@ async function runRelateBrain(brainId: string, limit?: number): Promise<void> {
 // ── P9: Semantic embedding ───────────────────────────────────────────────────
 
 /**
- * Embed one memory. The work lives in `lib/brain/embedding/embed-jobs`; this wrapper is
+ * Embed one memory. The work lives in `@brain/infrastructure/providers/embed-jobs`; this wrapper is
  * the operational shell — one log line of status only (never memory text) and a rethrow
  * so BullMQ retries a genuine failure. A no-op outcome (no provider, fresh, empty) is a
  * normal completion, not an error.

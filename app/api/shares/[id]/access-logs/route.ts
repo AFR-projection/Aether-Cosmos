@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { eq, desc } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { shares, activityLogs } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { shares, activityLogs } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 
 export async function GET(
   _request: NextRequest,

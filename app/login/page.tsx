@@ -5,15 +5,18 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, Eye, EyeOff, KeyRound, Loader2, UserRound } from "lucide-react";
-import { apiFetch } from "@/lib/api/client";
-import { APP_NAME } from "@/lib/app-version";
-import { useSecurityAlertFromStorage } from "@/components/auth/security-alert";
-import { AuthError, AuthHint, AuthShell } from "@/components/auth/auth-shell";
+import { apiFetch } from "@/shared/api/client";
+import { APP_NAME } from "@/shared/lib/app-version";
+import { useSecurityAlertFromStorage } from "@auth/presentation/components/security-alert";
+import { AuthError, AuthHint, AuthShell } from "@auth/presentation/components/auth-shell";
+import { apiErrorMessage, createTranslator, getLocale, useT } from "@/shared/lib/i18n";
 
 interface LoginResponse {
   user?: { role?: string };
   requiresStepCode?: boolean;
   stepCodeEnrollment?: boolean;
+  /** Digit count of this account's 2-Step Code; null when it is not recorded. */
+  stepCodeLength?: number | null;
   stepToken?: string;
   requires2fa?: boolean;
   pendingToken?: string;
@@ -32,17 +35,21 @@ export default function LoginPage() {
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const { alert: securityAlert, dismiss: dismissSecurityAlert } =
     useSecurityAlertFromStorage();
+  const t = useT();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("registration") === "disabled") {
-      window.setTimeout(() => setError("Public registration is currently disabled"), 0);
+      // Runs once on mount, so it reads the live locale instead of depending on `t`.
+      const translate = createTranslator(getLocale());
+      window.setTimeout(() => setError(translate("auth.login.registrationDisabled")), 0);
     }
     apiFetch<{ enabled: boolean }>("/api/auth/register").then((res) => {
       if (res.success && res.data?.enabled) setRegistrationEnabled(true);
     });
     sessionStorage.removeItem("auth_step_token");
     sessionStorage.removeItem("auth_step_enrollment");
+    sessionStorage.removeItem("auth_step_length");
     sessionStorage.removeItem("auth_pending_token");
   }, []);
 
@@ -57,7 +64,7 @@ export default function LoginPage() {
       });
 
       if (!res.success) {
-        setError(res.error ?? "Sign-in failed");
+        setError(apiErrorMessage(res, t, "auth.login.failed"));
         return;
       }
 
@@ -66,6 +73,13 @@ export default function LoginPage() {
       if (data?.requiresStepCode && data.stepToken) {
         sessionStorage.setItem("auth_step_token", data.stepToken);
         sessionStorage.setItem("auth_step_enrollment", data.stepCodeEnrollment ? "1" : "0");
+        // The numpad on the next screen draws this many slots. Absent for an
+        // account whose length was never recorded, which keeps the flexible pad.
+        if (typeof data.stepCodeLength === "number") {
+          sessionStorage.setItem("auth_step_length", String(data.stepCodeLength));
+        } else {
+          sessionStorage.removeItem("auth_step_length");
+        }
         router.push(data.stepCodeEnrollment ? "/login/step-code/setup" : "/login/step-code");
         return;
       }
@@ -93,7 +107,7 @@ export default function LoginPage() {
       router.push(dest);
       router.refresh();
     } catch {
-      setError("Connection failed");
+      setError(t("errors.network"));
     } finally {
       setLoading(false);
     }
@@ -103,17 +117,23 @@ export default function LoginPage() {
     <AuthShell
       step="password"
       icon={<KeyRound />}
-      title="Welcome back"
-      description="Sign in to open your private workspace."
-      visualKicker="STORAGE / CONTROLLED ACCESS"
-      visualTitle={<>Your files.<br /><em>In their right place.</em></>}
-      visualDescription="A quiet, dependable home for the things you need to keep close — with every layer of access made deliberate."
+      title={t("auth.login.title")}
+      description={t("auth.login.description")}
+      visualKicker={t("auth.login.visualKicker")}
+      visualTitle={
+        <>
+          {t("auth.login.visualTitleTop")}
+          <br />
+          <em>{t("auth.login.visualTitleEm")}</em>
+        </>
+      }
+      visualDescription={t("auth.login.visualDescription")}
       securityAlert={securityAlert}
       onDismissSecurityAlert={dismissSecurityAlert}
       footer={
         <span>
           <span className="auth-main__footer-dot" aria-hidden="true" />
-          Your space stays yours
+          {t("auth.login.footer")}
         </span>
       }
     >
@@ -125,8 +145,8 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="auth-form" aria-describedby={error ? "login-error" : undefined}>
           <div className="auth-field">
             <label htmlFor="identifier" className="auth-label">
-              <span>Username or email</span>
-              <span className="auth-label__hint">Required</span>
+              <span>{t("auth.login.identifier")}</span>
+              <span className="auth-label__hint">{t("auth.required")}</span>
             </label>
             <div className="auth-control">
               <UserRound aria-hidden="true" />
@@ -135,7 +155,7 @@ export default function LoginPage() {
                 className="auth-input"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="you@example.com"
+                placeholder={t("auth.emailPlaceholder")}
                 autoComplete="username"
                 autoCapitalize="none"
                 required
@@ -145,8 +165,8 @@ export default function LoginPage() {
 
           <div className="auth-field">
             <label htmlFor="password" className="auth-label">
-              <span>Password</span>
-              <span className="auth-label__hint">Required</span>
+              <span>{t("auth.passwordLabel")}</span>
+              <span className="auth-label__hint">{t("auth.required")}</span>
             </label>
             <div className="auth-control">
               <KeyRound aria-hidden="true" />
@@ -156,7 +176,7 @@ export default function LoginPage() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
+                placeholder={t("auth.login.passwordPlaceholder")}
                 autoComplete="current-password"
                 required
               />
@@ -164,7 +184,9 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => setShowPassword((visible) => !visible)}
                 className="auth-password-toggle"
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-label={
+                  showPassword ? t("auth.login.hidePassword") : t("auth.login.showPassword")
+                }
               >
                 {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
               </button>
@@ -177,12 +199,12 @@ export default function LoginPage() {
             {loading ? (
               <>
                 <Loader2 className="animate-spin" aria-hidden="true" />
-                <span>Checking access…</span>
-                <span className="sr-only">Signing you in</span>
+                <span>{t("auth.login.submitting")}</span>
+                <span className="sr-only">{t("auth.login.submittingAnnounce")}</span>
               </>
             ) : (
               <>
-                <span>Continue to workspace</span>
+                <span>{t("auth.login.submit")}</span>
                 <ArrowRight aria-hidden="true" />
               </>
             )}
@@ -190,11 +212,11 @@ export default function LoginPage() {
 
           {registrationEnabled ? (
             <p className="auth-form__footer">
-              New to {APP_NAME}?{" "}
-              <Link href="/register">Create an account</Link>
+              {t("auth.login.newTo", { app: APP_NAME })}{" "}
+              <Link href="/register">{t("auth.login.createAccount")}</Link>
             </p>
           ) : (
-            <AuthHint>Access is invitation-only for this workspace.</AuthHint>
+            <AuthHint>{t("auth.login.inviteOnly")}</AuthHint>
           )}
         </form>
       </motion.div>

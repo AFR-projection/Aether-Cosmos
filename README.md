@@ -33,9 +33,9 @@ Full list: [docs/features.md](docs/features.md).
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 16.2 (App Router) + React 19 |
+| Framework | Next.js 16.3 (App Router) + React 19 |
 | Language | TypeScript 5, strict |
-| Database | PostgreSQL (Neon) + Drizzle ORM 0.45 |
+| Database | PostgreSQL + Drizzle ORM 0.45 |
 | Object storage | Cloudflare R2 (S3-compatible) |
 | Cache & queue | Redis + BullMQ 5 |
 | UI | Tailwind CSS v4, Radix UI, Framer Motion |
@@ -63,7 +63,7 @@ Started](docs/getting-started.md).
 npm run dev        # dev server
 npm run build      # production build
 npm run lint       # eslint
-npm test           # vitest (2382 tests)
+npm test           # vitest (2502 tests)
 npm run worker     # background worker (requires Redis)
 npm run db:studio  # Drizzle Studio
 ```

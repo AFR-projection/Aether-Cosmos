@@ -14,7 +14,7 @@ import { NextRequest } from "next/server";
 const dbCalls = vi.hoisted(() => ({ updates: 0, deletes: 0 }));
 const selectQueue = vi.hoisted(() => ({ rows: [] as unknown[][] }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   type Q = {
     set: (...a: unknown[]) => Q;
     where: (...a: unknown[]) => Q;
@@ -50,41 +50,41 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn(), checkUserApiRateLimit: vi.fn() };
 });
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return { ...actual, requireAuth: vi.fn(), getClientIp: vi.fn(() => "127.0.0.1") };
 });
 
-vi.mock("@/lib/auth/api-key", () => ({
+vi.mock("@/shared/lib/auth/api-key", () => ({
   requireAuthOrApiKey: vi.fn(),
   requireMasterOrApiKey: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@/shared/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@files/infrastructure/storage/r2", () => ({
   objectExists: vi.fn().mockResolvedValue(true),
   downloadFromR2Bytes: vi.fn().mockResolvedValue(new Uint8Array(16)),
   completeMultipartUpload: vi.fn().mockResolvedValue(undefined),
   abortMultipartUpload: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/security/file-validation", () => ({
+vi.mock("@/shared/lib/security/file-validation", () => ({
   validateFileMagicBytes: vi.fn(() => ({ valid: true })),
 }));
-vi.mock("@/lib/security/suspicious-activity", () => ({
+vi.mock("@/shared/lib/security/suspicious-activity", () => ({
   checkSuspiciousActivity: vi.fn().mockResolvedValue({ suspicious: false }),
   logSuspiciousActivity: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/queue", () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/webhooks/dispatch", () => ({
+vi.mock("@/shared/infrastructure/queue", () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/shared/infrastructure/webhooks/dispatch", () => ({
   dispatchWebhookEvent: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/realtime/events", () => ({ publishToUser: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/admin-settings", () => ({
+vi.mock("@/shared/infrastructure/realtime/events", () => ({ publishToUser: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/shared/lib/settings/admin-settings", () => ({
   getAdminSettings: vi.fn().mockResolvedValue({ rateLimitPerMinute: 1000 }),
 }));
 
@@ -93,8 +93,8 @@ const MASTER = "22222222-2222-4222-8222-222222222222";
 const FILE_ID = "44444444-4444-4444-8444-444444444444";
 const FILE_ID_2 = "55555555-5555-4555-8555-555555555555";
 
-const { validateCsrf, checkUserApiRateLimit } = await import("@/lib/security");
-const { requireAuthOrApiKey } = await import("@/lib/auth/api-key");
+const { validateCsrf, checkUserApiRateLimit } = await import("@/shared/lib/security");
+const { requireAuthOrApiKey } = await import("@/shared/lib/auth/api-key");
 const completeRoute = await import("@/app/api/upload/complete/route");
 const completeBatchRoute = await import("@/app/api/upload/complete-batch/route");
 

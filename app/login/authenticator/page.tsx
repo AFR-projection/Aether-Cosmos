@@ -4,8 +4,9 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, KeyRound, Loader2, RotateCcw, ShieldCheck, Smartphone } from "lucide-react";
-import { apiFetch } from "@/lib/api/client";
-import { AuthError, AuthShell } from "@/components/auth/auth-shell";
+import { apiFetch } from "@/shared/api/client";
+import { AuthError, AuthShell } from "@auth/presentation/components/auth-shell";
+import { apiErrorMessage, useT } from "@/shared/lib/i18n";
 
 interface LoginResponse {
   user?: { role?: string };
@@ -23,6 +24,7 @@ export default function AuthenticatorPage() {
   const [shake, setShake] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const t = useT();
 
   useEffect(() => {
     const token = sessionStorage.getItem("auth_pending_token");
@@ -92,12 +94,14 @@ export default function AuthenticatorPage() {
       if (!res.success) {
         setShake(true);
         window.setTimeout(() => setShake(false), 500);
-        setError(res.error ?? "Invalid code");
+        setError(apiErrorMessage(res, t, "auth.authenticator.invalid"));
         if (!useRecovery) {
           setDigits(["", "", "", "", "", ""]);
           window.setTimeout(() => inputRefs.current[0]?.focus(), 50);
         }
-        if (res.error?.toLowerCase().includes("session expired")) {
+        // Keyed off the stable code, not the message text: the staged token is
+        // gone, so the only way forward is a fresh sign-in.
+        if (res.code === "2FA_EXPIRED") {
           window.setTimeout(() => router.replace("/login"), 1200);
         }
         return;
@@ -125,7 +129,7 @@ export default function AuthenticatorPage() {
       router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : home);
       router.refresh();
     } catch {
-      setError("Connection failed");
+      setError(t("errors.network"));
     } finally {
       setLoading(false);
     }
@@ -144,11 +148,21 @@ export default function AuthenticatorPage() {
     <AuthShell
       step="authenticator"
       icon={useRecovery ? <KeyRound /> : <Smartphone />}
-      title={useRecovery ? "Recovery code" : "Authenticator"}
-      description={useRecovery ? "Use one of your saved backup codes." : "Confirm with the code from your trusted device."}
-      visualKicker="STORAGE / VERIFIED PRESENCE"
-      visualTitle={<>Known device.<br /><em>Clear signal.</em></>}
-      visualDescription="The final check connects your account to a device you already trust, keeping the handoff private and intentional."
+      title={useRecovery ? t("auth.authenticator.recoveryTitle") : t("auth.stepAuthenticator")}
+      description={
+        useRecovery
+          ? t("auth.authenticator.recoveryDescription")
+          : t("auth.authenticator.description")
+      }
+      visualKicker={t("auth.authenticator.visualKicker")}
+      visualTitle={
+        <>
+          {t("auth.authenticator.visualTitleTop")}
+          <br />
+          <em>{t("auth.authenticator.visualTitleEm")}</em>
+        </>
+      }
+      visualDescription={t("auth.authenticator.visualDescription")}
     >
       <AnimatePresence mode="wait">
         {!useRecovery ? (
@@ -162,7 +176,7 @@ export default function AuthenticatorPage() {
             <div
               className={shake ? "auth-otp-grid auth-otp-grid--error" : "auth-otp-grid"}
               role="group"
-              aria-label="Six digit authenticator code"
+              aria-label={t("auth.authenticator.gridLabel")}
               onPaste={handleDigitPaste}
             >
               {digits.map((digit, index) => (
@@ -177,7 +191,7 @@ export default function AuthenticatorPage() {
                   onChange={(event) => handleDigitChange(index, event.target.value)}
                   onKeyDown={(event) => handleDigitKeyDown(index, event)}
                   disabled={loading}
-                  aria-label={`Authenticator digit ${index + 1} of 6`}
+                  aria-label={t("auth.authenticator.digitLabel", { index: index + 1 })}
                   aria-invalid={Boolean(error)}
                   className={[
                     "auth-otp-input",
@@ -211,12 +225,12 @@ export default function AuthenticatorPage() {
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" aria-hidden="true" />
-                  <span>Verifying device…</span>
+                  <span>{t("auth.authenticator.submitting")}</span>
                 </>
               ) : (
                 <>
                   <ShieldCheck aria-hidden="true" />
-                  <span>Verify authenticator</span>
+                  <span>{t("auth.authenticator.submit")}</span>
                 </>
               )}
             </button>
@@ -233,15 +247,15 @@ export default function AuthenticatorPage() {
           >
             <div className="auth-field">
               <label htmlFor="recovery-code" className="auth-label">
-                <span>Backup code</span>
-                <span className="auth-label__hint">One-time use</span>
+                <span>{t("auth.authenticator.backupLabel")}</span>
+                <span className="auth-label__hint">{t("auth.authenticator.backupHint")}</span>
               </label>
               <input
                 id="recovery-code"
                 className="auth-recovery-input"
                 value={recoveryCode}
                 onChange={(event) => { setRecoveryCode(event.target.value); if (error) setError(""); }}
-                placeholder="xxxx-xxxx-xxxx"
+                placeholder={t("auth.authenticator.backupPlaceholder")}
                 autoComplete="off"
                 autoFocus
                 spellCheck={false}
@@ -257,12 +271,12 @@ export default function AuthenticatorPage() {
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" aria-hidden="true" />
-                  <span>Verifying code…</span>
+                  <span>{t("auth.authenticator.verifying")}</span>
                 </>
               ) : (
                 <>
                   <ShieldCheck aria-hidden="true" />
-                  <span>Use recovery code</span>
+                  <span>{t("auth.authenticator.useRecovery")}</span>
                 </>
               )}
             </button>
@@ -273,11 +287,13 @@ export default function AuthenticatorPage() {
       <div className="auth-secondary-actions">
         <button type="button" onClick={switchMode} className="auth-text-button">
           <RotateCcw aria-hidden="true" />
-          {useRecovery ? "Use authenticator code" : "Use recovery code"}
+          {useRecovery
+            ? t("auth.authenticator.useAuthenticator")
+            : t("auth.authenticator.useRecovery")}
         </button>
         <button type="button" onClick={() => router.push("/login")} className="auth-text-button">
           <ArrowLeft aria-hidden="true" />
-          Start over
+          {t("auth.authenticator.startOver")}
         </button>
       </div>
     </AuthShell>

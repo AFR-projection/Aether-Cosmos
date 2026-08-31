@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { getClientIp } from "@/lib/auth/session";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { completeUpload, getUpload, type UploadPartInput } from "@/lib/storage/upload-service";
-import { enqueueJob } from "@/lib/queue";
-import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
-import { publishToUser } from "@/lib/realtime/events";
-import { logActivity } from "@/lib/auth/audit";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { completeUpload, getUpload, type UploadPartInput } from "@files/infrastructure/storage/upload-service";
+import { enqueueJob } from "@/shared/infrastructure/queue";
+import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
+import { publishToUser } from "@/shared/infrastructure/realtime/events";
+import { logActivity } from "@/shared/lib/auth/audit";
 
 const schema = z.object({
   checksumSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),

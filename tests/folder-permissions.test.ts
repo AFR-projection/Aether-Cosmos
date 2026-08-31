@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { File, Folder } from "@/lib/db/schema";
-import type { SessionUser } from "@/lib/auth/session";
+import type { File, Folder } from "@/shared/infrastructure/db/schema";
+import type { SessionUser } from "@/shared/lib/auth/session";
 
 /**
  * The sharing policy, pinned.
@@ -27,7 +27,7 @@ const state = vi.hoisted(() => ({
   joinedSelects: 0,
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   type Chain = {
     from: (t?: unknown) => Chain;
     innerJoin: (...a: unknown[]) => Chain;
@@ -65,7 +65,7 @@ vi.mock("@/lib/db", () => {
 });
 
 const { folderCapabilities, resolveWritableDestination, fileDomainOwnerId } = await import(
-  "@/lib/auth/permissions"
+  "@/shared/lib/auth/permissions"
 );
 
 const OWNER = "11111111-1111-1111-1111-111111111111";

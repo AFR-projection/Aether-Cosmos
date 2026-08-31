@@ -19,6 +19,14 @@
       }
     ],
     "paths": {
+      "@/shared/*": ["./src/shared/*"],
+      "@/ui/*": ["./src/ui/*"],
+      "@shell/*": ["./src/shell/*"],
+      "@brain/*": ["./src/features/brain/*"],
+      "@auth/*": ["./src/features/auth/*"],
+      "@files/*": ["./src/features/files/*"],
+      "@admin/*": ["./src/features/admin/*"],
+      "@shares/*": ["./src/features/shares/*"],
       "@/*": ["./*"]
     }
   },

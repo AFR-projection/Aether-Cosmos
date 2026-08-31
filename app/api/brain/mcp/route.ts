@@ -1,4 +1,4 @@
-import { handleBrainMcpRequest } from "@/lib/brain/mcp/handler";
+import { handleBrainMcpRequest } from "@brain/infrastructure/mcp/handler";
 
 /**
  * POST /api/brain/mcp — the Second Brain MCP endpoint (Streamable HTTP).

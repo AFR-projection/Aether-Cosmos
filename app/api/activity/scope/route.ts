@@ -1,7 +1,7 @@
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { getOrCreateActivityScope } from "@/shared/lib/activity/activity-scope-server";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
 
 export async function GET() {
   try {

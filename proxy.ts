@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { hstsEnabled } from "@/lib/env/runtime";
-import { isProgrammaticBearerRequest } from "@/lib/auth/api-key";
+import { hstsEnabled } from "@/shared/lib/env/runtime";
+import { isProgrammaticBearerRequest } from "@/shared/lib/auth/api-key";
 
 const publicPaths = [
   "/",

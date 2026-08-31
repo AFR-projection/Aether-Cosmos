@@ -21,8 +21,8 @@ const store = vi.hoisted(() => ({
   bandwidth: [] as number[],
 }));
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return {
     ...actual,
     requireAuth: vi.fn().mockResolvedValue({ id: "user-1", role: "user" }),
@@ -30,7 +30,7 @@ vi.mock("@/lib/auth/session", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/auth/permissions", () => ({
+vi.mock("@/shared/lib/auth/permissions", () => ({
   getAccessibleFile: vi.fn(async () =>
     store.file ? { canView: true, file: store.file } : null
   ),
@@ -39,15 +39,15 @@ vi.mock("@/lib/auth/permissions", () => ({
   ),
 }));
 
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@files/infrastructure/storage/r2", () => ({
   downloadFromR2Stream: vi.fn(async () => {
     store.r2Calls++;
     return { body: store.body };
   }),
 }));
 
-vi.mock("@/lib/billing/bandwidth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/billing/bandwidth")>();
+vi.mock("@/shared/lib/billing/bandwidth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/billing/bandwidth")>();
   return {
     ...actual,
     recordBandwidth: vi.fn(async (_u: string, bytes: number) => {

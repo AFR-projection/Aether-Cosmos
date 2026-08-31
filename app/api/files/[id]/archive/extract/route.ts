@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/session";
-import { getAccessibleFile } from "@/lib/auth/permissions";
-import { downloadFromR2Stream } from "@/lib/storage/r2";
-import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
-import { apiError, handleApiError } from "@/lib/api/response";
-import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getAccessibleFile } from "@/shared/lib/auth/permissions";
+import { downloadFromR2Stream } from "@files/infrastructure/storage/r2";
+import { recordBandwidth, BandwidthQuotaError } from "@/shared/lib/billing/bandwidth";
+import { apiError, handleApiError } from "@/shared/api/response";
+import { getSafeMimeType, shouldForceDownload } from "@/shared/lib/security/mime";
 import {
   ARCHIVE_ENTRY_MAX_BYTES,
   ARCHIVE_INSPECT_MAX_BYTES,
@@ -12,7 +12,7 @@ import {
   archiveTooLargeResponse,
   readArchiveBuffer,
   readEntryBounded,
-} from "@/lib/storage/archive-read";
+} from "@files/infrastructure/storage/archive-read";
 import JSZip from "jszip";
 
 const TEXT_TYPES = new Set([

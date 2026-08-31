@@ -1,16 +1,17 @@
 import { NextRequest } from "next/server";
 import { eq, or } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { hashPassword } from "@/lib/auth/password";
-import { validateCsrf, checkRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getAdminSettings, defaultQuotaBytes, defaultBandwidthQuotaBytes, isEmailDomainAllowed } from "@/lib/admin-settings";
-import { validatePasswordStrength } from "@/lib/security/password-policy";
-import { sendOTP, normalizeEmail } from "@/lib/email/email-service";
-import { getClientIp } from "@/lib/auth/session";
-import { publishToAdmins } from "@/lib/realtime/events";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { hashPassword } from "@/shared/lib/auth/password";
+import { validateCsrf, checkRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { readBoundedJson } from "@/shared/api/read-body";
+import { getAdminSettings, defaultQuotaBytes, defaultBandwidthQuotaBytes, isEmailDomainAllowed } from "@/shared/lib/settings/admin-settings";
+import { validatePasswordStrength } from "@/shared/lib/security/password-policy";
+import { sendOTP, normalizeEmail } from "@/shared/infrastructure/email/email-service";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { publishToAdmins } from "@/shared/infrastructure/realtime/events";
 
 export const runtime = "nodejs";
 
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
       return apiError("Too many registration attempts", 429);
     }
 
-    const body = registerSchema.parse(await request.json());
+    const body = registerSchema.parse(await readBoundedJson(request));
     const email = normalizeEmail(body.email);
 
     // Optional domain allowlist from Admin → Settings. Checked before the

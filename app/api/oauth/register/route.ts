@@ -1,8 +1,8 @@
-import { registerOAuthClient, OAuthClientError } from "@/lib/oauth/clients";
-import { oauthBodyErrorResponse, oauthError, oauthJson } from "@/lib/oauth/http";
-import { readBoundedJson } from "@/lib/api/read-body";
-import { getClientIp } from "@/lib/auth/session";
-import { checkRateLimit } from "@/lib/security";
+import { registerOAuthClient, OAuthClientError } from "@/shared/lib/auth/oauth/clients";
+import { oauthBodyErrorResponse, oauthError, oauthJson } from "@/shared/lib/auth/oauth/http";
+import { readBoundedJson } from "@/shared/api/read-body";
+import { getClientIp } from "@/shared/lib/auth/session";
+import { checkRateLimit } from "@/shared/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  *
  *  - the body was read with an unbounded `request.json()`;
  *  - the metadata was stored with no length, count or vocabulary check (see
- *    `lib/oauth/clients.ts`);
+ *    `src/features/auth/domain/services/clients.ts`);
  *  - there was no rate limit at all, so the table could be filled at request speed;
  *  - and the catch-all returned `e.message`, handing the caller driver text —
  *    constraint names, column names — from a 500.

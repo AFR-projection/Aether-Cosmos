@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { sessions } from "@/lib/db/schema";
-import { requireAuth, destroySession, getClientIp } from "@/lib/auth/session";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { logActivity } from "@/lib/auth/audit";
-import { publishToUser } from "@/lib/realtime/events";
+import { db } from "@/shared/infrastructure/db";
+import { sessions } from "@/shared/infrastructure/db/schema";
+import { requireAuth, destroySession, getClientIp } from "@/shared/lib/auth/session";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { publishToUser } from "@/shared/infrastructure/realtime/events";
 
 export async function DELETE(
   request: NextRequest,

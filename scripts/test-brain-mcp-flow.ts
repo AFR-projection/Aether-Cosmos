@@ -12,11 +12,11 @@
  */
 import "./load-env";
 import { and, eq } from "drizzle-orm";
-import { db } from "../lib/db";
-import { brainAgents, brains, users } from "../lib/db/schema";
-import { deleteApiKey } from "../lib/auth/api-key";
-import { createBrainAgent, revokeBrainAgent } from "../lib/brain/agent-service";
-import { createBrain, deleteBrain } from "../lib/brain/brain-service";
+import { db } from "@/shared/infrastructure/db";
+import { brainAgents, brains, users } from "@/shared/infrastructure/db/schema";
+import { deleteApiKey } from "@/shared/lib/auth/api-key";
+import { createBrainAgent, revokeBrainAgent } from "@brain/application/commands/agent-service";
+import { createBrain, deleteBrain } from "@brain/application/commands/brain-service";
 
 const BASE = (process.argv[2] ?? "http://localhost:3000").replace(/\/$/, "");
 const MCP_URL = `${BASE}/api/brain/mcp`;

@@ -1,18 +1,18 @@
 import { NextRequest } from "next/server";
 import { eq, desc, count, gt, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users, files, sessions } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp, destroyAllUserSessions } from "@/lib/auth/session";
-import { hashPassword } from "@/lib/auth/password";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { validatePasswordStrength } from "@/lib/security/password-policy";
-import { deleteR2Object } from "@/lib/storage/r2";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { defaultQuotaBytes, defaultBandwidthQuotaBytes, getAdminSettings } from "@/lib/admin-settings";
-import { publishToAdmins } from "@/lib/realtime/events";
+import { db } from "@/shared/infrastructure/db";
+import { users, files, sessions } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { getClientIp, destroyAllUserSessions } from "@/shared/lib/auth/session";
+import { hashPassword } from "@/shared/lib/auth/password";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { validatePasswordStrength } from "@/shared/lib/security/password-policy";
+import { deleteR2Object } from "@files/infrastructure/storage/r2";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { defaultQuotaBytes, defaultBandwidthQuotaBytes, getAdminSettings } from "@/shared/lib/settings/admin-settings";
+import { publishToAdmins } from "@/shared/infrastructure/realtime/events";
 import {
   MAX_QUOTA_BYTES,
   USERNAME_MAX,
@@ -20,7 +20,7 @@ import {
   adminUserUpdateByIdSchema,
   normalizeAdminEmail,
   sessionRevocationReason,
-} from "@/lib/admin/user-update";
+} from "@admin/domain/services/user-update";
 
 /** A user counts as "online" if a live session was active within this window. */
 const ONLINE_WINDOW_MS = 3 * 60 * 1000;

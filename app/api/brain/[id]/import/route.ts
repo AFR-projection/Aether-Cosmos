@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
-import { requireBrainOwnerContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
-import { logBrainAudit } from "@/lib/brain/audit";
-import { BrainValidationError } from "@/lib/brain/errors";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
+import { requireBrainOwnerContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
+import { logBrainAudit } from "@brain/infrastructure/audit";
+import { BrainValidationError } from "@brain/domain/errors";
 import {
   IMPORT_MAX_TOTAL_BYTES,
   parseBrainArchive,
   previewImport,
   runImport,
-} from "@/lib/brain/import-service";
+} from "@brain/application/commands/import-service";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

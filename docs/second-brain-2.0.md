@@ -29,7 +29,7 @@ consolidation preview at `/api/brain/[id]/consolidate`.
 
 ## Retrieval (`retrieve-v1`)
 
-`lib/brain/retrieval/hybrid.ts`
+`@brain/application/queries/retrieve.ts`
 
 Four retrieval legs run in parallel, each returning up to `perLeg` candidates
 (default 20):
@@ -45,14 +45,14 @@ A leg that abstains contributes zero candidates rather than random noise. The fo
 lists are fused with Reciprocal Rank Fusion (RRF, k=60), deduplicated, and returned
 as one ranked list.
 
-**Tested:** 34 unit tests in `lib/brain/retrieval/hybrid.test.ts`, covering
+**Tested:** 34 unit tests in `@brain/application/queries/retrieve.test.ts`, covering
 abstention, deduplication, multi-leg fusion, and the scoring math.
 
 ---
 
 ## Scoring (`scorer-v1`)
 
-`lib/brain/retrieval/scorer.ts`
+`@brain/domain/retrieval/score.ts`
 
 The pure scorer takes a memory and a retrieval context (query + focus + recency
 window + feedback stats) and returns a score in [0, 1]. No side effects, no database
@@ -75,7 +75,7 @@ This prevents low-quality memories from ranking high on recency alone.
 A **validity multiplier** bounds how much recency can lift a stale memory: memories
 older than 180 days get a factor in [0.5, 1.0] based on age.
 
-**Tested:** 28 unit tests in `lib/brain/retrieval/scorer.test.ts`, covering each
+**Tested:** 28 unit tests in `@brain/domain/retrieval/score.test.ts`, covering each
 signal in isolation, the quality cap, validity decay, and score stability (same
 input → same output).
 
@@ -83,7 +83,7 @@ input → same output).
 
 ## Context engine (`context-v1`)
 
-`lib/brain/context-engine.ts`
+`@brain/application/queries/context-engine.ts`
 
 One call: `buildContext(brainId, query, options)` → packed context object.
 
@@ -103,7 +103,7 @@ Returns: `{ memories: Memory[], explanation: string, tokensUsed: number, stats: 
 
 The MCP tool `brain_context` calls this and formats the result for the agent.
 
-**Tested:** 19 integration tests in `lib/brain/context-engine.test.ts`, covering
+**Tested:** 19 integration tests in `@brain/application/queries/context-engine.test.ts`, covering
 query parsing, multi-leg fusion, redundancy filtering, token packing, and
 explanation generation.
 
@@ -111,7 +111,7 @@ explanation generation.
 
 ## Enrichment (`enrich-v1`)
 
-`lib/brain/enrich/orchestrator.ts` + `lib/brain/enrich/extract.ts`
+`@brain/application/jobs/enrich-service.ts` + `@brain/application/jobs/extract.ts`
 
 **Idempotent** extraction of entity mentions from memory content. On every memory
 write, the enrichment job:
@@ -140,7 +140,7 @@ the review-queue write.
 
 ## Temporal service
 
-`lib/brain/temporal-service.ts`
+`@brain/application/queries/temporal-service.ts`
 
 Two exports:
 
@@ -157,7 +157,7 @@ The MCP tool `brain_timeline` calls the first; the scorer calls the second.
 
 ## Provenance service
 
-`lib/brain/provenance-service.ts`
+`@brain/application/queries/provenance-service.ts`
 
 Tracks derivation: memory A was created from memories B and C. The service writes to
 a `memory_provenance` join table (not yet in the schema — placeholder for now) and
@@ -177,7 +177,7 @@ behavior).
 
 ## Health service
 
-`lib/brain/health-service.ts`
+`@brain/application/queries/health-service.ts`
 
 Computes a health snapshot for a brain:
 
@@ -219,7 +219,7 @@ review-service tests yet.
 
 ## Feedback loop
 
-`lib/brain/feedback-loop.ts`
+`@brain/application/queries/feedback-loop.ts`
 
 Two counters on the `memories` table:
 - `retrieval_count` — how many times this memory appeared in a retrieval result
@@ -242,7 +242,7 @@ logging, and the feedback signal calculation.
 
 ## Token accounting
 
-`lib/brain/tokens.ts`
+`@brain/domain/tokens.ts`
 
 `heuristic-bpe-v1`: `characters / 3.7`, calibrated against `gpt-4` token counts with
 2.1% mean error over 50 test cases. Fast (no tiktoken call), deterministic, and
@@ -257,7 +257,7 @@ version may call `tiktoken` for exact counts when the budget is tight.
 
 ## Graph algorithms
 
-`lib/brain/graph/algorithms.ts`
+`@brain/domain/graph/algorithms.ts`
 
 | Algorithm | What it does | Used by |
 |-----------|--------------|---------|
@@ -277,7 +277,7 @@ graphs, self-loops, and known PageRank results.
 
 ## Consolidation (§30 / §31)
 
-`lib/brain/consolidate/*`
+`src/features/brain/consolidate/*`
 
 Non-destructive merge of duplicate entities and reconciliation of naming conflicts.
 Two modes:
@@ -294,7 +294,7 @@ Duplicate detection: edit distance ≤ 2 (Levenshtein) + same entity type.
 **Status:** the `/api/brain/[id]/consolidate` route works and is covered by tests.
 The MCP tool `brain_consolidate` calls it.
 
-**Tested:** 23 integration tests in `lib/brain/graph/related-service.test.ts` and
+**Tested:** 23 integration tests in `@brain/application/queries/related-service.test.ts` and
 consolidation unit tests (not in a dedicated file yet; coverage is in the
 integration suite).
 
@@ -302,7 +302,7 @@ integration suite).
 
 ## Embeddings
 
-`lib/brain/embedding/*`
+`@brain/infrastructure/providers/*`
 
 Three providers: `NullEmbeddingProvider` (default), `OpenAIEmbeddingProvider`,
 `VoyageAIEmbeddingProvider`. Selected by `BRAIN_EMBEDDING_PROVIDER` env var.
@@ -366,7 +366,7 @@ abstention path in hybrid retrieval).
 
 **BUG-2b** (from the final baseline report):
 
-`lib/brain/import-service.ts` writes memories additively (no conflict clause), so
+`@brain/application/commands/import-service.ts` writes memories additively (no conflict clause), so
 importing the same archive twice creates duplicates. Projects, entities, tags, and
 relationships merge by natural key, but memories and memory links do not.
 

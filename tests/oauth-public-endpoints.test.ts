@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { MAX_REQUEST_BODY_BYTES } from "@/lib/api/read-body";
+import { MAX_REQUEST_BODY_BYTES } from "@/shared/api/read-body";
 
 /**
  * Bounds on the two OAuth endpoints that need no credential at all.
@@ -20,7 +20,7 @@ const store = vi.hoisted(() => ({
   insertThrows: null as Error | null,
 }));
 
-vi.mock("@/lib/db", () => ({
+vi.mock("@/shared/infrastructure/db", () => ({
   db: {
     insert: () => ({
       values: async (values: Record<string, unknown>) => {
@@ -34,10 +34,10 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("@/lib/db/schema", async (importOriginal) => importOriginal());
+vi.mock("@/shared/infrastructure/db/schema", async (importOriginal) => importOriginal());
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return {
     ...actual,
     checkRateLimit: vi.fn(async (key: string) => {
@@ -48,7 +48,7 @@ vi.mock("@/lib/security", async (importOriginal) => {
 });
 
 const { POST: register } = await import("@/app/api/oauth/register/route");
-const { parseOAuthBody } = await import("@/lib/oauth/http");
+const { parseOAuthBody } = await import("@/shared/lib/auth/oauth/http");
 
 function registerRequest(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/api/oauth/register", {

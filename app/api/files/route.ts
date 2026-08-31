@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull, isNotNull, desc, lt, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { getClientIp, requireAuth } from "@/lib/auth/session";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
+import { db } from "@/shared/infrastructure/db";
+import { files } from "@/shared/infrastructure/db/schema";
+import { getClientIp, requireAuth } from "@/shared/lib/auth/session";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
 import {
   getEffectiveUserId,
   resolveFolderAccess,
@@ -13,21 +13,21 @@ import {
   fileDomainOwnerId,
   fileRefusal,
   shareRefusal,
-} from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
+} from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
 import {
   buildR2Key,
   copyR2Object,
   deleteR2Object,
-} from "@/lib/storage/r2";
-import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
-import { tiptapToPlainText } from "@/lib/search/tiptap-text";
-import { cacheGet, cacheSet, cacheDelPattern } from "@/lib/cache/redis";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { recalculateUsedBytes } from "@/lib/db";
-import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
-import { getAdminSettings } from "@/lib/admin-settings";
-import { timestampParam } from "@/lib/api/query-params";
+} from "@files/infrastructure/storage/r2";
+import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { tiptapToPlainText } from "@/shared/lib/search/tiptap-text";
+import { cacheGet, cacheSet, cacheDelPattern } from "@/shared/infrastructure/cache/redis";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
+import { timestampParam } from "@/shared/api/query-params";
 
 const listSchema = z.object({
   folderId: z.string().uuid().nullable().optional(),
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
       .returning();
 
     if (body.content) {
-      const { fileContents } = await import("@/lib/db/schema");
+      const { fileContents } = await import("@/shared/infrastructure/db/schema");
       await db.insert(fileContents).values({
         fileId: file.id,
         contentJson: body.content,

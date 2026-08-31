@@ -4,20 +4,21 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { KeyRound, Loader2, Cloud } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { apiFetch } from "@/lib/api/client";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { apiFetch } from "@/shared/api/client";
 import {
   validatePasswordStrength,
-  getPasswordStrengthLabel,
   getPasswordStrengthColor,
-  getPasswordPolicyRules,
-} from "@/lib/security/password-policy";
-import { cn } from "@/lib/utils";
-import { APP_NAME } from "@/lib/app-version";
+  PASSWORD_MIN_LENGTH,
+} from "@/shared/lib/security/password-policy";
+import { cn } from "@/shared/lib/utils";
+import { APP_NAME } from "@/shared/lib/app-version";
+import { apiErrorMessage, passwordStrengthKey, useT } from "@/shared/lib/i18n";
 
 export default function ChangePasswordPage() {
   const router = useRouter();
+  const t = useT();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -26,14 +27,28 @@ export default function ChangePasswordPage() {
 
   const strength = newPassword ? validatePasswordStrength(newPassword) : null;
 
+  /**
+   * The same three rules `getPasswordPolicyRules()` returns for server responses
+   * and tests, rendered from the dictionary so the screen reads in the viewer's
+   * language. The English values are copied from that helper verbatim.
+   */
+  const passwordRules = [
+    t("auth.passwordRule.minLength", { min: PASSWORD_MIN_LENGTH }),
+    t("auth.passwordRule.mix"),
+    t("auth.passwordRule.notCommon"),
+  ];
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (newPassword !== confirm) {
-      setError("Passwords do not match");
+      setError(t("auth.changePassword.mismatch"));
       return;
     }
     if (strength && !strength.valid) {
+      // The validator's own sentences, which are English and have no codes to key
+      // off. Translating them is tracked in the migration backlog; the rule list
+      // above already states the same requirements in the viewer's language.
       setError(strength.errors.join(", "));
       return;
     }
@@ -48,13 +63,13 @@ export default function ChangePasswordPage() {
         }),
       });
       if (!res.success) {
-        setError(res.error ?? "Failed to update password");
+        setError(apiErrorMessage(res, t, "auth.changePassword.failed"));
         return;
       }
       router.push(res.data?.staySignedIn ? "/dashboard" : "/login");
       router.refresh();
     } catch {
-      setError("Connection failed");
+      setError(t("errors.connectionFailed"));
     } finally {
       setLoading(false);
     }
@@ -71,21 +86,23 @@ export default function ChangePasswordPage() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-accent-ink">
             <KeyRound className="h-7 w-7" />
           </div>
-          <h1 className="text-2xl font-bold">Change your password</h1>
+          <h1 className="text-2xl font-bold">{t("auth.changePassword.title")}</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            An administrator requires you to set a new password before continuing.
+            {t("auth.changePassword.description")}
           </p>
         </div>
 
         <ul className="mb-5 space-y-1 rounded-xl border border-border/40 bg-muted/20 p-3 text-xs text-muted-foreground">
-          {getPasswordPolicyRules().map((rule) => (
+          {passwordRules.map((rule) => (
             <li key={rule}>• {rule}</li>
           ))}
         </ul>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-sm font-medium">Current password (if known)</label>
+            <label className="mb-1.5 block text-sm font-medium">
+              {t("auth.changePassword.current")}
+            </label>
             <Input
               type="password"
               value={currentPassword}
@@ -95,7 +112,9 @@ export default function ChangePasswordPage() {
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium">New password</label>
+            <label className="mb-1.5 block text-sm font-medium">
+              {t("auth.changePassword.new")}
+            </label>
             <Input
               type="password"
               value={newPassword}
@@ -106,12 +125,16 @@ export default function ChangePasswordPage() {
             />
             {strength && (
               <p className={cn("mt-1.5 text-xs font-medium", getPasswordStrengthColor(strength.score))}>
-                Strength: {getPasswordStrengthLabel(strength.score)}
+                {t("common.passwordStrength.summary", {
+                  level: t(passwordStrengthKey(strength.score)),
+                })}
               </p>
             )}
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium">Confirm new password</label>
+            <label className="mb-1.5 block text-sm font-medium">
+              {t("auth.changePassword.confirm")}
+            </label>
             <Input
               type="password"
               value={confirm}
@@ -127,7 +150,7 @@ export default function ChangePasswordPage() {
           )}
 
           <Button type="submit" className="h-11 w-full" disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update password"}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t("auth.changePassword.submit")}
           </Button>
         </form>
 

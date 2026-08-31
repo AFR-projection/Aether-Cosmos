@@ -1,20 +1,20 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, recalculateUsedBytes } from "@/lib/db";
-import { folders, files, type Folder } from "@/lib/db/schema";
-import { requireAuth, getClientIp, type SessionUser } from "@/lib/auth/session";
-import { getEffectiveUserId, resolveFolderAccess, shareRefusal } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf, checkUserApiRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getAdminSettings } from "@/lib/admin-settings";
-import { escapeRegex } from "@/lib/utils";
-import { deleteR2Objects } from "@/lib/storage/r2";
-import { cacheDelPattern } from "@/lib/cache/redis";
+import { db, recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { folders, files, type Folder } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp, type SessionUser } from "@/shared/lib/auth/session";
+import { getEffectiveUserId, resolveFolderAccess, shareRefusal } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
+import { escapeRegex } from "@/shared/lib/utils";
+import { deleteR2Objects } from "@files/infrastructure/storage/r2";
+import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 
 /**
- * Kept in step with `FOLDER_BATCH_SIZE` in `lib/files/folder-tree-upload.ts`: the
+ * Kept in step with `FOLDER_BATCH_SIZE` in `src/features/files/domain/services/folder-tree-upload.ts`: the
  * client chunks a tree of any size into requests of at most this many paths. The
  * old cap of 200 in a single un-chunked request is why uploading a real project
  * silently lost its folders — this repository has 1,193 directories without
@@ -37,7 +37,7 @@ function cacheKey(parentId: string | null, name: string): string {
 /**
  * One query for every folder the owner already has, instead of a SELECT per path
  * segment. A 500-path chunk four levels deep meant ~2,000 sequential round-trips to
- * Neon and a request that timed out long before it finished; the same chunk now
+ * PostgreSQL and a request that timed out long before it finished; the same chunk now
  * costs one read plus an insert per genuinely new folder.
  */
 async function loadFolderIndex(ownerId: string): Promise<Map<string, FolderNode>> {

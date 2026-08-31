@@ -3,11 +3,12 @@
 import { useState, useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { apiFetch } from "@/lib/api/client";
-import { Button } from "@/components/ui/button";
-import { cn, formatBytes } from "@/lib/utils";
-import { getAccentColor, getGradientFallback, getFileTypeIcon } from "@/lib/file-type-utils";
-import type { File as FileRecord, Folder } from "@/lib/db/schema";
+import { apiFetch } from "@/shared/api/client";
+import { Button } from "@/ui/primitives/button";
+import { cn } from "@/shared/lib/utils";
+import { getAccentColor, getGradientFallback, getFileTypeIcon } from "@/shared/lib/file-type-utils";
+import { apiErrorMessage, useFormat, useT, type TranslationKey, type Translator } from "@/shared/lib/i18n";
+import type { File as FileRecord, Folder } from "@/shared/infrastructure/db/schema";
 import {
   Trash2, RotateCcw, Search, Folder as FolderIcon,
   CheckSquare, Square, AlertTriangle,
@@ -19,30 +20,57 @@ type TrashFile = FileRecord & { _type: "file"; _sortTime: number };
 type TrashFolder = Folder & { _type: "folder"; _sortTime: number };
 type TrashItem = TrashFile | TrashFolder;
 
-function getRelativeTime(ms: number): { label: string; color: string } {
+function getRelativeTime(ms: number, t: Translator): { label: string; color: string } {
   const mins = Math.floor(ms / 60000);
-  if (mins < 1) return { label: "Now", color: "text-red-500" };
-  if (mins < 60) return { label: `${mins}m ago`, color: "text-red-400" };
+  if (mins < 1) return { label: t("common.relative.now"), color: "text-red-500" };
+  if (mins < 60)
+    return { label: t("common.relative.minutes", { count: mins }), color: "text-red-400" };
 
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return { label: `${hours}h ago`, color: "text-orange-400" };
+  if (hours < 24)
+    return { label: t("common.relative.hours", { count: hours }), color: "text-orange-400" };
 
   const days = Math.floor(hours / 24);
-  if (days === 1) return { label: "Yesterday", color: "text-amber-400" };
-  if (days < 7) return { label: `${days}d ago`, color: "text-amber-400" };
-  if (days < 30) return { label: `${Math.floor(days / 7)}w ago`, color: "text-yellow-600 dark:text-yellow-400" };
-  return { label: `${Math.floor(days / 30)}mo ago`, color: "text-muted-foreground/60" };
+  if (days === 1) return { label: t("common.relative.yesterday"), color: "text-amber-400" };
+  if (days < 7)
+    return { label: t("common.relative.days", { count: days }), color: "text-amber-400" };
+  if (days < 30)
+    return {
+      label: t("common.relative.weeks", { count: Math.floor(days / 7) }),
+      color: "text-yellow-600 dark:text-yellow-400",
+    };
+  return {
+    label: t("common.relative.months", { count: Math.floor(days / 30) }),
+    color: "text-muted-foreground/60",
+  };
 }
 
-function getTimeGroup(timestamp: number): string {
+/**
+ * A group id, not a label. The same value keys the expanded-groups set, so it
+ * has to stay identical across languages — switching language mid-session must
+ * not collapse every group by making the old keys unrecognisable.
+ */
+type TimeGroup = "today" | "yesterday" | "week" | "month" | "older";
+
+const GROUP_ORDER: TimeGroup[] = ["today", "yesterday", "week", "month", "older"];
+
+const GROUP_LABELS: Record<TimeGroup, TranslationKey> = {
+  today: "recycleBin.group.today",
+  yesterday: "recycleBin.group.yesterday",
+  week: "recycleBin.group.week",
+  month: "recycleBin.group.month",
+  older: "recycleBin.group.older",
+};
+
+function getTimeGroup(timestamp: number): TimeGroup {
   const now = Date.now();
   const diff = now - timestamp;
   const day = 86400000;
-  if (diff < day) return "Today";
-  if (diff < 2 * day) return "Yesterday";
-  if (diff < 7 * day) return "This Week";
-  if (diff < 30 * day) return "This Month";
-  return "Older";
+  if (diff < day) return "today";
+  if (diff < 2 * day) return "yesterday";
+  if (diff < 7 * day) return "week";
+  if (diff < 30 * day) return "month";
+  return "older";
 }
 
 function getFileIcon(mimeType: string) {
@@ -58,6 +86,8 @@ function getFileGradient(mimeType: string): string {
 }
 
 export default function RecycleBinPage() {
+  const t = useT();
+  const { formatBytes, formatNumber } = useFormat();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -65,7 +95,7 @@ export default function RecycleBinPage() {
   const [message, setMessage] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["Today", "Yesterday", "This Week", "This Month", "Older"]));
+  const [expandedGroups, setExpandedGroups] = useState<Set<TimeGroup>>(new Set(GROUP_ORDER));
 
   const { data, isLoading } = useQuery({
     queryKey: ["recycle-bin"],
@@ -96,14 +126,15 @@ export default function RecycleBinPage() {
   }, [items, search]);
 
   const grouped = useMemo(() => {
-    const groups: Record<string, TrashItem[]> = {};
+    const groups = {} as Record<TimeGroup, TrashItem[] | undefined>;
     for (const item of filtered) {
       const grp = getTimeGroup(item._sortTime);
-      if (!groups[grp]) groups[grp] = [];
-      groups[grp].push(item);
+      (groups[grp] ??= []).push(item);
     }
-    const order = ["Today", "Yesterday", "This Week", "This Month", "Older"];
-    return order.filter((g) => groups[g]).map((g) => ({ name: g, items: groups[g] }));
+    return GROUP_ORDER.flatMap((id) => {
+      const rows = groups[id];
+      return rows ? [{ id, items: rows }] : [];
+    });
   }, [filtered]);
 
   const totalSize = useMemo(() => {
@@ -120,11 +151,11 @@ export default function RecycleBinPage() {
     try {
       const endpoint = item._type === "file" ? "/api/files" : "/api/folders";
       const res = await apiFetch(endpoint, { method: "PATCH", body: JSON.stringify({ id: item.id, action: "restore" }) });
-      if (!res.success) { showMsg(res.error ?? "Failed to restore"); return; }
-      showMsg(`"${item.name}" restored`);
+      if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.restoreFailed")); return; }
+      showMsg(t("recycleBin.restored", { name: item.name }));
       setSelected((prev) => { const next = new Set(prev); next.delete(item.id); return next; });
       queryClient.invalidateQueries({ queryKey: ["recycle-bin"] });
-    } catch { showMsg("Connection failed"); }
+    } catch { showMsg(t("recycleBin.connectionFailed")); }
     finally { setActionLoading(null); }
   }
 
@@ -133,11 +164,11 @@ export default function RecycleBinPage() {
     try {
       const endpoint = item._type === "file" ? "/api/files" : "/api/folders";
       const res = await apiFetch(endpoint, { method: "DELETE", body: JSON.stringify({ id: item.id, permanent: true }) });
-      if (!res.success) { showMsg(res.error ?? "Failed to delete"); return; }
-      showMsg(`"${item.name}" permanently deleted`);
+      if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.deleteFailed")); return; }
+      showMsg(t("recycleBin.permanentlyDeleted", { name: item.name }));
       setSelected((prev) => { const next = new Set(prev); next.delete(item.id); return next; });
       queryClient.invalidateQueries({ queryKey: ["recycle-bin"] });
-    } catch { showMsg("Connection failed"); }
+    } catch { showMsg(t("recycleBin.connectionFailed")); }
     finally { setActionLoading(null); }
   }
 
@@ -157,19 +188,19 @@ export default function RecycleBinPage() {
           method: "PATCH",
           body: JSON.stringify({ ids: fileIds, action: "restore" }),
         });
-        if (!res.success) { showMsg(res.error ?? "Failed to restore files"); return; }
+        if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.restoreFilesFailed")); return; }
       }
       if (folderIds.length) {
         const res = await apiFetch("/api/folders/batch", {
           method: "PATCH",
           body: JSON.stringify({ ids: folderIds, action: "restore" }),
         });
-        if (!res.success) { showMsg(res.error ?? "Failed to restore folders"); return; }
+        if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.restoreFoldersFailed")); return; }
       }
-      showMsg(`${selected.size} item${selected.size > 1 ? "s" : ""} restored`);
+      showMsg(t("recycleBin.batchRestored", { count: selected.size }));
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["recycle-bin"] });
-    } catch { showMsg("Batch restore failed"); }
+    } catch { showMsg(t("recycleBin.batchRestoreFailed")); }
     finally { setActionLoading(null); }
   }
 
@@ -189,19 +220,19 @@ export default function RecycleBinPage() {
           method: "DELETE",
           body: JSON.stringify({ ids: fileIds, permanent: true }),
         });
-        if (!res.success) { showMsg(res.error ?? "Failed to delete files"); return; }
+        if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.deleteFilesFailed")); return; }
       }
       if (folderIds.length) {
         const res = await apiFetch("/api/folders/batch", {
           method: "DELETE",
           body: JSON.stringify({ ids: folderIds, permanent: true }),
         });
-        if (!res.success) { showMsg(res.error ?? "Failed to delete folders"); return; }
+        if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.deleteFoldersFailed")); return; }
       }
-      showMsg(`${selected.size} item${selected.size > 1 ? "s" : ""} permanently deleted`);
+      showMsg(t("recycleBin.batchDeleted", { count: selected.size }));
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["recycle-bin"] });
-    } catch { showMsg("Batch delete failed"); }
+    } catch { showMsg(t("recycleBin.batchDeleteFailed")); }
     finally { setActionLoading(null); }
   }
 
@@ -216,7 +247,7 @@ export default function RecycleBinPage() {
           method: "DELETE",
           body: JSON.stringify({ ids: chunk, permanent: true }),
         });
-        if (!res.success) { showMsg(res.error ?? "Failed to empty trash"); return; }
+        if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.emptyFailed")); return; }
       }
       for (let i = 0; i < folderIds.length; i += 500) {
         const chunk = folderIds.slice(i, i + 500);
@@ -224,14 +255,14 @@ export default function RecycleBinPage() {
           method: "DELETE",
           body: JSON.stringify({ ids: chunk, permanent: true }),
         });
-        if (!res.success) { showMsg(res.error ?? "Failed to empty trash"); return; }
+        if (!res.success) { showMsg(apiErrorMessage(res, t, "recycleBin.emptyFailed")); return; }
       }
-      showMsg("Recycle bin emptied");
+      showMsg(t("recycleBin.emptied"));
       setConfirmEmpty(false);
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["recycle-bin"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    } catch { showMsg("Failed to empty trash"); }
+    } catch { showMsg(t("recycleBin.emptyFailed")); }
     finally { setActionLoading(null); }
   }
 
@@ -252,11 +283,11 @@ export default function RecycleBinPage() {
     setSelected(new Set(allIds));
   }
 
-  function toggleGroup(groupName: string) {
+  function toggleGroup(groupId: TimeGroup) {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(groupName)) next.delete(groupName);
-      else next.add(groupName);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
       return next;
     });
   }
@@ -295,7 +326,7 @@ export default function RecycleBinPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search deleted files..."
+            placeholder={t("recycleBin.searchPlaceholder")}
             className="h-10 w-full rounded-xl border border-border/60 bg-surface pl-10 pr-4 text-base sm:text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all"
           />
           {search && (
@@ -303,7 +334,7 @@ export default function RecycleBinPage() {
               onClick={() => setSearch("")}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground transition-colors text-xs"
             >
-              Clear
+              {t("recycleBin.clear")}
             </button>
           )}
         </div>
@@ -319,7 +350,7 @@ export default function RecycleBinPage() {
           ) : (
             <Eraser className="h-3.5 w-3.5" />
           )}
-          Empty Trash
+          {t("recycleBin.emptyTrash")}
         </Button>
       </div>
 
@@ -332,19 +363,21 @@ export default function RecycleBinPage() {
             exit={{ opacity: 0, y: -8 }}
             className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-accent/30 bg-accent/5 px-5 py-3"
           >
-            <span className="text-sm font-medium">{selected.size} selected</span>
+            <span className="text-sm font-medium">{t("common.selectedCount", { count: selected.size })}</span>
             <div className="flex-1 min-w-0" />
             <Button variant="secondary" size="sm" className="gap-1.5" onClick={toggleSelectAll}>
               {allSelected ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
-              <span className="hidden sm:inline">{allSelected ? "Deselect all" : "Select all"}</span>
+              <span className="hidden sm:inline">{allSelected ? t("recycleBin.deselectAll") : t("recycleBin.selectAll")}</span>
             </Button>
             <Button variant="secondary" size="sm" className="gap-1.5" onClick={handleBatchRestore} disabled={actionLoading === "batch-restore"}>
               {actionLoading === "batch-restore" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-              <span>Restore</span>
+              <span>{t("recycleBin.restore")}</span>
             </Button>
             <Button variant="destructive" size="sm" className="gap-1.5" onClick={handleBatchDelete} disabled={actionLoading === "batch-delete"}>
               {actionLoading === "batch-delete" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              <span className="hidden sm:inline">Delete</span><span className="sm:hidden">Del</span>
+              {/* The short form is a separate key: no locale can be trimmed
+                  automatically, so each language supplies its own abbreviation. */}
+              <span className="hidden sm:inline">{t("common.delete")}</span><span className="sm:hidden">{t("recycleBin.deleteShort")}</span>
             </Button>
           </motion.div>
         )}
@@ -360,17 +393,17 @@ export default function RecycleBinPage() {
           <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/5 border border-accent/10">
             <Trash2 className="h-10 w-10 text-accent-ink/40" />
           </div>
-          <p className="text-lg font-semibold">Recycle bin is empty</p>
-          <p className="mt-1 text-sm text-muted-foreground/70">Deleted files and folders show here</p>
+          <p className="text-lg font-semibold">{t("recycleBin.empty")}</p>
+          <p className="mt-1 text-sm text-muted-foreground/70">{t("recycleBin.emptyHint")}</p>
         </motion.div>
       ) : (
         <div className="space-y-6">
           {grouped.map((group) => {
-            const isExpanded = expandedGroups.has(group.name);
+            const isExpanded = expandedGroups.has(group.id);
             return (
-              <div key={group.name}>
+              <div key={group.id}>
                 <button
-                  onClick={() => toggleGroup(group.name)}
+                  onClick={() => toggleGroup(group.id)}
                   className="flex items-center gap-2 mb-3 group/heading cursor-pointer"
                 >
                   {isExpanded ? (
@@ -379,9 +412,9 @@ export default function RecycleBinPage() {
                     <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover/heading:text-foreground transition-colors" />
                   )}
                   <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 group-hover/heading:text-foreground transition-colors">
-                    {group.name}
+                    {t(GROUP_LABELS[group.id])}
                   </h2>
-                  <span className="text-[11px] text-muted-foreground/40 font-mono">({group.items.length})</span>
+                  <span className="text-[11px] text-muted-foreground/40 font-mono">({formatNumber(group.items.length)})</span>
                   <div className="flex-1 border-b border-border/20" />
                 </button>
 
@@ -395,7 +428,7 @@ export default function RecycleBinPage() {
                     >
                       {group.items.map((item, idx) => {
                         const isSelected = selected.has(item.id);
-                        const rel = getRelativeTime(Date.now() - item._sortTime);
+                        const rel = getRelativeTime(Date.now() - item._sortTime, t);
                         const Icon = item._type === "file" ? getFileIcon(item.mimeType) : FolderIcon;
 
                         return (
@@ -442,7 +475,7 @@ export default function RecycleBinPage() {
                               <div className="flex items-center gap-2">
                                 <p className="text-sm font-semibold truncate">{item.name}</p>
                                 {item._type === "file" && item.isNote && (
-                                  <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[9px] font-medium text-accent-ink">Note</span>
+                                  <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[9px] font-medium text-accent-ink">{t("common.note")}</span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground/60">
@@ -452,7 +485,7 @@ export default function RecycleBinPage() {
                                 {item._type === "folder" && (
                                   <span className="inline-flex items-center gap-1">
                                     <FolderIcon className="h-3 w-3" />
-                                    Folder
+                                    {t("common.folder")}
                                   </span>
                                 )}
                                 {item._type === "folder" && item.materializedPath && (
@@ -482,7 +515,7 @@ export default function RecycleBinPage() {
                                 ) : (
                                   <RotateCcw className="h-3.5 w-3.5" />
                                 )}
-                                Restore
+                                {t("recycleBin.restore")}
                               </Button>
                               <Button
                                 variant="ghost"
@@ -492,7 +525,7 @@ export default function RecycleBinPage() {
                                 onClick={() => setConfirmDelete(item.id)}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
-                                Delete
+                                {t("common.delete")}
                               </Button>
                             </div>
                           </motion.div>
@@ -511,9 +544,9 @@ export default function RecycleBinPage() {
       <AnimatePresence>
         {confirmDelete && (
           <ConfirmModal
-            title="Delete permanently?"
-            description="This action cannot be undone. The file will be permanently removed from storage."
-            confirmLabel="Delete Forever"
+            title={t("recycleBin.confirmDeleteTitle")}
+            description={t("recycleBin.confirmDeleteBody")}
+            confirmLabel={t("recycleBin.confirmDeleteAction")}
             icon={AlertTriangle}
             danger
             loading={actionLoading === confirmDelete}
@@ -531,9 +564,9 @@ export default function RecycleBinPage() {
       <AnimatePresence>
         {confirmEmpty && (
           <ConfirmModal
-            title="Empty Recycle Bin?"
-            description={`${items.length} item${items.length !== 1 ? "s" : ""} will be permanently deleted. This action cannot be undone.`}
-            confirmLabel="Empty Forever"
+            title={t("recycleBin.confirmEmptyTitle")}
+            description={t("recycleBin.confirmEmptyBody", { count: items.length })}
+            confirmLabel={t("recycleBin.confirmEmptyAction")}
             icon={AlertTriangle}
             danger
             loading={actionLoading === "empty"}
@@ -558,6 +591,9 @@ function ConfirmModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  // The caller passes already-translated copy; only this component's own
+  // Cancel affordance is translated here.
+  const t = useT();
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -586,7 +622,7 @@ function ConfirmModal({
           </div>
         </div>
         <div className="flex justify-end gap-2 mt-6">
-          <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button variant="secondary" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
           <Button
             variant={danger ? "destructive" : "default"}
             size="sm"
@@ -603,6 +639,8 @@ function ConfirmModal({
 }
 
 function PageHeader({ itemCount, totalSize }: { itemCount: number; totalSize: number }) {
+  const t = useT();
+  const { formatBytes } = useFormat();
   return (
     <motion.div
       initial={{ opacity: 0, y: -8 }}
@@ -610,12 +648,12 @@ function PageHeader({ itemCount, totalSize }: { itemCount: number; totalSize: nu
       className="mb-6"
     >
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Recycle Bin</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{t("recycleBin.title")}</h1>
         {itemCount > 0 && (
           <div className="flex items-center gap-3 text-xs text-muted-foreground/60">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/30 px-3 py-1.5">
               <Trash2 className="h-3 w-3" />
-              {itemCount} item{itemCount !== 1 ? "s" : ""}
+              {t("common.itemCount", { count: itemCount })}
             </span>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/30 px-3 py-1.5 font-mono">
               {formatBytes(totalSize)}
@@ -623,7 +661,7 @@ function PageHeader({ itemCount, totalSize }: { itemCount: number; totalSize: nu
           </div>
         )}
       </div>
-      <p className="mt-1 text-sm text-muted-foreground/70">Restore deleted files or permanently remove them</p>
+      <p className="mt-1 text-sm text-muted-foreground/70">{t("recycleBin.subtitle")}</p>
     </motion.div>
   );
 }

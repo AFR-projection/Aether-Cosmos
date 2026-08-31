@@ -32,11 +32,11 @@ For local development, see [Getting Started](getting-started.md).
 
 | Service | Used for | Where |
 |---------|----------|-------|
-| Neon PostgreSQL | All metadata and Second Brain data | https://neon.tech |
+| PostgreSQL | All metadata and Second Brain data | Any managed PostgreSQL provider |
 | Cloudflare R2 | File objects | https://dash.cloudflare.com → R2 |
 | A domain | HTTPS certificate and app URL | Your registrar's DNS panel |
 
-The database and Redis are **external to the VPS**. The VPS runs the app, the
+The database is **external to the VPS**. The VPS runs the app, the
 worker, Redis, and Nginx; it never becomes the system of record.
 
 ### One thing to do first: point the domain at the VPS
@@ -218,7 +218,7 @@ Four things. Have them open in a browser tab before you start.
 (`https://` + that hostname), and `CERTBOT_EMAIL`, an address Let's Encrypt can warn
 about expiry.
 
-**2. `DATABASE_URL`** — copy it from the Neon dashboard exactly as given, on one
+**2. `DATABASE_URL`** — copy it from your PostgreSQL provider dashboard exactly as given, on one
 line, ending in `sslmode=require`.
 
 **3. R2 credentials** — account ID, access key ID, secret access key, bucket name,
@@ -269,7 +269,7 @@ NODE_ENV=production
 DEPLOY_DOMAIN=aether.example.com
 CERTBOT_EMAIL=admin@aether.example.com
 
-DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
+DATABASE_URL=postgresql://user:pass@host:port/database?sslmode=require
 
 R2_ACCOUNT_ID=...
 R2_ACCESS_KEY_ID=...
@@ -288,7 +288,7 @@ REDIS_URL=redis://redis:6379
 REDIS_DISABLED=false
 ```
 
-> **`DATABASE_URL` must be one unbroken line** exactly as Neon gives it. A value
+> **`DATABASE_URL` must be one unbroken line** exactly as your provider gives it. A value
 > wrapped by the editor into `...?sslmode>` is the single most common cause of a
 > failed deploy.
 
@@ -348,10 +348,10 @@ Uploads fail with a CORS error until this is done.
 wrangler r2 bucket cors set YOUR-BUCKET-NAME --file docker/r2-cors.json
 ```
 
-### 2. Allowlist the VPS in Neon (if required)
+### 2. Configure database IP allowlist (if required)
 
-Neon projects with IP restrictions enabled reject the VPS until it is listed:
-Neon Dashboard → Project → Settings → **IP Allow** → add the VPS public IP. The
+Some PostgreSQL providers with IP restrictions enabled reject the VPS until it is allowlisted.
+Check your provider's dashboard → Project → Settings → **IP Allow** → add the VPS public IP. The
 installer prints the IP it connected from when the check fails.
 
 ### 3. Add an email sender (OTP delivery)
@@ -385,25 +385,25 @@ Automatic, on every `aether update`: `.env` and the generated Nginx config, unde
 Worth doing yourself:
 
 - keep an offline copy of `.env` — it holds every secret, and nothing else does;
-- use Neon's built-in backups or branches for the database;
+- use your PostgreSQL provider's built-in backups for the database;
 - R2 objects are already durable on Cloudflare's side.
 
 ### Why schema updates need no manual step
 
-- PostgreSQL (Neon) and Redis are **external services**. The VPS only connects to
+- PostgreSQL and Redis are **external services**. The VPS only connects to
   them, and it connects to the same database used during development.
 - `aether update` syncs the schema with **`npm run db:push`**, not
-  `drizzle-kit migrate`. `db:push` compares `lib/db/schema.ts` against the live
+  `drizzle-kit migrate`. `db:push` compares `src/shared/infrastructure/db/schema.ts` against the live
   database and applies only the difference; when they already match it is a no-op.
-- Schema changes already applied to Neon during development (new columns, indexes,
+- Schema changes already applied during development (new columns, indexes,
   full-text search columns) are therefore live the moment the VPS connects. A
   redeploy only rebuilds the application code.
 
 > **Renaming a column is the exception.** `db:push` handles added columns and
 > indexes safely, but a rename it has not seen yet looks like "drop the old column,
-> create a new one", which destroys the data in it. Apply renames to Neon **before**
+> create a new one", which destroys the data in it. Apply renames to your database **before**
 > redeploying, so `db:push` sees a schema that already matches. Keep the order
-> "apply to Neon first, then redeploy" and data is never at risk.
+> "apply to database first, then redeploy" and data is never at risk.
 
 ---
 
@@ -438,8 +438,8 @@ The installer falls back to `sudo docker` when it has to.
 
 ### Database connection fails
 
-- Re-copy `DATABASE_URL` from the Neon dashboard — it must be **one unbroken line**.
-- Neon → Project Settings → **IP Allow** → add the VPS IP (printed by the installer
+- Re-copy `DATABASE_URL` from your PostgreSQL provider dashboard — it must be **one unbroken line**.
+- Check your provider's IP allowlist settings → add the VPS IP (printed by the installer
   when the connection is refused), or disable the restriction temporarily.
 - Verify with `aether doctor`.
 
@@ -525,7 +525,7 @@ npm run reset-master-password
 Internet → Nginx (:443, TLS) → Next.js app (:3000)
                              ↘ Redis → Worker (thumbnails, cleanup, webhooks)
 
-External: Neon PostgreSQL · Cloudflare R2 · Gmail SMTP (senders you add)
+External: PostgreSQL · Cloudflare R2 · Gmail SMTP (senders you add)
 Volumes:  redis_data (the only one)
 Certs:    Let's Encrypt, renewed automatically
 ```

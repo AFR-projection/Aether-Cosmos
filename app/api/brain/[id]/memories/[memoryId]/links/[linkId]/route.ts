@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { validateCsrf } from "@/lib/security";
-import { requireBrainContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
-import { logBrainAudit } from "@/lib/brain/audit";
-import { unlinkMemory } from "@/lib/brain/link-service";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf } from "@/shared/lib/security";
+import { requireBrainContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
+import { logBrainAudit } from "@brain/infrastructure/audit";
+import { unlinkMemory } from "@brain/application/commands/link-service";
 
 type RouteParams = { params: Promise<{ id: string; memoryId: string; linkId: string }> };
 

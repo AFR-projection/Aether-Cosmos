@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { requireBrainContext } from "@/lib/brain/access";
-import { requireUuid } from "@/lib/brain/http";
-import { listBrainTags } from "@/lib/brain/memory-service";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { requireBrainContext } from "@brain/infrastructure/access";
+import { requireUuid } from "@brain/infrastructure/http";
+import { listBrainTags } from "@brain/application/commands/memory-service";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

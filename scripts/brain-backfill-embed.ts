@@ -2,14 +2,14 @@ import "./load-env";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "../lib/db/schema";
-import { brains } from "../lib/db/schema";
+import * as schema from "@/shared/infrastructure/db/schema";
+import { brains } from "@/shared/infrastructure/db/schema";
 import {
   runEmbedBrainJob,
   runEmbedMemoryJob,
   type EmbedMemoryReport,
-} from "../lib/brain/embedding/embed-jobs";
-import { getEmbeddingProvider } from "../lib/brain/embedding/resolve";
+} from "@brain/infrastructure/providers/embed-jobs";
+import { getEmbeddingProvider } from "@brain/infrastructure/providers/resolve";
 
 /**
  * One-time operational backfill for P9 semantic embeddings.

@@ -25,7 +25,7 @@ const store = vi.hoisted(() => ({
   rateKeys: [] as string[],
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   const select = () => {
     let isUsers = true;
     const api = {
@@ -60,8 +60,8 @@ vi.mock("@/lib/db", () => {
 });
 
 // Partial: `@/lib/security` also exports the header set every response uses.
-vi.mock("@/lib/security", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/security")>()),
+vi.mock("@/shared/lib/security", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/shared/lib/security")>()),
   validateCsrf: async () => true,
   checkRateLimit: async (key: string) => {
     store.rateKeys.push(key);
@@ -69,7 +69,7 @@ vi.mock("@/lib/security", async (importOriginal) => ({
   },
 }));
 
-vi.mock("@/lib/email/email-service", () => ({
+vi.mock("@/shared/infrastructure/email/email-service", () => ({
   verifyOTP: async () => store.otpOk,
   sendOTP: async (email: string) => {
     store.sent.push(email);
@@ -78,7 +78,7 @@ vi.mock("@/lib/email/email-service", () => ({
   normalizeEmail: (email: string) => email.trim().toLowerCase(),
 }));
 
-vi.mock("@/lib/auth/session", () => ({
+vi.mock("@/shared/lib/auth/session", () => ({
   createSession: async (userId: string) => {
     store.sessions.push(userId);
     return "session-token";
@@ -88,8 +88,8 @@ vi.mock("@/lib/auth/session", () => ({
   AuthError: class AuthError extends Error {},
 }));
 
-vi.mock("@/lib/auth/audit", () => ({ logActivity: async () => undefined }));
-vi.mock("@/lib/realtime/events", () => ({ publishToAdmins: async () => undefined }));
+vi.mock("@/shared/lib/auth/audit", () => ({ logActivity: async () => undefined }));
+vi.mock("@/shared/infrastructure/realtime/events", () => ({ publishToAdmins: async () => undefined }));
 
 const { POST: verifyOtpRoute } = await import("@/app/api/auth/verify-otp/route");
 const { POST: resendOtpRoute } = await import("@/app/api/auth/resend-otp/route");

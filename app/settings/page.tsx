@@ -15,23 +15,24 @@ import {
   Sun,
   UserRound,
 } from "lucide-react";
-import { useTheme } from "@/components/theme-provider";
-import { apiFetch } from "@/lib/api/client";
-import { APP_NAME, APP_VERSION_LABEL } from "@/lib/app-version";
-import { formatBytes } from "@/lib/utils";
+import { useTheme } from "@/ui/providers/theme-provider";
+import { apiFetch } from "@/shared/api/client";
+import { APP_NAME, APP_VERSION_LABEL } from "@/shared/lib/app-version";
+import { useFormat, useT, type TranslationKey, type Translator } from "@/shared/lib/i18n";
+import { LanguageSelector } from "@/ui/i18n/language-selector";
 import {
   PasswordSection,
   StepCodeSection,
   TwoFactorSection,
-} from "@/components/account/account-security-sections";
-import { SessionsSection } from "@/components/settings/sessions-section";
-import { rememberCurrentSessionId } from "@/hooks/use-realtime-events";
+} from "@auth/presentation/components/account-security-sections";
+import { SessionsSection } from "@auth/presentation/components/sessions-section";
+import { rememberCurrentSessionId } from "@/ui/hooks/use-realtime-events";
 import {
   setLitePreference,
   useLiteMode,
   useLitePreference,
   type LitePreference,
-} from "@/lib/system/lite-mode";
+} from "@/shared/lib/system/lite-mode";
 
 interface SessionUser {
   id: string;
@@ -56,13 +57,23 @@ type SectionId =
   | "devices"
   | "about";
 
-const GROUPS = ["Security", "Account", "System"] as const;
+/** `as const satisfies` keeps `id` a literal union while forcing every
+    `labelKey` to be a key English actually has. */
+const GROUPS = [
+  { id: "security", labelKey: "settings.group.security" },
+  { id: "account", labelKey: "settings.group.account" },
+  { id: "system", labelKey: "settings.group.system" },
+] as const satisfies readonly { id: string; labelKey: TranslationKey }[];
+
+type GroupId = (typeof GROUPS)[number]["id"];
 
 type Section = {
   id: SectionId;
-  group: (typeof GROUPS)[number];
-  title: string;
-  description: string;
+  group: GroupId;
+  titleKey: TranslationKey;
+  /** About shows a product name and a build version, which are not prose. */
+  descriptionKey?: TranslationKey;
+  descriptionText?: string;
   icon: typeof KeyRound;
 };
 
@@ -71,16 +82,23 @@ type Section = {
  * the panel is looked up by id and mounted on its own. The old page built an
  * array of seven live elements every render, so every section (including the
  * two that fetch) was mounted even while collapsed.
+ *
+ * The table holds translation keys rather than text so it can stay at module
+ * scope: `t` is only available inside a component.
  */
 const SECTIONS: readonly Section[] = [
-  { id: "password", group: "Security", title: "Password", description: "Change the password you sign in with.", icon: KeyRound },
-  { id: "step-code", group: "Security", title: "2-Step Code", description: "A numeric code asked for after your password.", icon: Hash },
-  { id: "2fa", group: "Security", title: "Two-factor app", description: "Authenticator codes and one-time recovery codes.", icon: Shield },
-  { id: "profile", group: "Account", title: "Profile", description: "Account details and how much storage you have used.", icon: UserRound },
-  { id: "appearance", group: "Account", title: "Appearance", description: "Theme, and how much visual effect to load.", icon: Palette },
-  { id: "devices", group: "Account", title: "Devices", description: "Where this account is signed in, and how to sign it out.", icon: Laptop },
-  { id: "about", group: "System", title: "About", description: `${APP_NAME} ${APP_VERSION_LABEL}`, icon: Info },
+  { id: "password", group: "security", titleKey: "settings.section.password.title", descriptionKey: "settings.section.password.description", icon: KeyRound },
+  { id: "step-code", group: "security", titleKey: "settings.section.stepCode.title", descriptionKey: "settings.section.stepCode.description", icon: Hash },
+  { id: "2fa", group: "security", titleKey: "settings.section.twoFactor.title", descriptionKey: "settings.section.twoFactor.description", icon: Shield },
+  { id: "profile", group: "account", titleKey: "settings.section.profile.title", descriptionKey: "settings.section.profile.description", icon: UserRound },
+  { id: "appearance", group: "account", titleKey: "settings.section.appearance.title", descriptionKey: "settings.section.appearance.description", icon: Palette },
+  { id: "devices", group: "account", titleKey: "settings.section.devices.title", descriptionKey: "settings.section.devices.description", icon: Laptop },
+  { id: "about", group: "system", titleKey: "settings.section.about.title", descriptionText: `${APP_NAME} ${APP_VERSION_LABEL}`, icon: Info },
 ];
+
+function sectionDescription(section: Section, t: Translator): string {
+  return section.descriptionKey ? t(section.descriptionKey) : (section.descriptionText ?? "");
+}
 
 export default function SettingsPage() {
   const { data: user, isLoading } = useQuery({
@@ -100,6 +118,7 @@ export default function SettingsPage() {
 }
 
 function SettingsContent({ user }: { user: SessionUser }) {
+  const t = useT();
   const [active, setActive] = useState<SectionId>("password");
   const current = SECTIONS.find((section) => section.id === active) ?? SECTIONS[0];
   const CurrentIcon = current.icon;
@@ -111,23 +130,20 @@ function SettingsContent({ user }: { user: SessionUser }) {
           <div className="set-header__copy">
             <p className="set-kicker">
               <span aria-hidden="true" />
-              Account settings
+              {t("settings.kicker")}
             </p>
-            <h1>Settings</h1>
-            <p>
-              Security, appearance and the devices signed in to this account.
-              Choose a section to open it — the others stay out of the way.
-            </p>
+            <h1>{t("settings.title")}</h1>
+            <p>{t("settings.intro")}</p>
           </div>
           <IdentityChip user={user} />
         </header>
 
         <div className="set-body">
-          <nav className="set-nav" aria-label="Settings sections">
+          <nav className="set-nav" aria-label={t("settings.navLabel")}>
             {GROUPS.map((group) => (
-              <div key={group} className="set-nav__group">
-                <p className="set-nav__label">{group}</p>
-                {SECTIONS.filter((section) => section.group === group).map((section) => (
+              <div key={group.id} className="set-nav__group">
+                <p className="set-nav__label">{t(group.labelKey)}</p>
+                {SECTIONS.filter((section) => section.group === group.id).map((section) => (
                   <button
                     key={section.id}
                     type="button"
@@ -138,10 +154,10 @@ function SettingsContent({ user }: { user: SessionUser }) {
                     onClick={() => setActive(section.id)}
                   >
                     <section.icon aria-hidden="true" />
-                    <span className="set-nav__text">{section.title}</span>
+                    <span className="set-nav__text">{t(section.titleKey)}</span>
                     {section.id === "2fa" && (
                       <span className="set-flag" data-tone={user.totpEnabled ? "on" : "off"}>
-                        {user.totpEnabled ? "On" : "Off"}
+                        {user.totpEnabled ? t("common.on") : t("common.off")}
                       </span>
                     )}
                   </button>
@@ -156,8 +172,8 @@ function SettingsContent({ user }: { user: SessionUser }) {
                 <CurrentIcon />
               </span>
               <div className="min-w-0">
-                <h2 id="settings-panel-title" className="set-panel__title">{current.title}</h2>
-                <p className="set-panel__sub">{current.description}</p>
+                <h2 id="settings-panel-title" className="set-panel__title">{t(current.titleKey)}</h2>
+                <p className="set-panel__sub">{sectionDescription(current, t)}</p>
               </div>
             </div>
             <div className="set-panel__body">
@@ -183,6 +199,7 @@ function SettingsContent({ user }: { user: SessionUser }) {
 }
 
 function IdentityChip({ user }: { user: SessionUser }) {
+  const t = useT();
   return (
     <div className="set-id">
       <span className="set-id__mark" aria-hidden="true">
@@ -192,7 +209,7 @@ function IdentityChip({ user }: { user: SessionUser }) {
         <p className="set-id__name">{user.username}</p>
         <p className="set-id__meta">
           <span className="set-id__role">{user.role}</span>
-          <span className="truncate">{user.email ?? "No email on file"}</span>
+          <span className="truncate">{user.email ?? t("settings.noEmail")}</span>
         </p>
       </div>
     </div>
@@ -221,6 +238,8 @@ function SectionBody({ id, user }: { id: SectionId; user: SessionUser }) {
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
 function ProfileSection({ user }: { user: SessionUser }) {
+  const t = useT();
+  const { formatBytes } = useFormat();
   const used = user.usedBytes ?? 0;
   const quota = user.quotaBytes ?? 0;
   const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0;
@@ -231,26 +250,26 @@ function ProfileSection({ user }: { user: SessionUser }) {
       <div className="set-group">
         <dl className="set-facts">
           <div className="set-fact">
-            <dt>Username</dt>
+            <dt>{t("settings.profile.username")}</dt>
             <dd>{user.username}</dd>
           </div>
           <div className="set-fact">
-            <dt>Email</dt>
-            <dd>{user.email ?? "Not set"}</dd>
+            <dt>{t("settings.profile.email")}</dt>
+            <dd>{user.email ?? t("settings.notSet")}</dd>
           </div>
           <div className="set-fact">
-            <dt>Role</dt>
+            <dt>{t("settings.profile.role")}</dt>
             <dd className="capitalize">{user.role}</dd>
           </div>
         </dl>
       </div>
       <div className="set-group">
-        <p className="set-group__title">Storage</p>
+        <p className="set-group__title">{t("settings.profile.storage")}</p>
         <div className="set-meter">
           <div
             className="set-meter__track"
             role="progressbar"
-            aria-label="Storage used"
+            aria-label={t("settings.profile.storageUsed")}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(percent)}
@@ -258,8 +277,12 @@ function ProfileSection({ user }: { user: SessionUser }) {
             <div className="set-meter__fill" data-tone={tone} style={{ width: `${percent}%` }} />
           </div>
           <p className="set-meter__row">
-            <span>{formatBytes(used)} used</span>
-            <span>{quota > 0 ? `${formatBytes(quota)} total` : "No quota set"}</span>
+            <span>{t("settings.profile.used", { size: formatBytes(used) })}</span>
+            <span>
+              {quota > 0
+                ? t("settings.profile.total", { size: formatBytes(quota) })
+                : t("settings.profile.noQuota")}
+            </span>
           </p>
         </div>
       </div>
@@ -270,22 +293,23 @@ function ProfileSection({ user }: { user: SessionUser }) {
 // ─── Appearance ───────────────────────────────────────────────────────────────
 
 const THEME_OPTIONS = [
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
-  { value: "system", label: "System", icon: Monitor },
-] as const;
+  { value: "light", labelKey: "settings.appearance.light", icon: Sun },
+  { value: "dark", labelKey: "settings.appearance.dark", icon: Moon },
+  { value: "system", labelKey: "settings.appearance.system", icon: Monitor },
+] as const satisfies readonly { value: string; labelKey: TranslationKey; icon: typeof Sun }[];
 
 function AppearanceSection() {
+  const t = useT();
   const { theme, setTheme } = useTheme();
 
   return (
     <>
       <div className="set-group">
-        <p className="set-group__title" id="set-theme-label">Theme</p>
+        <p className="set-group__title" id="set-theme-label">{t("settings.appearance.theme")}</p>
         {/* Buttons with aria-pressed rather than role="radio": a real radiogroup
             owes the user arrow-key traversal, and these stay plain tab stops. */}
         <div className="set-choice" role="group" aria-labelledby="set-theme-label">
-          {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+          {THEME_OPTIONS.map(({ value, labelKey, icon: Icon }) => (
             <button
               key={value}
               type="button"
@@ -295,21 +319,26 @@ function AppearanceSection() {
               onClick={() => setTheme(value)}
             >
               <Icon aria-hidden="true" />
-              <span className="set-choice__label">{label}</span>
+              <span className="set-choice__label">{t(labelKey)}</span>
             </button>
           ))}
         </div>
       </div>
+      <LanguageSelector />
       <LiteModeSetting />
     </>
   );
 }
 
-const LITE_OPTIONS: readonly { value: LitePreference; label: string; hint: string }[] = [
-  { value: "auto", label: "Auto", hint: "Follow device & network" },
-  { value: "on", label: "On", hint: "Always lightweight" },
-  { value: "off", label: "Off", hint: "Always full effects" },
-];
+const LITE_OPTIONS = [
+  { value: "auto", labelKey: "settings.lite.auto", hintKey: "settings.lite.autoHint" },
+  { value: "on", labelKey: "common.on", hintKey: "settings.lite.onHint" },
+  { value: "off", labelKey: "common.off", hintKey: "settings.lite.offHint" },
+] as const satisfies readonly {
+  value: LitePreference;
+  labelKey: TranslationKey;
+  hintKey: TranslationKey;
+}[];
 
 /**
  * Auto is the right default for almost everyone — the override exists for the
@@ -318,18 +347,16 @@ const LITE_OPTIONS: readonly { value: LitePreference; label: string; hint: strin
  * fine (or is plugged into a fast network) and wants the full chrome back.
  */
 function LiteModeSetting() {
+  const t = useT();
   const preference = useLitePreference();
   const active = useLiteMode();
 
   return (
     <div className="set-group">
-      <p className="set-group__title" id="set-lite-label">Lite mode</p>
-      <p className="set-group__note">
-        Drops heavy visual effects and loads smaller thumbnails to keep things
-        smooth on slower devices and connections.
-      </p>
+      <p className="set-group__title" id="set-lite-label">{t("settings.lite.title")}</p>
+      <p className="set-group__note">{t("settings.lite.note")}</p>
       <div className="set-choice" role="group" aria-labelledby="set-lite-label">
-        {LITE_OPTIONS.map(({ value, label, hint }) => (
+        {LITE_OPTIONS.map(({ value, labelKey, hintKey }) => (
           <button
             key={value}
             type="button"
@@ -338,13 +365,15 @@ function LiteModeSetting() {
             aria-pressed={preference === value}
             onClick={() => setLitePreference(value)}
           >
-            <span className="set-choice__label">{label}</span>
-            <span className="set-choice__hint">{hint}</span>
+            <span className="set-choice__label">{t(labelKey)}</span>
+            <span className="set-choice__hint">{t(hintKey)}</span>
           </button>
         ))}
       </div>
       {preference === "auto" && (
-        <p className="set-group__note">Currently {active ? "on" : "off"} for this device.</p>
+        <p className="set-group__note">
+          {active ? t("settings.lite.currentlyOn") : t("settings.lite.currentlyOff")}
+        </p>
       )}
     </div>
   );
@@ -352,20 +381,24 @@ function LiteModeSetting() {
 
 // ─── About ────────────────────────────────────────────────────────────────────
 
+/** The release codename is a proper noun, so it is not a translation key. */
+const RELEASE_NAME = "Second Brain 2.0";
+
 /**
  * Read-only. `APP_VERSION` is pinned to `package.json` by a test, so what this
  * row shows is the version that was actually built and deployed.
  */
 function AboutSection() {
+  const t = useT();
   return (
     <dl className="set-facts">
       <div className="set-fact">
-        <dt>App version</dt>
+        <dt>{t("settings.about.appVersion")}</dt>
         <dd>{APP_VERSION_LABEL}</dd>
       </div>
       <div className="set-fact">
-        <dt>Release</dt>
-        <dd>Second Brain 2.0</dd>
+        <dt>{t("settings.about.release")}</dt>
+        <dd>{RELEASE_NAME}</dd>
       </div>
     </dl>
   );

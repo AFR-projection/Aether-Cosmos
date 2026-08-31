@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { getAccessibleFile, getEffectiveUserId, fileRefusal } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { restoreFileVersion } from "@/lib/files/versions";
-import { enqueueJob } from "@/lib/queue";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { cacheDelPattern } from "@/lib/cache/redis";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { getAccessibleFile, getEffectiveUserId, fileRefusal } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { restoreFileVersion } from "@files/application/commands/versions";
+import { enqueueJob } from "@/shared/infrastructure/queue";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 
 const schema = z.object({
   version: z.number().int().positive(),

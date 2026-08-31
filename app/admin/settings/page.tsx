@@ -29,8 +29,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { AdminSettings } from "@/app/api/admin/settings/route";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
 import {
   AdminEmpty,
   AdminHeader,
@@ -42,9 +42,10 @@ import {
   SearchField,
   Skeleton,
   Switch,
-} from "@/components/admin/admin-ui";
-import { apiFetch } from "@/lib/api/client";
-import { cn } from "@/lib/utils";
+} from "@admin/presentation/components/admin-ui";
+import { apiFetch } from "@/shared/api/client";
+import { cn } from "@/shared/lib/utils";
+import { useT, type Translator } from "@/shared/lib/i18n";
 
 /* ── Section definition ──────────────────────────────────────────────────────
    Sections are told apart by icon and title, not by colour: the previous version
@@ -214,7 +215,90 @@ const SETTING_SECTIONS: Section[] = [
   },
 ];
 
-const sections = SETTING_SECTIONS;
+const SECTION_KEYS = {
+  general: ["sectionGeneral", "sectionGeneralDesc"],
+  storage: ["sectionStorage", "sectionStorageDesc"],
+  security: ["sectionSecurity", "sectionSecurityDesc"],
+  limits: ["sectionLimits", "sectionLimitsDesc"],
+  sharing: ["sectionSharing", "sectionSharingDesc"],
+  files: ["sectionFiles", "sectionFilesDesc"],
+  retention: ["sectionRetention", "sectionRetentionDesc"],
+  email: ["sectionEmail", "sectionEmailDesc"],
+} as const;
+
+const FIELD_KEYS: Partial<Record<keyof AdminSettings, [string, string]>> = {
+  registrationEnabled: ["registrationLabel", "registrationDesc"],
+  allowedEmailDomains: ["allowedDomainsLabel", "allowedDomainsDesc"],
+  maintenanceMode: ["maintenanceModeLabel", "maintenanceModeDesc"],
+  maintenanceMessage: ["maintenanceMessageLabel", "maintenanceMessageDesc"],
+  defaultQuotaGB: ["defaultQuotaLabel", "defaultQuotaDesc"],
+  maxUploadSizeMB: ["maxUploadLabel", "maxUploadDesc"],
+  storageWarningThreshold: ["warningThresholdLabel", "warningThresholdDesc"],
+  defaultBandwidthQuotaGB: ["defaultBandwidthLabel", "defaultBandwidthDesc"],
+  uploadUrlExpiryMinutes: ["uploadUrlLifetimeLabel", "uploadUrlLifetimeDesc"],
+  downloadUrlExpirySeconds: ["downloadUrlLifetimeLabel", "downloadUrlLifetimeDesc"],
+  sessionDurationHours: ["sessionDurationLabel", "sessionDurationDesc"],
+  sessionIdleTimeoutMinutes: ["idleTimeoutLabel", "idleTimeoutDesc"],
+  sessionIpBinding: ["ipBindingLabel", "ipBindingDesc"],
+  maxSessionsPerUser: ["maxSessionsLabel", "maxSessionsDesc"],
+  stepCodeRequired: ["stepCodeRequiredLabel", "stepCodeRequiredDesc"],
+  rateLimitPerMinute: ["rateLimitLabel", "rateLimitDesc"],
+  loginMaxAttempts: ["loginAttemptsLabel", "loginAttemptsDesc"],
+  loginIpMaxAttempts: ["loginIpAttemptsLabel", "loginIpAttemptsDesc"],
+  loginLockoutMinutes: ["lockoutWindowLabel", "lockoutWindowDesc"],
+  publicSharingEnabled: ["publicSharingLabel", "publicSharingDesc"],
+  shareDefaultExpiryDays: ["defaultExpiryLabel", "defaultExpiryDesc"],
+  shareMaxExpiryDays: ["maxExpiryLabel", "maxExpiryDesc"],
+  maxFileLifetimeDays: ["maxLifetimeLabel", "maxLifetimeDesc"],
+  autoDeleteTrashDays: ["autoDeleteTrashLabel", "autoDeleteTrashDesc"],
+  blockedExtensions: ["blockedExtensionsLabel", "blockedExtensionsDesc"],
+  allowedMimeTypes: ["allowedMimeLabel", "allowedMimeDesc"],
+  logRetentionDays: ["logRetentionLabel", "logRetentionDesc"],
+  emailDailyLimitPerSender: ["emailDailyLimitLabel", "emailDailyLimitDesc"],
+  emailFailureThreshold: ["emailFailureThresholdLabel", "emailFailureThresholdDesc"],
+  emailCooldownMinutes: ["emailCooldownLabel", "emailCooldownDesc"],
+};
+
+const UNIT_KEYS: Record<string, string> = {
+  GB: "unitGB", MB: "unitMB", "%": "unitPercent", minutes: "unitMinutes",
+  seconds: "unitSeconds", hours: "unitHours", sessions: "unitSessions",
+  "req/min": "unitReqMin", attempts: "unitAttempts", days: "unitDays",
+  "emails/day": "unitEmailsDay", failures: "unitFailures",
+};
+
+function localizedSections(t: Translator): Section[] {
+  return SETTING_SECTIONS.map((section) => {
+    const sectionKeys = SECTION_KEYS[section.id as keyof typeof SECTION_KEYS];
+    return {
+      ...section,
+      title: t(`admin.settings.${sectionKeys[0]}` as Parameters<Translator>[0]),
+      description: t(`admin.settings.${sectionKeys[1]}` as Parameters<Translator>[0]),
+      fields: section.fields.map((field) => {
+        const keys = FIELD_KEYS[field.key]!;
+        const placeholderKey = field.key === "allowedEmailDomains" ? "allowedDomainsPlaceholder"
+          : field.key === "maintenanceMessage" ? "maintenanceMessagePlaceholder"
+          : field.key === "blockedExtensions" ? "blockedExtensionsPlaceholder"
+          : field.key === "allowedMimeTypes" ? "allowedMimePlaceholder" : null;
+        return {
+          ...field,
+          label: t(`admin.settings.${keys[0]}` as Parameters<Translator>[0]),
+          description: t(`admin.settings.${keys[1]}` as Parameters<Translator>[0]),
+          placeholder: placeholderKey
+            ? t(`admin.settings.${placeholderKey}` as Parameters<Translator>[0])
+            : field.placeholder,
+          unit: field.unit && UNIT_KEYS[field.unit]
+            ? t(`admin.settings.${UNIT_KEYS[field.unit]}` as Parameters<Translator>[0])
+            : field.unit,
+          options: field.key === "sessionIpBinding" ? [
+            { label: t("admin.settings.ipBindingAuto"), value: "auto" },
+            { label: t("admin.settings.ipBindingOn"), value: "on" },
+            { label: t("admin.settings.ipBindingOff"), value: "off" },
+          ] : field.options,
+        };
+      }),
+    };
+  });
+}
 
 /* ── Session duration ────────────────────────────────────────────────────────
    Session length is the one setting on this page that is genuinely hard to type
@@ -241,38 +325,52 @@ const SESSION_PRESETS: SessionPreset[] = [
   { label: "1 year", hours: 8760 },
 ];
 
-function formatSessionDuration(hours: number): string {
-  if (hours < 1) return `${Math.round(hours * 60)} minutes`;
-  if (hours < 24) return hours === 1 ? "1 hour" : `${hours} hours`;
+function formatSessionDuration(hours: number, t: Translator): string {
+  if (hours < 1) return t("admin.settings.durationMinutes", { count: Math.round(hours * 60) });
+  if (hours < 24) return t("admin.settings.durationHours", { count: hours });
   if (hours < 168) {
     const days = Math.round(hours / 24);
-    return days === 1 ? "1 day" : `${days} days`;
+    return t("admin.settings.durationDays", { count: days });
   }
   if (hours < 720) {
     const weeks = Math.round(hours / 168);
-    return weeks === 1 ? "1 week" : `${weeks} weeks`;
+    return t("admin.settings.durationWeeks", { count: weeks });
   }
   const months = Math.round(hours / 720);
-  return months === 1 ? "1 month" : `${months} months`;
+  return t("admin.settings.durationMonths", { count: months });
 }
 
 function SessionDurationPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const t = useT();
+  const presets: SessionPreset[] = [
+    { label: t("admin.settings.preset30min"), hours: 0.5 },
+    { label: t("admin.settings.preset1hour"), hours: 1 },
+    { label: t("admin.settings.preset4hours"), hours: 4 },
+    { label: t("admin.settings.preset8hours"), hours: 8, sublabel: t("admin.settings.preset8hoursSub") },
+    { label: t("admin.settings.preset1day"), hours: 24 },
+    { label: t("admin.settings.preset3days"), hours: 72 },
+    { label: t("admin.settings.preset1week"), hours: 168, sublabel: t("admin.settings.preset1weekSub") },
+    { label: t("admin.settings.preset2weeks"), hours: 336 },
+    { label: t("admin.settings.preset1month"), hours: 720 },
+    { label: t("admin.settings.preset3months"), hours: 2160 },
+    { label: t("admin.settings.preset1year"), hours: 8760 },
+  ];
   const [customMode, setCustomMode] = useState(false);
-  const activePreset = SESSION_PRESETS.find((p) => p.hours === value);
+  const activePreset = presets.find((p) => p.hours === value);
   const customId = useId();
 
   return (
     <div className="grid gap-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="adm-field__label">Session Duration</span>
-        <div className="adm-seg" role="group" aria-label="Session duration input mode">
+        <span className="adm-field__label">{t("admin.settings.sessionDurationLabel")}</span>
+        <div className="adm-seg" role="group" aria-label={t("admin.settings.sessionDurationMode")}>
           <button
             type="button"
             className="adm-seg__btn"
             aria-pressed={!customMode}
             onClick={() => setCustomMode(false)}
           >
-            Presets
+            {t("admin.settings.sessionDurationPresets")}
           </button>
           <button
             type="button"
@@ -280,17 +378,17 @@ function SessionDurationPicker({ value, onChange }: { value: number; onChange: (
             aria-pressed={customMode}
             onClick={() => setCustomMode(true)}
           >
-            Custom
+            {t("admin.settings.sessionDurationCustom")}
           </button>
         </div>
       </div>
       <span className="adm-field__hint">
-        How long a session stays valid before the user must sign in again
+        {t("admin.settings.sessionDurationDesc")}
       </span>
 
       {!customMode ? (
         <div className="flex flex-wrap gap-1.5">
-          {SESSION_PRESETS.map((preset) => (
+          {presets.map((preset) => (
             <FilterChip
               key={preset.hours}
               active={preset.hours === value}
@@ -305,7 +403,7 @@ function SessionDurationPicker({ value, onChange }: { value: number; onChange: (
       ) : (
         <div className="relative max-w-[13rem]">
           <label className="sr-only" htmlFor={customId}>
-            Session duration in hours
+            {t("admin.settings.sessionDurationHours")}
           </label>
           <Input
             id={customId}
@@ -317,19 +415,17 @@ function SessionDurationPicker({ value, onChange }: { value: number; onChange: (
             onChange={(e) => onChange(Math.max(0.5, Math.min(8760, Number(e.target.value) || 0.5)))}
             className="h-9 pr-14 text-sm"
           />
-          <span className="adm-sub absolute right-3 top-1/2 -translate-y-1/2">hours</span>
+          <span className="adm-sub absolute right-3 top-1/2 -translate-y-1/2">{t("admin.settings.unitHours")}</span>
         </div>
       )}
 
       <p className="adm-field__hint inline-flex items-start gap-1.5">
         <Clock className="mt-px h-3.5 w-3.5 shrink-0 text-accent-ink" aria-hidden="true" />
         <span>
-          Users are signed out{" "}
-          <span className="font-semibold text-foreground">{formatSessionDuration(value)}</span>
+          {t("admin.settings.sessionDurationReadout", { duration: formatSessionDuration(value, t) })}
           {!activePreset && value >= 1 && (
             <span className="adm-num"> ({value}h)</span>
           )}{" "}
-          after signing in, however active they have been.
         </span>
       </p>
     </div>
@@ -349,6 +445,7 @@ function TagsInput({
   placeholder?: string;
   label: string;
 }) {
+  const t = useT();
   const [input, setInput] = useState("");
   const inputId = useId();
 
@@ -371,7 +468,7 @@ function TagsInput({
                 type="button"
                 onClick={() => onChange(value.filter((t) => t !== tag))}
                 className="-mr-0.5 ml-0.5 opacity-60 transition-opacity hover:opacity-100"
-                aria-label={`Remove ${tag}`}
+                aria-label={t("admin.settings.tagRemove", { tag })}
               >
                 <X className="h-3 w-3" aria-hidden="true" />
               </button>
@@ -393,12 +490,12 @@ function TagsInput({
               addTag();
             }
           }}
-          placeholder={placeholder ? `Add ${placeholder}…` : "Add value…"}
+          placeholder={placeholder ? t("admin.settings.tagAdd", { placeholder }) : t("admin.settings.tagAddGeneric")}
           className="h-9 text-sm"
         />
         <Button variant="outline" size="sm" className="h-9 shrink-0" onClick={addTag} type="button">
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-          Add
+          {t("admin.settings.tagAddButton")}
         </Button>
       </div>
     </div>
@@ -417,6 +514,7 @@ function SettingsField({
   value: unknown;
   onChange: (v: unknown) => void;
 }) {
+  const t = useT();
   const [showSensitive, setShowSensitive] = useState(false);
   const id = useId();
 
@@ -497,7 +595,7 @@ function SettingsField({
                 type="button"
                 onClick={() => setShowSensitive((v) => !v)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--adm-muted)] transition-colors hover:text-foreground"
-                aria-label={showSensitive ? `Hide ${field.label}` : `Show ${field.label}`}
+                aria-label={showSensitive ? t("settings.password.hideCurrent") : t("settings.password.showCurrent")}
               >
                 {showSensitive ? (
                   <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -530,16 +628,16 @@ function SettingsField({
 /* ── Cleanup status ──────────────────────────────────────────────────────────── */
 
 /** Pure: the page ticks `now` so this never reads the clock during render. */
-function formatAgo(iso: string, now: number): string {
-  if (now === 0) return "recently";
+function formatAgo(iso: string, now: number, t: Translator): string {
+  if (now === 0) return t("common.relative.now");
   const diff = now - new Date(iso).getTime();
-  if (!Number.isFinite(diff) || diff < 0) return "now";
+  if (!Number.isFinite(diff) || diff < 0) return t("common.relative.now");
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return t("common.relative.now");
+  if (mins < 60) return t("common.relative.minutes", { count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return t("common.relative.hours", { count: hours });
+  return t("common.relative.days", { count: Math.floor(hours / 24) });
 }
 
 /**
@@ -548,6 +646,7 @@ function formatAgo(iso: string, now: number): string {
  * interval, or the BullMQ worker when Redis is up.
  */
 function CleanupStatus({ cleanup, now }: { cleanup?: CleanupState | null; now: number }) {
+  const t = useT();
   if (!cleanup) return null;
 
   const { lastRunAt, lastSource, lastResult, lastError } = cleanup;
@@ -555,7 +654,7 @@ function CleanupStatus({ cleanup, now }: { cleanup?: CleanupState | null; now: n
   if (!lastRunAt) {
     return (
       <Note icon={AlertCircle} tone="warning" className="mt-4">
-        No cleanup has run. The first sweep happens within 20 minutes of server start.
+        {t("admin.settings.cleanupNone")}
       </Note>
     );
   }
@@ -563,31 +662,30 @@ function CleanupStatus({ cleanup, now }: { cleanup?: CleanupState | null; now: n
   return (
     <div className="mt-4 grid gap-2">
       <Note icon={CheckCircle2} tone={lastError ? "warning" : "success"}>
-        Last cleanup {formatAgo(lastRunAt, now)} via{" "}
-        {lastSource === "worker" ? "the background worker" : "the app scheduler"}.
+        {t("admin.settings.cleanupLast", {
+          ago: formatAgo(lastRunAt, now, t),
+          source: lastSource === "worker" ? t("admin.settings.cleanupSourceWorker") : t("admin.settings.cleanupSourceApp"),
+        })}
         {lastResult && (
           <span className="adm-sub mt-0.5 block">
-            <span className="adm-num">{lastResult.trashFiles}</span> trash files ·{" "}
-            <span className="adm-num">{lastResult.trashFolders}</span> folders ·{" "}
-            <span className="adm-num">{lastResult.lifetimeSoftDeleted}</span> expired ·{" "}
-            <span className="adm-num">{lastResult.logsDeleted}</span> logs
+            {t("admin.settings.cleanupStats", { trash: lastResult.trashFiles, folders: lastResult.trashFolders, expired: lastResult.lifetimeSoftDeleted, logs: lastResult.logsDeleted })}
           </span>
         )}
       </Note>
       {lastError && (
         <Note icon={AlertCircle} tone="danger">
-          Last run failed: {lastError}
+          {t("admin.settings.cleanupError", { error: lastError })}
         </Note>
       )}
     </div>
   );
 }
 /** "90" is a worse way to say "1h 30m", so the idle readout spells it out. */
-function formatIdleMinutes(minutes: number): string {
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+function formatIdleMinutes(minutes: number, t: Translator): string {
+  if (minutes < 60) return t("admin.settings.durationMinutes", { count: minutes });
   if (minutes % 60 === 0) {
     const hours = minutes / 60;
-    return `${hours} hour${hours === 1 ? "" : "s"}`;
+    return t("admin.settings.durationHours", { count: hours });
   }
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
@@ -605,6 +703,7 @@ function SessionDurationNote({
   idleMinutes: number;
   sessionDurationHours: number;
 }) {
+  const t = useT();
   const durationMinutes = sessionDurationHours * 60;
   const idleActive = idleMinutes > 0;
   const idleWins = idleActive && idleMinutes < durationMinutes;
@@ -612,34 +711,19 @@ function SessionDurationNote({
   if (!idleActive) {
     return (
       <Note icon={Info} tone="info">
-        Sessions expire{" "}
-        <span className="font-semibold">{formatSessionDuration(sessionDurationHours)}</span> after
-        sign-in. No idle timeout is active — a session stays alive even while the user is away,
-        until that duration runs out or they sign out. Set{" "}
-        <span className="font-semibold">Idle Timeout</span> below to also end quiet sessions early.
+        {t("admin.settings.sessionNoteNoIdle", { duration: formatSessionDuration(sessionDurationHours, t) })}
       </Note>
     );
   }
 
-  const idleLabel = formatIdleMinutes(idleMinutes);
+  const idleLabel = formatIdleMinutes(idleMinutes, t);
 
   return (
     <Note icon={idleWins ? AlertCircle : CheckCircle2} tone={idleWins ? "warning" : "success"}>
-      <span className="font-semibold">Idle Timeout</span> is set to {idleLabel}.{" "}
-      {idleWins ? (
-        <>
-          That is <span className="font-semibold">shorter</span> than the{" "}
-          {formatSessionDuration(sessionDurationHours)} session duration, so in practice inactive
-          users are signed out after <span className="font-semibold">{idleLabel}</span> and the
-          duration above only caps sessions that stay busy. Set the idle timeout to{" "}
-          <span className="adm-num">0</span> to let Session Duration decide on its own.
-        </>
-      ) : (
-        <>
-          That is longer than the {formatSessionDuration(sessionDurationHours)} session duration, so
-          the duration is always reached first and the idle timeout never gets a chance to fire.
-        </>
-      )}
+      {t(idleWins ? "admin.settings.sessionNoteIdleWins" : "admin.settings.sessionNoteIdleLoses", {
+        idle: idleLabel,
+        duration: formatSessionDuration(sessionDurationHours, t),
+      })}
     </Note>
   );
 }
@@ -650,13 +734,11 @@ function SessionDurationNote({
  * using `_meta.productionMode` from the server.
  */
 function IpBindingNote({ mode, productionMode }: { mode: string; productionMode?: boolean }) {
+  const t = useT();
   if (mode !== "auto" || productionMode === undefined) return null;
   return (
     <Note icon={Info} tone={productionMode ? "success" : "info"} className="mt-1">
-      This deployment is running in{" "}
-      <span className="font-semibold">{productionMode ? "production" : "development"}</span>, so
-      auto currently means IP binding is{" "}
-      <span className="font-semibold">{productionMode ? "on" : "off"}</span>.
+      {t(productionMode ? "admin.settings.ipBindingNoteProd" : "admin.settings.ipBindingNoteDev")}
     </Note>
   );
 }
@@ -666,29 +748,22 @@ function IpBindingNote({ mode, productionMode }: { mode: string; productionMode?
  * This mirrors `shareExpiryPolicy()` on the server and states the outcome.
  */
 function ShareExpiryNote({ defaultDays, maxDays }: { defaultDays: number; maxDays: number }) {
+  const t = useT();
   const effective =
     maxDays > 0 && (defaultDays === 0 || defaultDays > maxDays) ? maxDays : defaultDays;
   const capped = effective !== defaultDays;
-  const label = (d: number) => `${d} day${d === 1 ? "" : "s"}`;
+  const label = (d: number) => t("admin.settings.durationDays", { count: d });
 
   return (
     <Note icon={capped ? AlertCircle : Info} tone={capped ? "warning" : "info"} className="mt-1">
       {effective === 0 ? (
-        <>
-          New links <span className="font-semibold">never expire</span> unless the person sharing
-          picks an expiry, and they may pick any length. Set a maximum to put a ceiling on that.
-        </>
+        t("admin.settings.shareNoteNeverExpires")
       ) : (
-        <>
-          A link created without a chosen expiry lasts{" "}
-          <span className="font-semibold">{label(effective)}</span>
-          {capped && <> — the maximum, because the default is longer than it or unset</>}.{" "}
-          {maxDays > 0 ? (
-            <>Nobody can ask for more than {label(maxDays)}.</>
-          ) : (
-            <>There is no ceiling, so a link can still be created with any expiry.</>
-          )}
-        </>
+        <>{t("admin.settings.shareNoteWithMax", { effective: label(effective) })}
+          {capped && t("admin.settings.shareNoteCapped")}.{" "}
+          {maxDays > 0
+            ? t("admin.settings.shareNoteMaxCeiling", { max: label(maxDays) })
+            : t("admin.settings.shareNoteNoCeiling")}</>
       )}
     </Note>
   );
@@ -711,6 +786,8 @@ function SettingsSkeleton() {
 }
 
 export default function AdminSettingsPage() {
+  const t = useT();
+  const sections = useMemo(() => localizedSections(t), [t]);
   const queryClient = useQueryClient();
   const [values, setValues] = useState<AdminSettings | null>(null);
   const [baseline, setBaseline] = useState<AdminSettings | null>(null);
@@ -755,11 +832,11 @@ export default function AdminSettingsPage() {
         method: "PUT",
         body: JSON.stringify(settings),
       });
-      if (!res.success) throw new Error(res.error ?? "Failed to save settings");
+      if (!res.success) throw new Error(res.error ?? t("admin.settings.saveFailed"));
       return res.data;
     },
     onSuccess: (saved) => {
-      setSuccessMsg("Settings saved — changes take effect within ~30 seconds");
+      setSuccessMsg(t("admin.settings.saveSuccess"));
       setTimeout(() => setSuccessMsg(""), 4000);
       if (saved) setBaseline(saved as AdminSettings);
       queryClient.invalidateQueries({ queryKey: ["admin-settings"] });
@@ -806,7 +883,7 @@ export default function AdminSettingsPage() {
         ),
       }))
       .filter((s) => s.fields.length > 0);
-  }, [query]);
+  }, [query, sections]);
 
   const visibleSections = query
     ? filteredSections
@@ -821,11 +898,11 @@ export default function AdminSettingsPage() {
   if (!values) {
     return (
       <div className="space-y-5">
-        <AdminHeader icon={Sliders} kicker="Configuration" title="Settings" />
+        <AdminHeader icon={Sliders} kicker={t("admin.settings.kicker")} title={t("admin.settings.title")} />
         <AdminEmpty
           icon={AlertCircle}
-          title="Settings could not be loaded"
-          body="The request came back empty. Reload the page — if it keeps happening the settings table may be unreachable."
+          title={t("admin.settings.loadFailed")}
+          body={t("admin.settings.loadFailedBody")}
           action={
             <Button
               variant="outline"
@@ -833,7 +910,7 @@ export default function AdminSettingsPage() {
               onClick={() => queryClient.invalidateQueries({ queryKey: ["admin-settings"] })}
             >
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
-              Retry
+              {t("admin.settings.retry")}
             </Button>
           }
         />
@@ -845,28 +922,28 @@ export default function AdminSettingsPage() {
     <div className="space-y-5 pb-28">
       <AdminHeader
         icon={Sliders}
-        kicker="Configuration"
-        title="Settings"
-        lede="Stored in the database and picked up by the running app within about 30 seconds — no redeploy. Unsaved fields are marked, and nothing is written until you save."
+        kicker={t("admin.settings.kicker")}
+        title={t("admin.settings.title")}
+        lede={t("admin.settings.lede")}
         actions={
           <>
             {meta?.totalUsers !== undefined && (
               <Chip icon={Users} mono>
-                {meta.totalUsers} users
+                {t("admin.settings.usersChip", { count: meta.totalUsers })}
               </Chip>
             )}
             {values?.maintenanceMode && (
               <Chip icon={AlertCircle} tone="warning">
-                Maintenance mode
+                {t("admin.settings.maintenanceChip")}
               </Chip>
             )}
             {isDirty ? (
               <Chip icon={AlertCircle} tone="warning">
-                {dirtyKeys.size} unsaved
+                {t("admin.settings.unsavedChip", { count: dirtyKeys.size })}
               </Chip>
             ) : (
               <Chip icon={CheckCircle2} tone="success">
-                All saved
+                {t("admin.settings.allSavedChip")}
               </Chip>
             )}
           </>
@@ -878,11 +955,11 @@ export default function AdminSettingsPage() {
           icon={Search}
           value={search}
           onChange={setSearch}
-          label="Search settings"
-          placeholder="Quota, session, cooldown…"
+          label={t("admin.settings.searchLabel")}
+          placeholder={t("admin.settings.searchPlaceholder")}
         />
         {search && (
-          <IconButton icon={X} label="Clear the settings search" onClick={() => setSearch("")} />
+          <IconButton icon={X} label={t("admin.settings.clearSearch")} onClick={() => setSearch("")} />
         )}
       </div>
 
@@ -914,7 +991,7 @@ export default function AdminSettingsPage() {
         {/* Section rail. Hidden while searching, because search results span
             sections and a highlighted "current section" would be a lie. */}
         {!query && (
-          <nav aria-label="Settings sections" className="lg:sticky lg:top-4 lg:self-start">
+          <nav aria-label={t("admin.settings.title")} className="lg:sticky lg:top-4 lg:self-start">
             <ul className="flex gap-1.5 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
               {sections.map((section) => {
                 const active = section.id === activeSection;
@@ -925,7 +1002,7 @@ export default function AdminSettingsPage() {
                       type="button"
                       aria-pressed={active}
                       aria-label={
-                        sectionDirty ? `${section.title} — has unsaved changes` : undefined
+                        sectionDirty ? t("admin.settings.sectionUnsaved", { title: section.title }) : undefined
                       }
                       onClick={() => setActiveSection(section.id)}
                       className={cn(
@@ -955,8 +1032,8 @@ export default function AdminSettingsPage() {
           {visibleSections.length === 0 ? (
             <AdminEmpty
               icon={Search}
-              title="No setting matches that"
-              body="Try a shorter word — the search looks at setting names, their descriptions and the section titles."
+              title={t("admin.settings.noMatchTitle")}
+              body={t("admin.settings.noMatchBody")}
             />
           ) : (
             visibleSections.map((section) => {
@@ -1040,13 +1117,12 @@ export default function AdminSettingsPage() {
             exit={{ opacity: 0, y: 16 }}
             transition={{ type: "spring", stiffness: 380, damping: 30 }}
             role="region"
-            aria-label="Unsaved changes"
+            aria-label={t("admin.settings.unsavedCount", { count: dirtyKeys.size })}
           >
             <AlertCircle className="h-4 w-4 shrink-0 text-[var(--warning)]" aria-hidden="true" />
             <span className="min-w-0 text-[0.78rem]">
-              <span className="adm-num font-semibold">{dirtyKeys.size}</span> unsaved change
-              {dirtyKeys.size !== 1 ? "s" : ""}
-              <span className="adm-sub ml-1.5 hidden sm:inline">Nothing is written until you save</span>
+              <span className="adm-num font-semibold">{t("admin.settings.unsavedCount", { count: dirtyKeys.size })}</span>
+              <span className="adm-sub ml-1.5 hidden sm:inline">{t("admin.settings.unsavedHint")}</span>
             </span>
             <div className="ml-auto flex items-center gap-2">
               <Button
@@ -1056,7 +1132,7 @@ export default function AdminSettingsPage() {
                 disabled={saveMutation.isPending}
               >
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                Discard
+                {t("admin.settings.discard")}
               </Button>
               <Button
                 size="sm"
@@ -1068,7 +1144,7 @@ export default function AdminSettingsPage() {
                 ) : (
                   <Save className="h-4 w-4" aria-hidden="true" />
                 )}
-                Save changes
+                {t("admin.settings.saveChanges")}
               </Button>
             </div>
           </motion.div>

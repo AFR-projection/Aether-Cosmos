@@ -9,8 +9,8 @@ import {
   buildEnhancedQuery,
   extractEntityMatchWords,
   IMPERATIVE_VERBS,
-} from "@/lib/brain/retrieval/query-understanding";
-import { STOP_WORDS } from "@/lib/brain/graph/relate";
+} from "@brain/domain/retrieval/query-understanding";
+import { STOP_WORDS } from "@brain/domain/graph/relate";
 
 describe("query-understanding", () => {
   describe("normalizeText", () => {

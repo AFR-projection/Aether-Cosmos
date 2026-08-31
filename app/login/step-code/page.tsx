@@ -1,22 +1,52 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Delete, Loader2, ShieldCheck } from "lucide-react";
-import { apiFetch } from "@/lib/api/client";
-import { AuthError, AuthShell } from "@/components/auth/auth-shell";
+import { motion } from "framer-motion";
+import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { apiFetch } from "@/shared/api/client";
+import { Numpad } from "@auth/presentation/components/numpad";
+import { AuthShell } from "@auth/presentation/components/auth-shell";
+import { apiErrorMessage, useT } from "@/shared/lib/i18n";
 
+/**
+ * Layer 2 of sign-in: verify the account's existing 2-Step Code.
+ *
+ * The pad is sized to the account's own code length, handed over by the login
+ * response and kept in sessionStorage next to the staged token. Accounts whose
+ * length was never recorded (enrolled before the column existed) get the old
+ * flexible 6–10 pad until their next successful sign-in backfills it server-side.
+ *
+ * Mirrors of the server rules, not a second source of truth: the server still
+ * rejects anything it disagrees with. These only shape the pad.
+ */
 const STEP_CODE_MIN = 6;
 const STEP_CODE_MAX = 10;
 
-function shuffleDigits(): number[] {
-  const arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
+const ORDERED_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+
+/**
+ * Shuffled so the finger path across the pad is not the same every sign-in — a
+ * shoulder-surfer or a camera above the desk learns positions, not digits. Called
+ * from effects and event handlers only; never during render, where a different
+ * order on the server and client pass would break hydration.
+ */
+function shuffleKeys(): string[] {
+  const arr = [...ORDERED_KEYS];
   for (let i = arr.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+function readStoredLength(): number | null {
+  const raw = sessionStorage.getItem("auth_step_length");
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) return null;
+  if (parsed < STEP_CODE_MIN || parsed > STEP_CODE_MAX) return null;
+  return parsed;
 }
 
 interface LoginResponse {
@@ -30,12 +60,12 @@ interface LoginResponse {
 export default function StepCodePage() {
   const router = useRouter();
   const [stepToken, setStepToken] = useState<string | null>(null);
+  const [expectedLength, setExpectedLength] = useState<number | null>(null);
   const [code, setCode] = useState("");
-  const [keys, setKeys] = useState<number[]>([]);
-  const [activeKey, setActiveKey] = useState<number | null>(null);
+  const [keys, setKeys] = useState<string[]>(ORDERED_KEYS);
   const [error, setError] = useState("");
-  const [shake, setShake] = useState(false);
   const [loading, setLoading] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     const token = sessionStorage.getItem("auth_step_token");
@@ -43,47 +73,21 @@ export default function StepCodePage() {
       router.replace("/login");
       return;
     }
+    const length = readStoredLength();
     const setupFrame = window.setTimeout(() => {
       setStepToken(token);
-      setKeys(shuffleDigits());
+      setExpectedLength(length);
+      setKeys(shuffleKeys());
     }, 0);
     return () => window.clearTimeout(setupFrame);
   }, [router]);
 
-  const pressDigit = useCallback((digit: number) => {
-    if (code.length >= STEP_CODE_MAX || loading) return;
-    setCode((current) => current + digit);
-    setActiveKey(digit);
-    window.setTimeout(() => setActiveKey(null), 120);
-    if (error) setError("");
-  }, [code.length, error, loading]);
-
-  const deleteLast = useCallback(() => {
-    if (loading) return;
-    setCode((current) => current.slice(0, -1));
-    if (error) setError("");
-  }, [error, loading]);
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (/^[0-9]$/.test(event.key)) {
-        pressDigit(Number(event.key));
-        return;
-      }
-      if (event.key === "Backspace") {
-        deleteLast();
-        return;
-      }
-      if (event.key === "Enter") void handleSubmit();
-    };
-
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  });
-
   async function handleSubmit() {
-    if (!stepToken || code.length < STEP_CODE_MIN || loading) return;
+    const enough = expectedLength
+      ? code.length === expectedLength
+      : code.length >= STEP_CODE_MIN;
+    if (!stepToken || !enough || loading) return;
+
     setError("");
     setLoading(true);
 
@@ -94,11 +98,15 @@ export default function StepCodePage() {
       });
 
       if (!res.success) {
-        setShake(true);
-        window.setTimeout(() => setShake(false), 600);
         setCode("");
-        setError(res.error ?? "Incorrect code");
-        if (res.error?.toLowerCase().includes("session expired")) {
+        // A fresh layout for the retry: the failed attempt already showed an
+        // observer where the fingers went. The error state itself drives the
+        // shake and the red slots, so there is no separate timer to unwind.
+        setKeys(shuffleKeys());
+        setError(apiErrorMessage(res, t, "auth.stepCode.incorrect"));
+        // Keyed off the stable code, not the message text: the staged token is
+        // gone, so the only way forward is a fresh sign-in.
+        if (res.code === "STEP_CODE_EXPIRED") {
           window.setTimeout(() => router.replace("/login"), 1200);
         }
         return;
@@ -107,6 +115,7 @@ export default function StepCodePage() {
       const data = res.data;
       sessionStorage.removeItem("auth_step_token");
       sessionStorage.removeItem("auth_step_enrollment");
+      sessionStorage.removeItem("auth_step_length");
 
       if (data?.requires2fa && data.pendingToken) {
         sessionStorage.setItem("auth_pending_token", data.pendingToken);
@@ -132,15 +141,11 @@ export default function StepCodePage() {
       router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : home);
       router.refresh();
     } catch {
-      setError("Connection failed");
+      setError(t("errors.network"));
     } finally {
       setLoading(false);
     }
   }
-
-  const topKeys = keys.slice(0, 9);
-  const bottomKey = keys[9];
-  const canSubmit = code.length >= STEP_CODE_MIN && !loading;
 
   if (!stepToken) return null;
 
@@ -148,133 +153,51 @@ export default function StepCodePage() {
     <AuthShell
       step="step-code"
       icon={<ShieldCheck />}
-      title="Second layer"
-      description="Enter your personal security code to continue."
-      visualKicker="STORAGE / SECOND SIGNAL"
-      visualTitle={<>One more<br /><em>quiet signal.</em></>}
-      visualDescription="A second layer keeps the path to your workspace deliberate, even when your password is known."
+      title={t("auth.stepCode.title")}
+      description={
+        expectedLength
+          ? t("auth.stepCode.descriptionExact", { length: expectedLength })
+          : t("auth.stepCode.description")
+      }
+      visualKicker={t("auth.stepCode.visualKicker")}
+      visualTitle={
+        <>
+          {t("auth.stepCode.visualTitleTop")}
+          <br />
+          <em>{t("auth.stepCode.visualTitleEm")}</em>
+        </>
+      }
+      visualDescription={t("auth.stepCode.visualDescription")}
     >
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div
-          className={["auth-code-display", shake ? "auth-code-display--error" : ""].join(" ")}
-          aria-label={`${code.length} of ${STEP_CODE_MAX} digits entered`}
-        >
-          <div className="auth-code-dots" aria-hidden="true">
-            {Array.from({ length: STEP_CODE_MAX }).map((_, index) => (
-              <motion.span
-                key={index}
-                animate={index < code.length ? { scale: 1.12 } : { scale: 1 }}
-                transition={{ type: "spring", stiffness: 500, damping: 20 }}
-                className={[
-                  "auth-code-dot",
-                  index < code.length ? "auth-code-dot--filled" : "",
-                  index < code.length && error ? "auth-code-dot--error" : "",
-                ].join(" ")}
-              />
-            ))}
-          </div>
-
-          <AnimatePresence mode="wait">
-            {error ? (
-              <motion.div
-                key="error"
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-              >
-                <AuthError id="step-code-error">{error}</AuthError>
-              </motion.div>
-            ) : (
-              <motion.p key="hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="auth-code-caption">
-                {STEP_CODE_MIN}–{STEP_CODE_MAX} digits · shuffled for safety
-              </motion.p>
-            )}
-          </AnimatePresence>
-        </div>
-
-        <div className="auth-numpad" role="group" aria-label="Security code keypad">
-          {topKeys.map((digit) => (
-            <NumKey
-              key={`k-${digit}`}
-              digit={digit}
-              active={activeKey === digit}
-              disabled={loading}
-              onPress={() => pressDigit(digit)}
-            />
-          ))}
-          <span aria-hidden="true" />
-          <NumKey
-            digit={bottomKey}
-            active={activeKey === bottomKey}
-            disabled={loading}
-            onPress={() => pressDigit(bottomKey)}
-          />
-          <button
-            type="button"
-            onClick={deleteLast}
-            disabled={loading || code.length === 0}
-            aria-label="Delete last digit"
-            className="auth-numpad-button auth-numpad-button--muted"
-          >
-            <Delete aria-hidden="true" />
-          </button>
-        </div>
-
-        <motion.button
-          type="button"
-          onClick={() => void handleSubmit()}
-          disabled={!canSubmit}
-          whileTap={canSubmit ? { scale: 0.985 } : {}}
-          className="auth-primary-button auth-code-submit"
-          aria-busy={loading}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="animate-spin" aria-hidden="true" />
-              <span>Verifying code…</span>
-            </>
-          ) : (
-            <>
-              <ShieldCheck aria-hidden="true" />
-              <span>Verify security code</span>
-            </>
-          )}
-        </motion.button>
+        <Numpad
+          value={code}
+          onChange={(next) => {
+            setCode(next);
+            if (error) setError("");
+          }}
+          onSubmit={() => void handleSubmit()}
+          minLength={STEP_CODE_MIN}
+          maxLength={STEP_CODE_MAX}
+          exactLength={expectedLength}
+          keyOrder={keys}
+          shuffled
+          error={Boolean(error)}
+          loading={loading}
+          message={error}
+          submitLabel={t("auth.stepCode.submit")}
+          loadingLabel={t("auth.stepCode.submitting")}
+        />
 
         <button type="button" onClick={() => router.push("/login")} className="auth-secondary-link">
           <ArrowLeft aria-hidden="true" />
-          Back to sign in
+          {t("auth.backToSignIn")}
         </button>
       </motion.div>
     </AuthShell>
-  );
-}
-
-function NumKey({
-  digit,
-  active,
-  disabled,
-  onPress,
-}: {
-  digit: number;
-  active: boolean;
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onPress}
-      disabled={disabled}
-      animate={active ? { scale: 0.94 } : { scale: 1 }}
-      transition={{ type: "spring", stiffness: 600, damping: 25 }}
-      className="auth-numpad-button"
-    >
-      {digit}
-    </motion.button>
   );
 }

@@ -2,15 +2,15 @@ import { NextRequest } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db";
-import { files, shares } from "@/lib/db/schema";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { resolveFileAccess, fileRefusal } from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
-import { getAdminSettings, shareExpiryPolicy } from "@/lib/admin-settings";
+import { db } from "@/shared/infrastructure/db";
+import { files, shares } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { resolveFileAccess, fileRefusal } from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
+import { getAdminSettings, shareExpiryPolicy } from "@/shared/lib/settings/admin-settings";
 
 const createSchema = z.object({
   fileId: z.string().uuid(),

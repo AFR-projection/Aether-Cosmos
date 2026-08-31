@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { generateCsrfToken, SECURITY_HEADERS } from "@/lib/security";
-import { cookieSecure } from "@/lib/env/runtime";
+import { generateCsrfToken, SECURITY_HEADERS } from "@/shared/lib/security";
+import { cookieSecure } from "@/shared/lib/env/runtime";
 
 export async function GET() {
   const token = generateCsrfToken();

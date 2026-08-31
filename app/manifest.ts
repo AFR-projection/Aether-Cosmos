@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { APP_NAME, APP_SHORT_NAME } from "@/lib/app-version";
+import { APP_NAME, APP_SHORT_NAME } from "@/shared/lib/app-version";
 
 /**
  * PWA manifest — makes the app installable to the home screen and lets it run

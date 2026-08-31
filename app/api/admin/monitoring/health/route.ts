@@ -10,9 +10,9 @@
  */
 
 import { NextRequest } from "next/server";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { runHealthChecks } from "@/lib/monitoring/health-monitor";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { runHealthChecks } from "@/shared/lib/monitoring/health-monitor";
 
 export async function GET(request: NextRequest) {
   try {

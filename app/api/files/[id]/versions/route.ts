@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { desc, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { fileVersions, users } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { getAccessibleFile } from "@/lib/auth/permissions";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { fileVersions, users } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getAccessibleFile } from "@/shared/lib/auth/permissions";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 
 export async function GET(
   _request: NextRequest,

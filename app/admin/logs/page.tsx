@@ -5,8 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { apiFetch } from "@/lib/api/client";
-import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/shared/api/client";
+import { Button } from "@/ui/primitives/button";
 import {
   AdminEmpty,
   AdminHeader,
@@ -18,13 +18,14 @@ import {
   Segment,
   Skeleton,
   type Tone,
-} from "@/components/admin/admin-ui";
+} from "@admin/presentation/components/admin-ui";
 import {
   AUDIT_GROUPS,
   auditAction,
+  auditActionLabel,
   actionsInGroup,
   type AuditActionMeta,
-} from "@/lib/admin/audit-actions";
+} from "@admin/domain/services/audit-actions";
 import {
   ScrollText,
   Search,
@@ -41,7 +42,8 @@ import {
   Pause,
   X,
 } from "lucide-react";
-import { cn, formatBytes } from "@/lib/utils";
+import { relativeTime, useFormat, useT } from "@/shared/lib/i18n";
+import { cn } from "@/shared/lib/utils";
 
 type LogEntry = {
   id: string;
@@ -67,31 +69,6 @@ function useNow(intervalMs = 30_000): number {
   return now;
 }
 
-function formatRelativeTime(dateStr: string, now: number): string {
-  const diffSec = Math.floor((now - new Date(dateStr).getTime()) / 1000);
-  if (diffSec < 5) return "now";
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay}d ago`;
-  return `${Math.floor(diffDay / 30)}mo ago`;
-}
-
-function formatAbsoluteTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleString("id-ID", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
 /** A value inside a log summary that carries a tone (a role, a status, a mode). */
 function Val({ tone, children }: { tone?: Tone; children: React.ReactNode }) {
   return (
@@ -111,29 +88,36 @@ function Val({ tone, children }: { tone?: Tone; children: React.ReactNode }) {
  * anything that does not help while scanning.
  */
 function DescribeMetadata({ log }: { log: LogEntry }) {
+  const t = useT();
+  const { formatBytes } = useFormat();
   const meta = log.metadata;
   if (!meta || Object.keys(meta).length === 0) {
     return <span className="adm-sub">—</span>;
   }
+
+  const unknown = t("admin.logs.unknown");
 
   const detail = (() => {
     switch (log.action) {
       case "upload":
         return (
           <>
-            <Val>{String(meta.fileName || "Unknown")}</Val>
-            <span className="adm-sub"> · {String(meta.mimeType || "unknown type")}</span>
+            <Val>{String(meta.fileName || unknown)}</Val>
+            <span className="adm-sub">
+              {" · "}
+              {String(meta.mimeType || t("admin.logs.unknownType"))}
+            </span>
             {meta.size != null && <span className="adm-sub"> · {formatBytes(Number(meta.size))}</span>}
           </>
         );
       case "download":
         return (
           <>
-            <Val>{String(meta.fileName || "Unknown")}</Val>
+            <Val>{String(meta.fileName || unknown)}</Val>
             {meta.source ? (
               <span className="adm-sub">
-                {" "}
-                · via <Val tone="info">{String(meta.source)}</Val>
+                {` · ${t("admin.logs.via")} `}
+                <Val tone="info">{String(meta.source)}</Val>
               </span>
             ) : null}
           </>
@@ -141,18 +125,22 @@ function DescribeMetadata({ log }: { log: LogEntry }) {
       case "delete":
         return (
           <>
-            <Val>{String(meta.fileName || "Unknown")}</Val>
-            {meta.folder != null && <span className="adm-sub"> in /{String(meta.folder)}</span>}
+            <Val>{String(meta.fileName || unknown)}</Val>
+            {meta.folder != null && (
+              <span className="adm-sub">
+                {" "}
+                {t("admin.logs.inFolder", { folder: String(meta.folder) })}
+              </span>
+            )}
           </>
         );
       case "share":
         return (
           <>
-            <Val>{String(meta.fileName || "Unknown")}</Val>
+            <Val>{String(meta.fileName || unknown)}</Val>
             {meta.permission ? (
               <span className="adm-sub">
-                {" "}
-                as{" "}
+                {` ${t("admin.logs.asRole")} `}
                 <Val tone={meta.permission === "edit" ? "warning" : "info"}>
                   {String(meta.permission)}
                 </Val>
@@ -168,11 +156,11 @@ function DescribeMetadata({ log }: { log: LogEntry }) {
       case "create_user":
         return (
           <>
-            <Val>{String(meta.username || "Unknown")}</Val>
+            <Val>{String(meta.username || unknown)}</Val>
             {meta.role ? (
               <span className="adm-sub">
-                {" "}
-                as <Val tone={meta.role === "master" ? "warning" : "success"}>{String(meta.role)}</Val>
+                {` ${t("admin.logs.asRole")} `}
+                <Val tone={meta.role === "master" ? "warning" : "success"}>{String(meta.role)}</Val>
               </span>
             ) : null}
           </>
@@ -181,7 +169,7 @@ function DescribeMetadata({ log }: { log: LogEntry }) {
       case "suspend_user":
         return (
           <>
-            <Val>{String(meta.username || meta.targetUserId || "Unknown")}</Val>
+            <Val>{String(meta.username || meta.targetUserId || unknown)}</Val>
             {meta.status ? (
               <span className="adm-sub">
                 {" "}
@@ -192,17 +180,17 @@ function DescribeMetadata({ log }: { log: LogEntry }) {
         );
       case "create_folder":
       case "delete_folder":
-        return <Val>{String(meta.folderName || "Unknown")}</Val>;
+        return <Val>{String(meta.folderName || unknown)}</Val>;
       case "rename":
         return (
           <span className="adm-sub">
-            {String(meta.oldName || "Unknown")} → <Val>{String(meta.newName || "Unknown")}</Val>
+            {String(meta.oldName || unknown)} → <Val>{String(meta.newName || unknown)}</Val>
           </span>
         );
       case "move":
         return (
           <>
-            <Val>{String(meta.fileName || "Unknown")}</Val>
+            <Val>{String(meta.fileName || unknown)}</Val>
             {meta.destination ? (
               <span className="adm-sub"> → /{String(meta.destination)}</span>
             ) : null}
@@ -211,7 +199,8 @@ function DescribeMetadata({ log }: { log: LogEntry }) {
       case "impersonate":
         return (
           <span className="adm-sub">
-            Target: <Val>{String(meta.targetUserId || "Unknown")}</Val>
+            {`${t("admin.logs.target")} `}
+            <Val>{String(meta.targetUserId || unknown)}</Val>
           </span>
         );
       default:
@@ -239,16 +228,13 @@ export default function AdminLogsPage() {
   );
 }
 
-const GROUP_OPTIONS = [
-  { value: "all" as const, label: "All" },
-  ...AUDIT_GROUPS.map((group) => ({ value: group.id, label: group.label, icon: group.icon })),
-];
-
 type GroupFilter = "all" | AuditActionMeta["group"];
 
 function AdminLogsContent() {
   const searchParams = useSearchParams();
   const now = useNow();
+  const t = useT();
+  const { formatTimestamp } = useFormat();
   const [action, setAction] = useState(searchParams.get("action") ?? "");
   const [search, setSearch] = useState(
     searchParams.get("user") ?? searchParams.get("search") ?? ""
@@ -298,6 +284,20 @@ function AdminLogsContent() {
 
   const rows = useMemo(() => logs ?? [], [logs]);
 
+  // Built in the component, not at module scope: the group labels are keys now, and
+  // a module-level array would have frozen whichever language loaded first.
+  const groupOptions = useMemo(
+    () => [
+      { value: "all" as const, label: t("admin.logs.areaAll") },
+      ...AUDIT_GROUPS.map((entry) => ({
+        value: entry.id,
+        label: t(entry.labelKey),
+        icon: entry.icon,
+      })),
+    ],
+    [t]
+  );
+
   /** Chips are gated behind the group segment — 21 of them at once is a wall. */
   const chipActions = useMemo(() => (group === "all" ? [] : actionsInGroup(group)), [group]);
 
@@ -327,10 +327,20 @@ function AdminLogsContent() {
   function exportToCSV() {
     setExporting(true);
     try {
-      const headers = ["Timestamp", "Action", "User", "Email", "Role", "IP", "Resource", "Details"];
+      const headers = [
+        t("admin.logs.csvTimestamp"),
+        t("admin.logs.csvAction"),
+        t("admin.logs.csvUser"),
+        t("admin.logs.csvEmail"),
+        t("admin.logs.csvRole"),
+        // The protocol name reads the same in all three languages.
+        "IP",
+        t("admin.logs.csvResource"),
+        t("admin.logs.csvDetails"),
+      ];
       const body = filtered.map((log) =>
         [
-          formatAbsoluteTime(log.createdAt),
+          formatTimestamp(log.createdAt),
           log.action,
           log.username,
           log.email ?? "",
@@ -359,11 +369,11 @@ function AdminLogsContent() {
     <div className="space-y-5">
       <AdminHeader
         icon={ScrollText}
-        kicker="Audit trail"
-        title="Activity logs"
-        lede="Every privileged action, newest first. Pick an area, then narrow to a single kind of event — the raw payload is one click away on any row."
+        kicker={t("admin.logs.kicker")}
+        title={t("admin.logs.title")}
+        lede={t("admin.logs.lede")}
         live={autoRefresh}
-        liveLabel="Polling 10s"
+        liveLabel={t("admin.logs.polling")}
         actions={
           <>
             <Button
@@ -377,7 +387,7 @@ function AdminLogsContent() {
               ) : (
                 <Play className="h-4 w-4" aria-hidden="true" />
               )}
-              {autoRefresh ? "Pause" : "Auto"}
+              {autoRefresh ? t("admin.logs.pause") : t("admin.logs.auto")}
             </Button>
             <Button
               variant="outline"
@@ -390,11 +400,11 @@ function AdminLogsContent() {
               ) : (
                 <FileDown className="h-4 w-4" aria-hidden="true" />
               )}
-              Export
+              {t("admin.logs.export")}
             </Button>
             <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
               <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} aria-hidden="true" />
-              Refresh
+              {t("common.refresh")}
             </Button>
           </>
         }
@@ -402,31 +412,35 @@ function AdminLogsContent() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <AdminMetric
           icon={Activity}
-          label="Events"
+          label={t("admin.logs.metricEvents")}
           value={stats.total}
           tone="accent"
-          hint={group === "all" ? "Latest 200" : "In this area"}
+          hint={
+            group === "all"
+              ? t("admin.logs.metricEventsHintAll")
+              : t("admin.logs.metricEventsHintArea")
+          }
         />
         <AdminMetric
           icon={Users}
-          label="Actors"
+          label={t("admin.logs.metricActors")}
           value={stats.uniqueUsers}
           tone="info"
-          hint="Distinct accounts"
+          hint={t("admin.logs.metricActorsHint")}
         />
         <AdminMetric
           icon={Globe}
-          label="Addresses"
+          label={t("admin.logs.metricAddresses")}
           value={stats.uniqueIPs}
           tone="success"
-          hint="Distinct IPs"
+          hint={t("admin.logs.metricAddressesHint")}
         />
         <AdminMetric
           icon={Layers}
-          label="Event kinds"
+          label={t("admin.logs.metricKinds")}
           value={stats.actions}
           tone="muted"
-          hint="Different actions seen"
+          hint={t("admin.logs.metricKindsHint")}
         />
       </div>
 
@@ -435,10 +449,15 @@ function AdminLogsContent() {
           icon={Search}
           value={search}
           onChange={setSearch}
-          label="Search logs"
-          placeholder="User, email, or IP…"
+          label={t("admin.logs.searchLabel")}
+          placeholder={t("admin.logs.searchPlaceholder")}
         />
-        <Segment value={group} onChange={setGroup} options={GROUP_OPTIONS} label="Log area" />
+        <Segment
+          value={group}
+          onChange={setGroup}
+          options={groupOptions}
+          label={t("admin.logs.areaLabel")}
+        />
       </div>
       {/* Second tier of the filter: only the actions that live in the chosen area,
           plus an escape hatch for an action that arrived by query string. */}
@@ -449,9 +468,9 @@ function AdminLogsContent() {
               icon={X}
               active
               onClick={() => setAction("")}
-              title="Clear the action filter"
+              title={t("admin.logs.clearActionFilter")}
             >
-              {auditAction(action).label}
+              {auditActionLabel(action, t)}
             </FilterChip>
           )}
           {chipActions.map((key) => {
@@ -464,9 +483,9 @@ function AdminLogsContent() {
                 tone={meta.tone}
                 active={active}
                 onClick={() => setAction(active ? "" : key)}
-                title={meta.description}
+                title={t(meta.descriptionKey)}
               >
-                {meta.label}
+                {t(meta.labelKey)}
               </FilterChip>
             );
           })}
@@ -474,13 +493,16 @@ function AdminLogsContent() {
       )}
       <AdminPanel
         icon={ScrollText}
-        title={`${filtered.length} event${filtered.length !== 1 ? "s" : ""}`}
+        title={t("admin.logs.panelTitle", { count: filtered.length })}
         sub={
           action
-            ? `Filtered to ${auditAction(action).label}`
+            ? t("admin.logs.filteredTo", { action: auditActionLabel(action, t) })
             : group === "all"
-              ? "All areas"
-              : AUDIT_GROUPS.find((g) => g.id === group)?.label
+              ? t("admin.logs.allAreas")
+              : t(
+                  AUDIT_GROUPS.find((entry) => entry.id === group)?.labelKey ??
+                    "admin.logs.allAreas"
+                )
         }
         flush
       >
@@ -491,11 +513,15 @@ function AdminLogsContent() {
         ) : filtered.length === 0 ? (
           <AdminEmpty
             icon={ScrollText}
-            title={rows.length === 0 ? "No logs" : "Nothing in this area"}
+            title={
+              rows.length === 0
+                ? t("admin.logs.emptyTitle")
+                : t("admin.logs.noneInAreaTitle")
+            }
             body={
               rows.length === 0
-                ? "Sign-ins, uploads, shares and account changes all land here the moment they happen."
-                : "Widen the area segment or clear the action chip to see the rest of the trail."
+                ? t("admin.logs.emptyBody")
+                : t("admin.logs.noneInAreaBody")
             }
             action={
               rows.length > 0 ? (
@@ -507,7 +533,7 @@ function AdminLogsContent() {
                     setAction("");
                   }}
                 >
-                  Clear filters
+                  {t("admin.ui.clearFilters")}
                 </Button>
               ) : undefined
             }
@@ -532,7 +558,7 @@ function AdminLogsContent() {
           aria-expanded={open}
         >
           <Chip icon={meta.icon} tone={meta.tone} className="mt-px shrink-0">
-            {meta.label}
+            {auditActionLabel(log.action, t)}
           </Chip>
 
           <span className="min-w-0 flex-1">
@@ -554,9 +580,9 @@ function AdminLogsContent() {
           <span className="ml-auto flex shrink-0 items-center gap-2">
             <span
               className="adm-sub adm-num whitespace-nowrap"
-              title={formatAbsoluteTime(log.createdAt)}
+              title={formatTimestamp(log.createdAt)}
             >
-              {formatRelativeTime(log.createdAt, now)}
+              {relativeTime(log.createdAt, now, t)}
             </span>
             <ChevronDown
               className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
@@ -578,12 +604,12 @@ function AdminLogsContent() {
                   <div className="flex gap-2">
                     <dt className="adm-sub inline-flex w-20 shrink-0 items-center gap-1">
                       <Clock className="h-3 w-3" aria-hidden="true" />
-                      When
+                      {t("admin.logs.when")}
                     </dt>
-                    <dd className="adm-num">{formatAbsoluteTime(log.createdAt)}</dd>
+                    <dd className="adm-num">{formatTimestamp(log.createdAt)}</dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="adm-sub w-20 shrink-0">Account</dt>
+                    <dt className="adm-sub w-20 shrink-0">{t("admin.logs.account")}</dt>
                     <dd>
                       <Link
                         href={`/admin/users/${log.userId}`}
@@ -595,7 +621,7 @@ function AdminLogsContent() {
                     </dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="adm-sub w-20 shrink-0">Resource</dt>
+                    <dt className="adm-sub w-20 shrink-0">{t("admin.logs.resource")}</dt>
                     <dd className="adm-num break-all">
                       {log.resourceType
                         ? `${log.resourceType}${log.resourceId ? `:${log.resourceId}` : ""}`
@@ -603,8 +629,8 @@ function AdminLogsContent() {
                     </dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="adm-sub w-20 shrink-0">Meaning</dt>
-                    <dd className="adm-sub">{meta.description}</dd>
+                    <dt className="adm-sub w-20 shrink-0">{t("admin.logs.meaning")}</dt>
+                    <dd className="adm-sub">{t(meta.descriptionKey)}</dd>
                   </div>
                 </dl>
                 <pre className="adm-code">{JSON.stringify(log.metadata ?? {}, null, 2)}</pre>

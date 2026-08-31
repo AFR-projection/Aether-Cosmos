@@ -1,8 +1,8 @@
 import "./load-env";
 import { eq } from "drizzle-orm";
-import { db } from "../lib/db";
-import { users } from "../lib/db/schema";
-import { hashPassword } from "../lib/auth/password";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { hashPassword } from "@/shared/lib/auth/password";
 
 async function resetMasterPassword() {
   const username = process.env.MASTER_USERNAME ?? "ByAFR";

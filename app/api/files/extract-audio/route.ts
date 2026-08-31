@@ -1,22 +1,22 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
 import {
   getAccessibleFile,
   fileRefusal,
   fileDomainOwnerId,
   resolveWritableDestination,
-} from "@/lib/auth/permissions";
-import { objectExists } from "@/lib/storage/r2";
-import { validateCsrf } from "@/lib/security";
-import { enqueueJob, getQueue } from "@/lib/queue";
-import { logActivity } from "@/lib/auth/audit";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { EXTRACT_AUDIO_SOURCE_MAX_BYTES } from "@/lib/files/edit-limits";
-import { canExtractAudioFrom } from "@/lib/files/media-edit";
+} from "@/shared/lib/auth/permissions";
+import { objectExists } from "@files/infrastructure/storage/r2";
+import { validateCsrf } from "@/shared/lib/security";
+import { enqueueJob, getQueue } from "@/shared/infrastructure/queue";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { EXTRACT_AUDIO_SOURCE_MAX_BYTES } from "@files/domain/services/edit-limits";
+import { canExtractAudioFrom } from "@files/domain/services/media-edit";
 
 /**
  * Pull the audio track out of a video into a new file.

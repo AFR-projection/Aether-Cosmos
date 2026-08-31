@@ -5,7 +5,7 @@ import { join, relative, sep } from "node:path";
 /**
  * PHASE 2 section A — the schema half of the contract.
  *
- * The persistence tests in `lib/brain/graph/derived-link-service.test.ts` prove the
+ * The persistence tests in `src/features/brain/application/commands/derived-link-service.test.ts` prove the
  * application layer keeps its promises. This file proves the database would keep them
  * even if the application forgot: canonical pairs, bounded confidence, one row per
  * pair, no self-edge. Two independent layers, per PRINSIP 6.
@@ -23,7 +23,7 @@ const MIGRATION = readFileSync(
 );
 const ROLLBACK_FILE = "drizzle/0020_phase2_derived_relationships_rollback.sql";
 const ROLLBACK = readFileSync(join(ROOT, ...ROLLBACK_FILE.split("/")), "utf8");
-const SCHEMA = readFileSync(join(ROOT, "lib", "db", "schema.ts"), "utf8");
+const SCHEMA = readFileSync(join(ROOT, "src", "shared", "infrastructure", "db", "schema.ts"), "utf8");
 
 /** Every non-test TypeScript source under the given roots, path relative to ROOT. */
 function sourcesUnder(dirs: string[]): Array<{ path: string; source: string }> {
@@ -45,7 +45,7 @@ function sourcesUnder(dirs: string[]): Array<{ path: string; source: string }> {
   return out;
 }
 
-const brainSources = sourcesUnder(["lib", "app", "workers", "components"]);
+const brainSources = sourcesUnder(["src", "app", "workers"]);
 
 /** The migration's executable statements, with `--` commentary removed. */
 const STATEMENTS = MIGRATION.split("\n")
@@ -278,10 +278,10 @@ describe("STEP 8 — a guess never reaches an explicit-only surface", () => {
    */
   const EXPLICIT_ONLY = [
     // A reasoning chain must be defensible hop by hop.
-    ["lib/brain/graph/path-service.ts", "brain_path"],
+    ["src/features/brain/application/queries/path-service.ts", "brain_path"],
     // An archive carries user-owned data; derived edges rebuild themselves.
-    ["lib/brain/export-service.ts", "export"],
-    ["lib/brain/import-service.ts", "import"],
+    ["src/features/brain/application/commands/export-service.ts", "export"],
+    ["src/features/brain/application/commands/import-service.ts", "import"],
   ] as const;
 
   for (const [path, surface] of EXPLICIT_ONLY) {
@@ -297,15 +297,15 @@ describe("STEP 8 — a guess never reaches an explicit-only surface", () => {
     // A new reader is a design decision, not an accident: it has to be added here
     // together with a test for whatever provenance it exposes.
     const READERS = [
-      "lib/brain/graph/derived-link-service.ts",
-      "lib/brain/graph/related-service.ts",
-      "lib/brain/context-engine.ts",
-      "lib/brain/provenance-service.ts",
+      "src/features/brain/application/commands/derived-link-service.ts",
+      "src/features/brain/application/queries/related-service.ts",
+      "src/features/brain/application/queries/context-engine.ts",
+      "src/features/brain/application/queries/provenance-service.ts",
       // health-service reads applied derived edges ONLY to ANNOTATE the orphan count
       // (see the "orphan count is explicit-only" test below); it never lets a guess
       // change which memories are orphans.
-      "lib/brain/health-service.ts",
-      "lib/db/schema.ts",
+      "src/features/brain/application/queries/health-service.ts",
+      "src/shared/infrastructure/db/schema.ts",
     ];
 
     const found = brainSources
@@ -323,7 +323,7 @@ describe("STEP 8 — a guess never reaches an explicit-only surface", () => {
    * the softer "connected by similarity" annotation on top.
    */
   it("health metrics keeps the orphan count explicit-only, annotating with derived edges", () => {
-    const source = readFileSync(join(ROOT, "lib", "brain", "health-service.ts"), "utf8");
+    const source = readFileSync(join(ROOT, "src", "features", "brain", "application", "queries", "health-service.ts"), "utf8");
 
     // The orphan set is the degree-0 slice of the EXPLICIT link graph…
     expect(source).toMatch(/orphanIds\s*=\s*activeMemoryIds\.filter\(\(id\)\s*=>\s*degreeOf\(id\)\s*===\s*0\)/);

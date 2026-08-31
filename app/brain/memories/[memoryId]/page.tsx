@@ -12,14 +12,14 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { BrainShell } from "@/components/brain/brain-shell";
-import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
-import { MemoryForm } from "@/components/brain/memory-form";
-import { MemoryTypeBadge, ScoreMeter } from "@/components/brain/memory-card";
-import { useDialogs } from "@/components/ui/dialog-prompts";
-import { notify } from "@/lib/system/notify-store";
-import { formatDate } from "@/lib/utils";
+import { Button } from "@/ui/primitives/button";
+import { BrainShell } from "@brain/presentation/components/brain-shell";
+import { BrainErrorState, BrainLoading, BrainPanel } from "@brain/presentation/components/brain-states";
+import { MemoryForm } from "@brain/presentation/components/memory-form";
+import { MemoryTypeBadge, ScoreMeter } from "@brain/presentation/components/memory-card";
+import { useDialogs } from "@/ui/primitives/dialog-prompts";
+import { notify } from "@/shared/lib/system/notify-store";
+import { useFormat, useT } from "@/shared/lib/i18n";
 import {
   useActiveBrain,
   useDeleteMemory,
@@ -28,7 +28,7 @@ import {
   useProjects,
   useRestoreVersion,
   useUpdateMemory,
-} from "@/hooks/use-brain";
+} from "@brain/presentation/hooks/use-brain";
 
 export default function MemoryDetailPage() {
   const params = useParams<{ memoryId: string }>();
@@ -36,6 +36,8 @@ export default function MemoryDetailPage() {
   const router = useRouter();
   const { brain } = useActiveBrain();
   const { dialogs, askConfirm } = useDialogs();
+  const t = useT();
+  const { formatDate } = useFormat();
 
   const [editing, setEditing] = useState(false);
 
@@ -56,10 +58,13 @@ export default function MemoryDetailPage() {
       { archived: archiving },
       {
         onSuccess: () =>
-          notify({ title: archiving ? "Memory archived" : "Memory restored", tone: "success" }),
+          notify({
+            title: archiving ? t("brain.memory.archived") : t("brain.memory.unarchived"),
+            tone: "success",
+          }),
         onError: (error) =>
           notify({
-            title: error instanceof Error ? error.message : "Could not update memory",
+            title: error instanceof Error ? error.message : t("brain.memory.updateFailed"),
             tone: "error",
           }),
       }
@@ -69,22 +74,21 @@ export default function MemoryDetailPage() {
   async function handleDelete() {
     if (!memory) return;
     const confirmed = await askConfirm({
-      title: "Delete this memory?",
-      message:
-        "It is soft-deleted and stops appearing everywhere, including for agents. Archiving keeps it searchable instead.",
-      confirmText: "Delete",
+      title: t("brain.memory.deleteTitle"),
+      message: t("brain.memory.deleteBody"),
+      confirmText: t("common.delete"),
       danger: true,
     });
     if (!confirmed) return;
 
     deleteMemory.mutate(memory.id, {
       onSuccess: () => {
-        notify({ title: "Memory deleted", tone: "success" });
+        notify({ title: t("brain.memory.deleted"), tone: "success" });
         router.push("/brain/memories");
       },
       onError: (error) =>
         notify({
-          title: error instanceof Error ? error.message : "Could not delete memory",
+          title: error instanceof Error ? error.message : t("brain.memory.deleteFailed"),
           tone: "error",
         }),
     });
@@ -92,18 +96,21 @@ export default function MemoryDetailPage() {
 
   async function handleRestore(versionId: string, versionNumber: number) {
     const confirmed = await askConfirm({
-      title: `Restore version ${versionNumber}?`,
-      message:
-        "The current text is saved as a new version first, so nothing is lost either way.",
-      confirmText: "Restore",
+      title: t("brain.memory.restoreTitle", { version: versionNumber }),
+      message: t("brain.memory.restoreBody"),
+      confirmText: t("brain.memory.restore"),
     });
     if (!confirmed) return;
 
     restoreVersion.mutate(versionId, {
-      onSuccess: () => notify({ title: `Restored version ${versionNumber}`, tone: "success" }),
+      onSuccess: () =>
+        notify({
+          title: t("brain.memory.restored", { version: versionNumber }),
+          tone: "success",
+        }),
       onError: (error) =>
         notify({
-          title: error instanceof Error ? error.message : "Could not restore version",
+          title: error instanceof Error ? error.message : t("brain.memory.restoreFailed"),
           tone: "error",
         }),
     });
@@ -111,22 +118,24 @@ export default function MemoryDetailPage() {
 
   return (
     <BrainShell
-      title={memory?.title ?? "Memory"}
+      title={memory?.title ?? t("brain.memory.fallbackTitle")}
       actions={
         <Button asChild variant="ghost" size="sm">
           <Link href="/brain/memories">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            Back
+            {t("common.back")}
           </Link>
         </Button>
       }
     >
       {dialogs}
 
-      {memoryQuery.isLoading && <BrainLoading label="Loading memory" rows={2} />}
+      {memoryQuery.isLoading && (
+        <BrainLoading label={t("brain.memory.loading")} rows={2} />
+      )}
       {memoryQuery.isError && (
         <BrainErrorState
-          message="This memory could not be loaded. It may have been deleted."
+          message={t("brain.memory.loadFailed")}
           onRetry={() => void memoryQuery.refetch()}
         />
       )}
@@ -135,7 +144,7 @@ export default function MemoryDetailPage() {
         <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
           <div className="space-y-5">
             {editing ? (
-              <BrainPanel icon={Pencil} title="Edit memory">
+              <BrainPanel icon={Pencil} title={t("brain.memory.editTitle")}>
                 <MemoryForm
                   initial={{
                     title: memory.title,
@@ -148,7 +157,7 @@ export default function MemoryDetailPage() {
                     tags: memory.tags,
                   }}
                   projects={projects.data?.projects ?? []}
-                  submitLabel="Save changes"
+                  submitLabel={t("brain.memory.saveChanges")}
                   showChangeReason
                   pending={updateMemory.isPending}
                   error={updateMemory.error instanceof Error ? updateMemory.error.message : null}
@@ -156,13 +165,15 @@ export default function MemoryDetailPage() {
                   onSubmit={(values) =>
                     updateMemory.mutate(values, {
                       onSuccess: () => {
-                        notify({ title: "Memory updated", tone: "success" });
+                        notify({ title: t("brain.memory.updated"), tone: "success" });
                         setEditing(false);
                       },
                       onError: (error) =>
                         notify({
                           title:
-                            error instanceof Error ? error.message : "Could not update memory",
+                            error instanceof Error
+                              ? error.message
+                              : t("brain.memory.updateFailed"),
                           tone: "error",
                         }),
                     })
@@ -172,11 +183,11 @@ export default function MemoryDetailPage() {
             ) : (
               <BrainPanel
                 icon={Pencil}
-                title="Content"
+                title={t("brain.memory.content")}
                 action={
                   <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
                     <Pencil className="h-4 w-4" aria-hidden="true" />
-                    Edit
+                    {t("brain.memory.edit")}
                   </Button>
                 }
               >
@@ -191,7 +202,7 @@ export default function MemoryDetailPage() {
               </BrainPanel>
             )}
 
-            <BrainPanel icon={History} title="Version history">
+            <BrainPanel icon={History} title={t("brain.memory.versionHistory")}>
               {versions.data?.versions.length ? (
                 <ol className="space-y-2">
                   {versions.data.versions.map((version) => (
@@ -204,9 +215,9 @@ export default function MemoryDetailPage() {
                           v{version.versionNumber} · {version.title}
                         </span>
                         <span className="block text-[11px] text-muted-foreground">
-                          {version.changeReason ?? "no reason given"} ·{" "}
+                          {version.changeReason ?? t("brain.memory.noReason")} ·{" "}
                           {formatDate(version.createdAt, "short")} ·{" "}
-                          {version.changedByAgent ? "agent" : "you"}
+                          {version.changedByAgent ? t("brain.by.agent") : t("brain.by.you")}
                         </span>
                       </span>
                       <Button
@@ -216,41 +227,47 @@ export default function MemoryDetailPage() {
                         onClick={() => void handleRestore(version.id, version.versionNumber)}
                       >
                         <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                        Restore
+                        {t("brain.memory.restore")}
                       </Button>
                     </li>
                   ))}
                 </ol>
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  No earlier versions. Every edit to the title, content or summary saves one.
-                </p>
+                <p className="text-sm text-muted-foreground">{t("brain.memory.noVersions")}</p>
               )}
             </BrainPanel>
           </div>
 
           <div className="space-y-5">
-            <BrainPanel icon={Archive} title="Details">
+            <BrainPanel icon={Archive} title={t("brain.memory.details")}>
               <dl className="space-y-3 text-sm">
-                <Detail label="Type">
+                <Detail label={t("brain.memory.detailType")}>
                   <MemoryTypeBadge type={memory.type} />
                 </Detail>
-                <Detail label="Scores">
+                <Detail label={t("brain.memory.detailScores")}>
                   <span className="flex flex-wrap items-center gap-3">
-                    <ScoreMeter label="imp" value={memory.importance} tone="accent" />
-                    <ScoreMeter label="conf" value={memory.confidence} tone="warning" />
+                    <ScoreMeter
+                      label={t("brain.card.importanceShort")}
+                      value={memory.importance}
+                      tone="accent"
+                    />
+                    <ScoreMeter
+                      label={t("brain.card.confidenceShort")}
+                      value={memory.confidence}
+                      tone="warning"
+                    />
                   </span>
                 </Detail>
-                <Detail label="Project">
+                <Detail label={t("brain.memory.detailProject")}>
                   {project ? (
                     <Link href="/brain/projects" className="text-accent-ink hover:underline">
                       {project.name}
                     </Link>
                   ) : (
-                    <span className="text-muted-foreground">none</span>
+                    <span className="text-muted-foreground">{t("brain.none")}</span>
                   )}
                 </Detail>
-                <Detail label="Tags">
+                <Detail label={t("brain.memory.detailTags")}>
                   {memory.tags.length ? (
                     <span className="flex flex-wrap gap-1">
                       {memory.tags.map((tag) => (
@@ -263,24 +280,25 @@ export default function MemoryDetailPage() {
                       ))}
                     </span>
                   ) : (
-                    <span className="text-muted-foreground">none</span>
+                    <span className="text-muted-foreground">{t("brain.none")}</span>
                   )}
                 </Detail>
-                <Detail label="Source">
+                <Detail label={t("brain.memory.detailSource")}>
+                  {/* `sourceType` is a wire value, shown as the server sends it. */}
                   <span className="text-muted-foreground">
                     {memory.sourceType}
-                    {memory.createdByAgent ? " (agent)" : ""}
+                    {memory.createdByAgent ? ` ${t("brain.by.agentSuffix")}` : ""}
                   </span>
                 </Detail>
-                <Detail label="Version">
+                <Detail label={t("brain.memory.detailVersion")}>
                   <span className="text-muted-foreground">v{memory.version}</span>
                 </Detail>
-                <Detail label="Created">
+                <Detail label={t("brain.memory.detailCreated")}>
                   <span className="text-muted-foreground">
                     {formatDate(memory.createdAt, "medium")}
                   </span>
                 </Detail>
-                <Detail label="Updated">
+                <Detail label={t("brain.memory.detailUpdated")}>
                   <span className="text-muted-foreground">
                     {formatDate(memory.updatedAt, "medium")}
                   </span>
@@ -288,11 +306,8 @@ export default function MemoryDetailPage() {
               </dl>
             </BrainPanel>
 
-            <BrainPanel icon={Trash2} title="Lifecycle">
-              <p className="text-sm text-muted-foreground">
-                Archiving keeps a memory recoverable and out of recall. Deleting hides it from
-                everything, including agents.
-              </p>
+            <BrainPanel icon={Trash2} title={t("brain.memory.lifecycle")}>
+              <p className="text-sm text-muted-foreground">{t("brain.memory.lifecycleBody")}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   variant="secondary"
@@ -305,7 +320,7 @@ export default function MemoryDetailPage() {
                   ) : (
                     <Archive className="h-4 w-4" aria-hidden="true" />
                   )}
-                  {memory.archivedAt ? "Unarchive" : "Archive"}
+                  {memory.archivedAt ? t("brain.memory.unarchive") : t("brain.memory.archive")}
                 </Button>
                 <Button
                   variant="destructive"
@@ -314,7 +329,7 @@ export default function MemoryDetailPage() {
                   onClick={() => void handleDelete()}
                 >
                   <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  Delete
+                  {t("common.delete")}
                 </Button>
               </div>
             </BrainPanel>

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { EXTRACT_AUDIO_SOURCE_MAX_BYTES } from "@/lib/files/edit-limits";
+import { EXTRACT_AUDIO_SOURCE_MAX_BYTES } from "@files/domain/services/edit-limits";
 
 /**
  * `POST /api/files/extract-audio` — pulling a video's soundtrack into a NEW file.
@@ -30,13 +30,13 @@ const store = vi.hoisted(() => ({
   objectChecks: 0,
 }));
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn(async () => store.csrfOk) };
 });
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return {
     ...actual,
     requireAuth: vi.fn().mockResolvedValue({ id: "user-1", role: "user" }),
@@ -44,7 +44,7 @@ vi.mock("@/lib/auth/session", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/auth/permissions", () => ({
+vi.mock("@/shared/lib/auth/permissions", () => ({
   getAccessibleFile: vi.fn(async () =>
     store.file ? { canView: true, canEdit: store.canEdit, file: store.file } : null
   ),
@@ -53,14 +53,14 @@ vi.mock("@/lib/auth/permissions", () => ({
   resolveWritableDestination: vi.fn(async () => store.destination),
 }));
 
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@files/infrastructure/storage/r2", () => ({
   objectExists: vi.fn(async () => {
     store.objectChecks++;
     return store.objectPresent;
   }),
 }));
 
-vi.mock("@/lib/queue", () => ({
+vi.mock("@/shared/infrastructure/queue", () => ({
   getQueue: vi.fn(() => (store.queueUp ? ({} as unknown) : null)),
   enqueueJob: vi.fn(async (type: string, data: Record<string, unknown>) => {
     if (!store.queueUp) return false;
@@ -69,13 +69,13 @@ vi.mock("@/lib/queue", () => ({
   }),
 }));
 
-vi.mock("@/lib/auth/audit", () => ({
+vi.mock("@/shared/lib/auth/audit", () => ({
   logActivity: vi.fn(async (_user: unknown, action: string, options?: { metadata?: unknown }) => {
     store.activity.push({ action, metadata: options?.metadata });
   }),
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   const selectChain = {
     from: () => selectChain,
     where: () => selectChain,
@@ -84,7 +84,7 @@ vi.mock("@/lib/db", () => {
   return { db: { select: () => selectChain } };
 });
 
-vi.mock("@/lib/db/schema", async (importOriginal) => importOriginal());
+vi.mock("@/shared/infrastructure/db/schema", async (importOriginal) => importOriginal());
 
 function seedVideo(overrides: Record<string, unknown> = {}) {
   store.file = {

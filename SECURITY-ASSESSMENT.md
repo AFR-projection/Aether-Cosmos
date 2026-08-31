@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Target** | Aether Cosmos ByAFR — Next.js 16 App Router, PostgreSQL (Neon), Cloudflare R2, Redis |
+| **Target** | Aether Cosmos ByAFR — Next.js 16 App Router, PostgreSQL, Cloudflare R2, Redis |
 | **Scope** | Full source tree at `C:\Users\User\Documents\StrogeByAFR` (branch `main`, v0.4.0) — authentication, session management, authorization, upload/download, public sharing, admin console, OAuth 2.1 + API keys, and the Second Brain MCP surface |
 | **Authorization** | Owner-authorized white-box review. No third-party system was touched. |
 | **Method** | OWASP WSTG, adapted to source-level review (see *Methodology*) |
@@ -68,7 +68,7 @@ claim can be judged honestly.
 
 | WSTG step | How it was performed here | What this cannot cover |
 |---|---|---|
-| 1. Reconnaissance / mapping | Enumerated every route handler under `app/api/**` and every page under `app/**`; read `lib/**` for the shared gate helpers; mapped which routes are reachable with no session | Deployed headers, CDN behaviour, edge config |
+| 1. Reconnaissance / mapping | Enumerated every route handler under `app/api/**` and every page under `app/**`; read `src/**` for the shared gate helpers; mapped which routes are reachable with no session | Deployed headers, CDN behaviour, edge config |
 | 2. Authentication | Read the full login → 2-Step Code → authenticator → session chain, the OTP and password-reset flows, and the staged-token HMAC | Real timing measurements |
 | 3. Authorization | Traced every mutating route to its guard (`requireAuth` / `requireMaster` / `requireMasterOrApiKey` / `requireBrainContext` / `folderCapabilities`); asserted structurally that no route can be added without one | — |
 | 4. Input validation | Checked every body-reading route for a zod parse and a byte ceiling; every path segment and query parameter for a shape check before it reaches SQL, Redis or a filesystem-like API | Runtime fuzzing |
@@ -94,7 +94,7 @@ checkable property rather than a hope.
 ## WEB-001 — Authentication secret defaulted to a value published in the source
 
 **Severity**: Critical (CVSS 9.8 — `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`)
-**Affected**: `lib/security/step-code.ts`, `lib/email/crypto.ts`, `lib/auth/*` — every consumer of `SESSION_SECRET`
+**Affected**: `@/shared/lib/security/step-code.ts`, `@/shared/infrastructure/email/crypto.ts`, `@/shared/lib/auth/*` — every consumer of `SESSION_SECRET`
 **Parameter**: none (deployment default)
 **Status**: Fixed
 
@@ -116,7 +116,7 @@ for stored SMTP credentials.
 
 **Reproduction steps**
 1. Deploy without `SESSION_SECRET` (the pre-fix default path).
-2. Compute `HMAC-SHA256("dev-insecure-secret-change-me", "<userId>:step_code:<exp>")` using the algorithm in `lib/security/step-code.ts`.
+2. Compute `HMAC-SHA256("dev-insecure-secret-change-me", "<userId>:step_code:<exp>")` using the algorithm in `@/shared/lib/security/step-code.ts`.
 3. POST the forged token to the second-factor endpoint with any code-bearing payload the stage accepts.
 4. A full session cookie is issued for `<userId>`.
 
@@ -140,11 +140,11 @@ Complete authentication bypass for every account on any deployment missing the v
 including accounts with 2FA fully configured. Stored mail credentials become decryptable.
 
 **Remediation (applied)**
-`lib/security/app-secret.ts` is now the single source: it accepts `SESSION_SECRET` or
+`@/shared/lib/security/app-secret.ts` is now the single source: it accepts `SESSION_SECRET` or
 `CSRF_SECRET`, enforces `MIN_SECRET_LENGTH`, and treats `DEV_FALLBACK_SECRET` as a
 development-only value that warns loudly once and is refused outside development. The
 three local fallbacks were deleted.
-**Evidence**: `lib/security/app-secret.test.ts`
+**Evidence**: `@/shared/lib/security/app-secret.test.ts`
 **Operator action**: confirm `SESSION_SECRET` is set in the live environment. Rotating it
 invalidates saved Gmail App Passwords and enrolled 2FA secrets — re-enter them after a
 rotation.
@@ -205,7 +205,7 @@ condition, in the same statement.
 ## WEB-003 — OTP guess budget was read, compared, then written back
 
 **Severity**: High (CVSS 8.1 — `CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H`)
-**Affected**: `POST /api/auth/verify-otp` → `lib/email/otp-verify.ts`
+**Affected**: `POST /api/auth/verify-otp` → `verifyOTP` in `@/shared/infrastructure/email/email-service.ts`
 **Parameter**: `code`
 **Status**: Fixed
 
@@ -244,14 +244,14 @@ Both the attempt and the burn are single conditional UPDATE statements: the ceil
 of the `WHERE`, the counter is incremented as a SQL expression, and a loser gets zero rows
 back. The test's fake `db` evaluates the predicate at write time, so a return to
 select-then-update fails it.
-**Evidence**: `lib/email/otp-verify.test.ts`
+**Evidence**: `@/shared/infrastructure/email/otp-verify.test.ts`
 
 ---
 
 ## WEB-004 — OAuth authorization codes and refresh tokens were not atomically single-use
 
 **Severity**: High (CVSS 8.1 — `CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H`)
-**Affected**: `POST /api/oauth/token` → `lib/oauth/codes.ts`, `lib/oauth/tokens.ts`
+**Affected**: `POST /api/oauth/token` → `@/shared/lib/auth/oauth/codes.ts`, `@/shared/lib/auth/oauth/tokens.ts`
 **Parameter**: `code`, `refresh_token`
 **Status**: Fixed
 
@@ -336,7 +336,7 @@ Destructive, cross-tenant data loss by the least-privileged role in the sharing 
 silent data exfiltration by relocation.
 
 **Remediation (applied)**
-`folderCapabilities()` in `lib/auth/permissions.ts` is now the single authority and
+`folderCapabilities()` in `@/shared/lib/auth/permissions.ts` is now the single authority and
 **membership beats the master override**; `view` yields no mutating capability; a member
 leaves a share rather than deleting it; `resolveWritableDestination()` validates every move
 target. Every mutating route consults the model and refuses **before** any write.
@@ -384,7 +384,7 @@ of server-wide mail credentials.
 structural: `tests/csrf-coverage.test.ts` walks every route file, finds every exported
 `POST|PUT|PATCH|DELETE`, and fails if it lacks a gate — deliberate exemptions must be listed
 with a stated reason. A new route cannot forget it.
-**Evidence**: `tests/csrf-coverage.test.ts`, `lib/security/csrf-bearer.test.ts`
+**Evidence**: `tests/csrf-coverage.test.ts`, `@/shared/lib/security/csrf-bearer.test.ts`
 
 ---
 
@@ -421,14 +421,14 @@ through the delivery log. Scope is Changed: the impacted component is the infras
 this app.
 
 **Remediation (applied)**
-`lib/webhooks/ssrf.ts` replaces the denylist with a resolve-then-verify allowlist:
+`@/shared/infrastructure/webhooks/ssrf.ts` replaces the denylist with a resolve-then-verify allowlist:
 `parseWebhookUrl` enforces scheme and shape; DNS resolution is performed and **every**
 returned address is checked against the full set of private/reserved IPv4 and IPv6 ranges
 (`isBlockedAddress`); loopback is permitted only where explicitly enabled
 (`loopbackAllowed`); `fetchWebhook` re-validates on redirect rather than following blindly.
 `assertSafeWebhookTarget` throws `WebhookTargetError` and fails closed.
-**Evidence**: `lib/webhooks/ssrf.test.ts` (written as the bypasses that used to work),
-`lib/webhooks/manage.test.ts`
+**Evidence**: `@/shared/infrastructure/webhooks/ssrf.test.ts` (written as the bypasses that used to work),
+`@/shared/infrastructure/webhooks/manage.test.ts`
 **Residual risk**: one-lookup DNS-rebinding window between validation and connection —
 accepted, see *Residual risks*.
 
@@ -487,14 +487,14 @@ Every access-limited public share link was unlimited to anyone who sent a one-by
 WEB-020 (no metering) the same request was also invisible to the owner's bandwidth quota.
 
 **Remediation (applied)**
-Both questions are now answered by one parse. `lib/storage/http-range.ts` (extracted from
+Both questions are now answered by one parse. `@files/infrastructure/storage/http-range.ts` (extracted from
 the authenticated preview route, so the two byte-serving routes share it) parses the header
 once; the parsed range is forwarded to R2 and the response is a real `206` with
 `Content-Range`. The continuation exemption now requires *evidence of a paid access*:
-`shareResumeIsFree()` in `lib/shares/access.ts` grants it only when `accessCount >= 1` and
+`shareResumeIsFree()` in `@shares/application/access.ts` grants it only when `accessCount >= 1` and
 `lastAccessedAt` is within `SHARE_RESUME_WINDOW_MS` (5 minutes). A caller who has never paid
 gets charged; an unsatisfiable range is treated as a whole-object request and charged.
-**Evidence**: `lib/storage/http-range.test.ts` (13), `lib/shares/access.test.ts` (18),
+**Evidence**: `@files/infrastructure/storage/http-range.test.ts` (13), `@shares/application/access.test.ts` (18),
 `tests/share-token-budget.test.ts` (38) — including "charges a Range from a caller who has
 not paid for anything yet", "refuses that Range once the link is spent", and "actually
 serves the range it was given".
@@ -533,7 +533,7 @@ A "single use" link was worth as many downloads as the attacker could open socke
 expression, `lastAccessedAt` is stamped in the same UPDATE, and `RETURNING` yields the row
 or nothing. The test's fake `db` refuses to accept a numeric `accessCount` payload, so a
 return to JS arithmetic fails the suite rather than silently regressing.
-**Evidence**: `lib/shares/access.test.ts` — "caps a concurrent burst at the ceiling",
+**Evidence**: `@shares/application/access.test.ts` — "caps a concurrent burst at the ceiling",
 "increments with a SQL expression, never a value read beforehand".
 
 ---
@@ -569,13 +569,13 @@ Denial of service for every tenant from an unauthenticated request, at negligibl
 the attacker.
 
 **Remediation (applied)**
-`lib/api/read-body.ts` / `lib/api/body.ts` drain the body through the stream with a hard
+`@/shared/api/read-body.ts` / `@/shared/api/body.ts` drain the body through the stream with a hard
 ceiling (`MAX_REQUEST_BODY_BYTES` = 64 KiB), abandon the read the moment it is crossed, and
 cancel the reader rather than politely draining the rest. The declared `Content-Length` is
 used only as a *free early refusal*, never to allow. `handleApiError` maps
 `BodyTooLargeError` → 413 and `BodyInvalidJsonError` → 400.
-**Evidence**: `lib/api/body.test.ts` (a false `content-length`, and a chunked stream with no
-`content-length` that keeps going), `lib/api/response.test.ts`,
+**Evidence**: `@/shared/api/body.test.ts` (a false `content-length`, and a chunked stream with no
+`content-length` that keeps going), `@/shared/api/response.test.ts`,
 `tests/oauth-public-endpoints.test.ts`
 
 ---
@@ -610,7 +610,7 @@ Credential rotation did not end an active compromise — the one thing it exists
 **Remediation (applied)**
 Both routes revoke the target's sessions as part of the same operation, and the revocation is
 recorded in the activity log. The test counts the revoked session ids.
-**Evidence**: `tests/admin-users-routes.test.ts`, `lib/admin/user-update.test.ts`
+**Evidence**: `tests/admin-users-routes.test.ts`, `@admin/domain/services/user-update.test.ts`
 
 ---
 
@@ -647,7 +647,7 @@ limited to operator error and to an attacker who already holds an admin session.
 A zod schema per route: `role` as an enum, `quotaBytes` as a bounded non-negative integer,
 `username` length- and charset-checked, booleans as booleans, and a body-optional `DELETE`.
 The last-master guard is preserved.
-**Evidence**: `tests/admin-users-routes.test.ts`, `lib/admin/user-update.test.ts`
+**Evidence**: `tests/admin-users-routes.test.ts`, `@admin/domain/services/user-update.test.ts`
 
 ---
 
@@ -682,10 +682,10 @@ Arbitrary file write on the downloader's machine with a vulnerable extractor —
 because the impacted component is the victim's system.
 
 **Remediation (applied)**
-`lib/storage/archive-path.ts`: `archiveSegment` flattens POSIX and Windows traversal, strips
+`@files/infrastructure/storage/archive-path.ts`: `archiveSegment` flattens POSIX and Windows traversal, strips
 control characters and NUL, and `uniqueArchivePath` keeps duplicates distinct instead of
 overwriting. Both archive routes use it.
-**Evidence**: `lib/storage/archive-path.test.ts`, `tests/download-zip-entry-names.test.ts`
+**Evidence**: `@files/infrastructure/storage/archive-path.test.ts`, `tests/download-zip-entry-names.test.ts`
 (asserts every name handed to `archiver`)
 
 ---
@@ -720,9 +720,9 @@ Single-request denial of service affecting all tenants, from the lowest privileg
 
 **Remediation (applied)**
 Ceilings are enforced *before* the memory is spent — a bounded read of the object
-(`lib/storage/read-bounded.ts`), a cap on entry count and per-entry uncompressed size, and a
+(`@/shared/lib/stream/read-bounded.ts`), a cap on entry count and per-entry uncompressed size, and a
 bounded decompression on extract. Over-limit answers 413 rather than dying.
-**Evidence**: `tests/archive-inspect-limits.test.ts`, `lib/storage/archive-read.test.ts`
+**Evidence**: `tests/archive-inspect-limits.test.ts`, `@files/infrastructure/storage/archive-read.test.ts`
 
 ---
 
@@ -755,7 +755,7 @@ Cookie: storage_session=<any user>            {"success":false,"code":"VALIDATIO
 Memory exhaustion of the shared process from a tiny authenticated request.
 
 **Remediation (applied)**
-`lib/files/edit-limits.ts` pins `EDIT_MAX_DIMENSION` and `EDIT_SOURCE_MAX_BYTES`; the route
+`@files/domain/services/edit-limits.ts` pins `EDIT_MAX_DIMENSION` and `EDIT_SOURCE_MAX_BYTES`; the route
 parses geometry with zod against those bounds and reads the source through the bounded reader,
 using the **actual** byte count rather than the declared one.
 **Evidence**: `tests/files-edit-limits.test.ts`
@@ -799,7 +799,7 @@ media duration, and refuses before the job is enqueued. ffmpeg is invoked with a
 ## WEB-017 — Stored XSS in the text previewer via file content
 
 **Severity**: Medium (CVSS 6.1 — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N`)
-**Affected**: text/code previewer (`lib/viewers/text-highlight.ts`), reachable through `/shared/[token]` and shared folders
+**Affected**: text/code previewer (`@files/domain/services/text-highlight.ts`), reachable through `/shared/[token]` and shared folders
 **Parameter**: file content
 **Status**: Fixed
 
@@ -831,7 +831,7 @@ victim's — session-scoped data access and actions as that user. Scope Changed 
 Escaping happens **before** any highlighter runs, for every language. The invariant the tests
 hold is blunt: for each of the ~15 selectable languages plus unmapped ones, no `<` from the file
 may survive into the output as markup.
-**Evidence**: `lib/viewers/text-highlight.test.ts`
+**Evidence**: `@files/domain/services/text-highlight.test.ts`
 
 ---
 
@@ -865,7 +865,7 @@ is exactly the scenario it exists to stop.
 **Remediation (applied)**
 A per-account ceiling on the authenticator layer, independent of the IP limiter, with the same
 lockout accounting as the other factors.
-**Evidence**: `tests/login-hardening.test.ts`, `lib/security/user-rate-limit.test.ts`
+**Evidence**: `tests/login-hardening.test.ts`, `@/shared/lib/security/user-rate-limit.test.ts`
 
 ---
 
@@ -900,7 +900,7 @@ Bounded body (WEB-010), zod-validated metadata with length and count limits and 
 vocabulary for `grant_types` / `response_types`, every `redirect_uri` checked against
 `isAllowedRedirectUri` (no `javascript:`/`data:`/`file:`, no plaintext `http` off loopback), a
 per-IP rate limit, and a generic 500 body.
-**Evidence**: `tests/oauth-public-endpoints.test.ts`, `lib/oauth/redirect-policy.test.ts`
+**Evidence**: `tests/oauth-public-endpoints.test.ts`, `@/shared/lib/auth/oauth/redirect-policy.test.ts`
 
 ---
 
@@ -942,7 +942,7 @@ on a malformed body, and a silently unusable consent flow for `plain` clients.
 so the mismatch is refused at the consent step. CSRF-before-auth and the role scope clamp
 (`clampScopesToRole`) are unchanged — the role, not the request, decides whether `admin:*` can be
 granted.
-**Evidence**: `tests/oauth-approve.test.ts` (25 tests), `lib/oauth/scope-clamp.test.ts`
+**Evidence**: `tests/oauth-approve.test.ts` (25 tests), `@/shared/lib/auth/oauth/scope-clamp.test.ts`
 
 ---
 
@@ -1044,10 +1044,10 @@ Attacker-sized Redis keys (memory pressure on shared cache) and unnecessary quer
 unauthenticated request.
 
 **Remediation (applied)**
-`lib/shares/token.ts`: `isPossibleShareToken` bounds the segment to 8–128 characters over
+`@shares/domain/token.ts`: `isPossibleShareToken` bounds the segment to 8–128 characters over
 nanoid's URL-safe alphabet, and each route answers 404 — no oracle — **before** any query or cache
 key. Applied to all four handlers.
-**Evidence**: `lib/shares/token.test.ts`, `tests/share-token-budget.test.ts` (asserts
+**Evidence**: `@shares/domain/token.test.ts`, `tests/share-token-budget.test.ts` (asserts
 `store.rateKeys === []` for a rejected token)
 
 ---
@@ -1153,7 +1153,7 @@ Log flooding and misleading error telemetry; no data exposure (the database mess
 `handleApiError` maps `22P02` → 400 `INVALID_ID` centrally, so all 27 routes are covered at once,
 and **still logs** it — the same SQLSTATE comes from a genuine server-side bad cast, which is a bug
 worth seeing. The response carries no Postgres detail (asserted).
-**Evidence**: `lib/api/response.test.ts` — "answers 400 for an id that is not a UUID", "still logs
+**Evidence**: `@/shared/api/response.test.ts` — "answers 400 for an id that is not a UUID", "still logs
 22P02", "does not echo the database's own message on the 400"
 
 ---
@@ -1196,7 +1196,7 @@ a 404 with no write, for both the single and batch handlers.
 ## WEB-028 — Informational: `BodyTooLargeError` existed twice, breaking the 413 branch
 
 **Severity**: Informational (control-integrity regression, introduced and fixed during this engagement)
-**Affected**: `lib/api/body.ts`, `lib/api/read-body.ts`, `lib/api/response.ts`
+**Affected**: `@/shared/api/body.ts`, `@/shared/api/read-body.ts`, `@/shared/api/response.ts`
 **Status**: Fixed
 
 **Description**
@@ -1208,18 +1208,18 @@ perform. This is recorded because it is the failure mode a control-hardening cha
 to produce: the check fires, and the response says the server broke.
 
 **Remediation (applied)**
-The classes are declared once in `lib/api/read-body.ts` and re-exported from `lib/api/body.ts` (the
+The classes are declared once in `@/shared/api/read-body.ts` and re-exported from `@/shared/api/body.ts` (the
 re-export also avoids a `response.ts` ↔ `body.ts` import cycle). The regression test asserts
 **object identity** across both module paths, not just that both names exist, and drives a real
 oversized and a real malformed body through each reader into `handleApiError`.
-**Evidence**: `lib/api/response.test.ts` — "there is exactly one class per name" (4 tests)
+**Evidence**: `@/shared/api/response.test.ts` — "there is exactly one class per name" (4 tests)
 
 ---
 
 ## WEB-029 — Informational: MCP↔REST scope parity
 
 **Severity**: Informational (verified correct, now locked by a test)
-**Affected**: `lib/brain/mcp/**`, brain REST routes
+**Affected**: `@brain/infrastructure/mcp/*`, brain REST routes
 **Status**: Verified
 
 **Description**
@@ -1231,7 +1231,7 @@ mapping is complete and **fail-closed** — an unmapped tool is denied rather th
 **Remediation (applied)**
 A parity test enumerates the tool table and asserts each entry requires at least the scope its REST
 equivalent requires, and that an unknown tool name resolves to "deny".
-**Evidence**: `lib/brain/mcp/scope-parity.test.ts`
+**Evidence**: `@brain/infrastructure/mcp/scope-parity.test.ts`
 
 ---
 
@@ -1292,7 +1292,7 @@ several are now pinned structurally so a future route cannot silently omit them.
   brain query omits its `brain_id` predicate, including in the same `WHERE` as an ANN
   `ORDER BY`.
 - **Body validation coverage** — of 61 body-reading routes, only 3 lacked a zod parse; one
-  is `oauth/register`, which validates inside `lib/oauth/clients.ts` instead. The other two
+  is `oauth/register`, which validates inside `@/shared/lib/auth/oauth/clients.ts` instead. The other two
   are fixed above.
 - **`app/api/brain/[id]/import`** — bounded, owner-only, rate-limited to 2 per window.
 - **`app/api/shares/[id]/access-logs`** — ownership check correct; no cross-tenant read.
@@ -1324,7 +1324,7 @@ a place where the next change should be careful.
 - `download/[id]` carries a **local duplicate** of `getSafeMimeType`. This is the same
   shape as WEB-028 — one concept, two definitions — and should be collapsed to the shared
   helper.
-- `sanitizeFilename` in `lib/utils.ts` is dead code. Dead security helpers get called by
+- `sanitizeFilename` in `@/shared/lib/utils.ts` is dead code. Dead security helpers get called by
   mistake later; delete it or wire it in.
 - The legacy `upload/presign` → `complete` flow trusts the client-declared `sizeBytes`
   until the object is verified. Quota accounting is therefore briefly client-influenced.
@@ -1353,14 +1353,14 @@ in this environment, not failing.
 Regression tests were added or extended for **every** scored finding. The tests that matter
 most are the ones that fail if a fix is reverted in spirit rather than in letter:
 
-- `lib/shares/access.test.ts` — the fake `db` evaluates the budget predicate **at write
+- `@shares/application/access.test.ts` — the fake `db` evaluates the budget predicate **at write
   time** inside a single `returning()`, with no `await` in between. A 25-way concurrent
   burst against a 1-unit link must yield exactly 1 success. If the production code ever
   decides in JS again, this overspends and the test fails.
-- `lib/shares/access.test.ts` also throws if `accessCount` arrives as a **number** rather
+- `@shares/application/access.test.ts` also throws if `accessCount` arrives as a **number** rather
   than a SQL expression — i.e. it detects a value computed from an earlier read, which is
   the actual defect, not just its symptom.
-- `lib/api/response.test.ts` — asserts **class identity** across both body-module paths, so
+- `@/shared/api/response.test.ts` — asserts **class identity** across both body-module paths, so
   re-splitting `BodyTooLargeError` is a failing test instead of a silent 413 → 500.
 - `tests/csrf-coverage.test.ts` / `tests/brain-isolation.test.ts` — structural: a new route
   that forgets its gate fails the suite without anyone remembering to write a test for it.

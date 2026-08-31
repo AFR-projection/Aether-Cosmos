@@ -9,7 +9,7 @@
  *   node scripts/monitor.js --file PATH        # log to file
  */
 
-import "../lib/env/load-env";
+import "@/shared/lib/env/load-env";
 import {
   monitorHealth,
   runHealthChecks,
@@ -17,7 +17,7 @@ import {
   WebhookAlertChannel,
   FileAlertChannel,
   type AlertChannel,
-} from "../lib/monitoring/health-monitor";
+} from "@/shared/lib/monitoring/health-monitor";
 
 async function main() {
   const args = process.argv.slice(2);

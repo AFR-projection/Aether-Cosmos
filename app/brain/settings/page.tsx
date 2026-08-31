@@ -2,20 +2,22 @@
 
 import { useState } from "react";
 import { Archive, Download, Loader2, Plus, Save, Settings2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { BrainShell } from "@/components/brain/brain-shell";
-import { BrainLoading, BrainPanel } from "@/components/brain/brain-states";
-import { EmbeddingSettingsCard } from "@/components/brain/embedding-settings-card";
-import { notify } from "@/lib/system/notify-store";
-import { apiFetch } from "@/lib/api/client";
-import { formatDate } from "@/lib/utils";
-import { useActiveBrain, useCreateBrain, useUpdateBrain } from "@/hooks/use-brain";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { BrainShell } from "@brain/presentation/components/brain-shell";
+import { BrainLoading, BrainPanel } from "@brain/presentation/components/brain-states";
+import { EmbeddingSettingsCard } from "@brain/presentation/components/embedding-settings-card";
+import { notify } from "@/shared/lib/system/notify-store";
+import { apiFetch } from "@/shared/api/client";
+import { useFormat, useT } from "@/shared/lib/i18n";
+import { useActiveBrain, useCreateBrain, useUpdateBrain } from "@brain/presentation/hooks/use-brain";
 
 export default function BrainSettingsPage() {
   const { brain, brains, select } = useActiveBrain();
   const updateBrain = useUpdateBrain(brain?.id);
   const createBrain = useCreateBrain();
+  const t = useT();
+  const { formatDate, formatNumber } = useFormat();
 
   const [name, setName] = useState(brain?.name ?? "");
   const [description, setDescription] = useState(brain?.description ?? "");
@@ -37,10 +39,10 @@ export default function BrainSettingsPage() {
     updateBrain.mutate(
       { name: name.trim(), description: description.trim() || null },
       {
-        onSuccess: () => notify({ title: "Brain updated", tone: "success" }),
+        onSuccess: () => notify({ title: t("brain.settings.updated"), tone: "success" }),
         onError: (error) =>
           notify({
-            title: error instanceof Error ? error.message : "Could not update brain",
+            title: error instanceof Error ? error.message : t("brain.settings.updateFailed"),
             tone: "error",
           }),
       }
@@ -55,12 +57,14 @@ export default function BrainSettingsPage() {
       {
         onSuccess: () =>
           notify({
-            title: archiving ? "Brain archived — it is now read-only" : "Brain reactivated",
+            title: archiving
+              ? t("brain.settings.archivedNotice")
+              : t("brain.settings.reactivated"),
             tone: "success",
           }),
         onError: (error) =>
           notify({
-            title: error instanceof Error ? error.message : "Could not change status",
+            title: error instanceof Error ? error.message : t("brain.settings.statusChangeFailed"),
             tone: "error",
           }),
       }
@@ -77,20 +81,21 @@ export default function BrainSettingsPage() {
     try {
       const res = await apiFetch<Record<string, unknown>>(`/api/brain/${brain.id}/export`);
       if (!res.success || !res.data) {
-        throw new Error(res.error ?? "Export failed");
+        throw new Error(res.error ?? t("brain.settings.exportFailed"));
       }
       const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
+      // The filename stays ASCII and locale-free: it has to survive every OS.
       const slug = brain.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       link.href = url;
       link.download = `${slug || "brain"}-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
-      notify({ title: "Brain exported", tone: "success" });
+      notify({ title: t("brain.settings.exported"), tone: "success" });
     } catch (error) {
       notify({
-        title: error instanceof Error ? error.message : "Export failed",
+        title: error instanceof Error ? error.message : t("brain.settings.exportFailed"),
         tone: "error",
       });
     } finally {
@@ -105,29 +110,41 @@ export default function BrainSettingsPage() {
       { name: newName.trim() },
       {
         onSuccess: (data) => {
-          notify({ title: `Created "${data.brain.name}"`, tone: "success" });
+          notify({
+            title: t("brain.settings.created", { name: data.brain.name }),
+            tone: "success",
+          });
           setNewName("");
           select(data.brain.id);
         },
         onError: (error) =>
           notify({
-            title: error instanceof Error ? error.message : "Could not create brain",
+            title: error instanceof Error ? error.message : t("brain.settings.createFailed"),
             tone: "error",
           }),
       }
     );
   }
 
-  if (!brain) return <BrainShell title="Settings"><BrainLoading label="Loading brain" /></BrainShell>;
+  if (!brain) {
+    return (
+      <BrainShell title={t("brain.settings.title")}>
+        <BrainLoading label={t("brain.settings.loading")} />
+      </BrainShell>
+    );
+  }
 
   return (
-    <BrainShell title="Settings" description="Rename, archive, export, or add another brain.">
+    <BrainShell
+      title={t("brain.settings.title")}
+      description={t("brain.settings.description")}
+    >
       <div className="grid gap-5 lg:grid-cols-2">
-        <BrainPanel icon={Settings2} title="This brain">
+        <BrainPanel icon={Settings2} title={t("brain.settings.thisBrain")}>
           <form onSubmit={handleSave} className="space-y-3">
             <div>
               <label htmlFor="brain-name" className="mb-1.5 block text-xs font-medium text-foreground">
-                Name
+                {t("brain.settings.name")}
               </label>
               <Input
                 id="brain-name"
@@ -141,26 +158,28 @@ export default function BrainSettingsPage() {
                 htmlFor="brain-description"
                 className="mb-1.5 block text-xs font-medium text-foreground"
               >
-                Description
+                {t("brain.settings.descriptionLabel")}
               </label>
               <Input
                 id="brain-description"
                 value={description}
                 maxLength={500}
                 onChange={(event) => setDescription(event.target.value)}
-                placeholder="What is this brain for?"
+                placeholder={t("brain.settings.descriptionPlaceholder")}
               />
             </div>
             <p className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
               <span className="brain-chip brain-chip--mono" data-tone={brain.status === "active" ? "success" : "muted"}>
-                {brain.status}
+                {brain.status === "active"
+                  ? t("brain.settings.statusActive")
+                  : t("brain.settings.statusArchived")}
               </span>
               {brain.isDefault && (
                 <span className="brain-chip brain-chip--mono" data-tone="accent">
-                  default
+                  {t("brain.settings.defaultChip")}
                 </span>
               )}
-              Created {formatDate(brain.createdAt, "medium")}
+              {t("brain.settings.createdOn", { date: formatDate(brain.createdAt, "medium") })}
             </p>
             <div className="flex justify-end">
               <Button type="submit" size="sm" disabled={!name.trim() || updateBrain.isPending}>
@@ -168,20 +187,17 @@ export default function BrainSettingsPage() {
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 )}
                 <Save className="h-4 w-4" aria-hidden="true" />
-                Save
+                {t("common.save")}
               </Button>
             </div>
           </form>
         </BrainPanel>
 
         <div className="space-y-5">
-          <BrainPanel icon={Download} title="Export">
-            <p className="text-sm text-muted-foreground">
-              Downloads this brain as JSON: memories with their tags and provenance, projects, and
-              the knowledge graph. No credentials are included.
-            </p>
+          <BrainPanel icon={Download} title={t("brain.settings.exportTitle")}>
+            <p className="text-sm text-muted-foreground">{t("brain.settings.exportBody")}</p>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Export only. Use this for backups; import is not available.
+              {t("brain.settings.exportNote")}
             </p>
             <Button
               variant="secondary"
@@ -195,15 +211,15 @@ export default function BrainSettingsPage() {
               ) : (
                 <Download className="h-4 w-4" aria-hidden="true" />
               )}
-              Export brain
+              {t("brain.settings.exportAction")}
             </Button>
           </BrainPanel>
 
-          <BrainPanel icon={Archive} title="Status">
+          <BrainPanel icon={Archive} title={t("brain.settings.statusTitle")}>
             <p className="text-sm text-muted-foreground">
               {brain.status === "active"
-                ? "Archiving makes this brain read-only. Nothing is deleted, and agents can still recall from it."
-                : "This brain is archived and read-only. Reactivate it to allow writes again."}
+                ? t("brain.settings.statusActiveBody")
+                : t("brain.settings.statusArchivedBody")}
             </p>
             <Button
               variant="secondary"
@@ -213,11 +229,16 @@ export default function BrainSettingsPage() {
               onClick={handleArchiveToggle}
             >
               <Archive className="h-4 w-4" aria-hidden="true" />
-              {brain.status === "active" ? "Archive brain" : "Reactivate brain"}
+              {brain.status === "active"
+                ? t("brain.settings.archiveAction")
+                : t("brain.settings.reactivateAction")}
             </Button>
           </BrainPanel>
 
-          <BrainPanel icon={Plus} title={`Your brains (${brains.length})`}>
+          <BrainPanel
+            icon={Plus}
+            title={t("brain.settings.yourBrains", { count: formatNumber(brains.length) })}
+          >
             <ul className="space-y-1.5">
               {brains.map((option) => (
                 <li
@@ -228,16 +249,18 @@ export default function BrainSettingsPage() {
                     <span className="min-w-0 truncate text-sm text-foreground">{option.name}</span>
                     {option.isDefault && (
                       <span className="brain-chip brain-chip--mono shrink-0" data-tone="accent">
-                        default
+                        {t("brain.settings.defaultChip")}
                       </span>
                     )}
                     {option.id === brain.id && (
-                      <span className="brain-chip brain-chip--mono shrink-0">current</span>
+                      <span className="brain-chip brain-chip--mono shrink-0">
+                        {t("brain.settings.currentChip")}
+                      </span>
                     )}
                   </span>
                   {option.id !== brain.id && (
                     <Button variant="ghost" size="sm" onClick={() => select(option.id)}>
-                      Switch
+                      {t("brain.settings.switch")}
                     </Button>
                   )}
                 </li>
@@ -249,14 +272,14 @@ export default function BrainSettingsPage() {
                 value={newName}
                 maxLength={100}
                 onChange={(event) => setNewName(event.target.value)}
-                placeholder="New brain name"
-                aria-label="New brain name"
+                placeholder={t("brain.settings.newBrainPlaceholder")}
+                aria-label={t("brain.settings.newBrainPlaceholder")}
               />
               <Button type="submit" size="sm" disabled={!newName.trim() || createBrain.isPending}>
                 {createBrain.isPending && (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 )}
-                Add
+                {t("brain.settings.add")}
               </Button>
             </form>
           </BrainPanel>

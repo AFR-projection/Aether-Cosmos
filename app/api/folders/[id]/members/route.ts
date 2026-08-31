@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { folderMembers, folderInvitations, users } from "@/lib/db/schema";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { folderMembers, folderInvitations, users } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { getEffectiveUserId, resolveFolderAccess } from "@/shared/lib/auth/permissions";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 
 export async function GET(
   _request: NextRequest,
@@ -155,6 +155,10 @@ export async function POST(
         .returning();
       return apiSuccess({
         invitation: { ...updated, username: invitee.username },
+        // `updated` is the machine-readable half of the same fact: the dialog
+        // picks its own sentence from it, in the viewer's language, while
+        // `message` stays for API clients that only read prose.
+        updated: existingInvitation.status === "pending",
         message: existingInvitation.status === "pending" ? "Invitation updated" : "Invitation sent",
       });
     }
@@ -172,6 +176,7 @@ export async function POST(
 
     return apiSuccess({
       invitation: { ...invitation, username: invitee.username },
+      updated: false,
       message: "Invitation sent"
     });
   } catch (error) {

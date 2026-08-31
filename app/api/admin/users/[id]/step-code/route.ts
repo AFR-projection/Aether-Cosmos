@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { getClientIp, destroyAllUserSessions } from "@/lib/auth/session";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { cacheDelPattern } from "@/lib/cache/redis";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { STEP_CODE_MAX_ATTEMPTS } from "@/lib/security/step-code";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { getClientIp, destroyAllUserSessions } from "@/shared/lib/auth/session";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { STEP_CODE_MAX_ATTEMPTS } from "@/shared/lib/security/step-code";
 
 /**
  * Master controls for a single user's 2-Step Code.
@@ -96,10 +96,13 @@ export async function POST(
 
       case "reset":
         // Clear the code entirely — the user picks a new one at next sign-in.
+        // The recorded length goes with it, so the enrolment pad does not offer
+        // slots sized for a code that no longer exists.
         await db
           .update(users)
           .set({
             stepCodeHash: null,
+            stepCodeLength: null,
             stepCodeUpdatedAt: null,
             stepCodeFailedAttempts: 0,
             stepCodeLockedUntil: null,

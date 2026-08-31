@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { requireBrainContext } from "@/lib/brain/access";
-import { enforceBrainRateLimit, requireUuid } from "@/lib/brain/http";
-import { logBrainAudit } from "@/lib/brain/audit";
-import { exportGraph } from "@/lib/brain/graph-service";
-import { exportMemories, listBrainTags } from "@/lib/brain/memory-service";
-import { exportProjects } from "@/lib/brain/project-service";
-import { exportMemoryLinks } from "@/lib/brain/link-service";
-import { buildBrainArchive } from "@/lib/brain/export-service";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { requireBrainContext } from "@brain/infrastructure/access";
+import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
+import { logBrainAudit } from "@brain/infrastructure/audit";
+import { exportGraph } from "@brain/application/queries/graph-service";
+import { exportMemories, listBrainTags } from "@brain/application/commands/memory-service";
+import { exportProjects } from "@brain/application/commands/project-service";
+import { exportMemoryLinks } from "@brain/application/commands/link-service";
+import { buildBrainArchive } from "@brain/application/commands/export-service";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

@@ -23,7 +23,7 @@ const store = vi.hoisted(() => ({
   bandwidth: [] as number[],
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   const thenable = (result: () => unknown[]) => {
     const api = {
       from: () => api,
@@ -36,23 +36,23 @@ vi.mock("@/lib/db", () => {
   return { db: { select: () => thenable(() => store.rows) } };
 });
 
-vi.mock("@/lib/db/schema", async (importOriginal) => importOriginal());
+vi.mock("@/shared/infrastructure/db/schema", async (importOriginal) => importOriginal());
 
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn().mockResolvedValue(true) };
 });
 
-vi.mock("@/lib/auth/api-key", () => ({
+vi.mock("@/shared/lib/auth/api-key", () => ({
   requireAuthOrApiKey: vi.fn().mockResolvedValue({ id: "user-1", role: "user" }),
 }));
 
-vi.mock("@/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
   return { ...actual, getClientIp: vi.fn(() => "127.0.0.1") };
 });
 
-vi.mock("@/lib/auth/permissions", () => ({
+vi.mock("@/shared/lib/auth/permissions", () => ({
   getEffectiveUserId: vi.fn(() => "user-1"),
   resolveFileAccess: vi.fn(async (_u: unknown, id: string) => ({
     canView: true,
@@ -60,17 +60,17 @@ vi.mock("@/lib/auth/permissions", () => ({
   })),
 }));
 
-vi.mock("@/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/shared/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
 
-vi.mock("@/lib/storage/r2", () => ({
+vi.mock("@files/infrastructure/storage/r2", () => ({
   downloadFromR2Stream: vi.fn(async () => {
     const { Readable } = await import("stream");
     return { body: Readable.from([Buffer.from("payload")]) };
   }),
 }));
 
-vi.mock("@/lib/billing/bandwidth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/billing/bandwidth")>();
+vi.mock("@/shared/lib/billing/bandwidth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/billing/bandwidth")>();
   return {
     ...actual,
     recordBandwidth: vi.fn(async (_u: string, bytes: number) => {

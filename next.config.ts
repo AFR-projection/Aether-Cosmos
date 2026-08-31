@@ -20,6 +20,9 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: process.env.NEXT_SKIP_TYPECHECK === "1",
   },
   experimental: {
+    // Keep page-data collection stable on small VPS/CI machines. Next otherwise
+    // fans out to every logical CPU and can exhaust native memory.
+    cpus: 4,
     turbopackFileSystemCacheForDev: true,
     // lucide-react, date-fns and recharts are already on Next's built-in
     // optimize list — only the barrels it does not cover are listed here.

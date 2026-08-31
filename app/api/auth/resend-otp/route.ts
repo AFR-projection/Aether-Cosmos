@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { otpTokens, users } from "@/lib/db/schema";
-import { validateCsrf, checkRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { sendOTP, normalizeEmail } from "@/lib/email/email-service";
-import { getClientIp } from "@/lib/auth/session";
+import { db } from "@/shared/infrastructure/db";
+import { otpTokens, users } from "@/shared/infrastructure/db/schema";
+import { validateCsrf, checkRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { readBoundedJson } from "@/shared/api/read-body";
+import { sendOTP, normalizeEmail } from "@/shared/infrastructure/email/email-service";
+import { getClientIp } from "@/shared/lib/auth/session";
 
 export const runtime = "nodejs";
 
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
   try {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
 
-    const body = resendSchema.parse(await request.json());
+    const body = resendSchema.parse(await readBoundedJson(request));
     const email = normalizeEmail(body.email);
     const ip = getClientIp(request);
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { AuthError } from "@/lib/auth/session";
+import { AuthError } from "@/shared/lib/auth/session";
 
 /**
  * The route is a thin, SECURITY-critical shell over the config service: it must reject a
@@ -11,24 +11,24 @@ import { AuthError } from "@/lib/auth/session";
  * guard rails.
  */
 
-vi.mock("@/lib/auth/api-key", () => ({ requireMasterOrApiKey: vi.fn() }));
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/auth/api-key", () => ({ requireMasterOrApiKey: vi.fn() }));
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn() };
 });
-vi.mock("@/lib/brain/embedding/config", () => ({
+vi.mock("@brain/infrastructure/providers/config", () => ({
   getPublicEmbeddingConfig: vi.fn(),
   updateEmbeddingConfig: vi.fn(),
   loadEmbeddingConfig: vi.fn(),
   clearStoredEmbeddings: vi.fn(),
 }));
-vi.mock("@/lib/brain/embedding/detect", () => ({ detectEmbeddingDimension: vi.fn() }));
+vi.mock("@brain/infrastructure/providers/detect", () => ({ detectEmbeddingDimension: vi.fn() }));
 
-const { requireMasterOrApiKey } = await import("@/lib/auth/api-key");
-const { validateCsrf } = await import("@/lib/security");
+const { requireMasterOrApiKey } = await import("@/shared/lib/auth/api-key");
+const { validateCsrf } = await import("@/shared/lib/security");
 const { getPublicEmbeddingConfig, updateEmbeddingConfig, loadEmbeddingConfig, clearStoredEmbeddings } =
-  await import("@/lib/brain/embedding/config");
-const { detectEmbeddingDimension } = await import("@/lib/brain/embedding/detect");
+  await import("@brain/infrastructure/providers/config");
+const { detectEmbeddingDimension } = await import("@brain/infrastructure/providers/detect");
 const { GET, PUT } = await import("@/app/api/brain/embedding-settings/route");
 
 const PUBLIC_SHAPE = {

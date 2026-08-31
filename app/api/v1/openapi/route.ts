@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { requireAuthOrApiKey, isMasterApiKey, extractBearerToken } from "@/lib/auth/api-key";
-import { buildOpenApiSpec } from "@/lib/api/openapi";
-import { handleApiError } from "@/lib/api/response";
+import { requireAuthOrApiKey, isMasterApiKey, extractBearerToken } from "@/shared/lib/auth/api-key";
+import { buildOpenApiSpec } from "@/shared/api/openapi";
+import { handleApiError } from "@/shared/api/response";
 
 export async function GET(request: NextRequest) {
   try {

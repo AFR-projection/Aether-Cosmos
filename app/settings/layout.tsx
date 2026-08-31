@@ -1,1 +1,1 @@
-export { default } from "@/components/layout/protected-layout";
+export { default } from "@shell/layouts/protected-layout";

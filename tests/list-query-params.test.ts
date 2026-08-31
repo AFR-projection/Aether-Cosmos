@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { timestampParam } from "@/lib/api/query-params";
+import { timestampParam } from "@/shared/api/query-params";
 
 /**
  * Bounds on the two list endpoints' query parameters.
@@ -19,7 +19,7 @@ const store = vi.hoisted(() => ({
   rows: [] as Record<string, unknown>[],
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   function chain(): Record<string, unknown> {
     const self: Record<string, unknown> = {};
     for (const step of ["from", "where", "orderBy", "limit", "offset"]) {
@@ -34,13 +34,13 @@ vi.mock("@/lib/db", () => {
   return { db: { select: () => chain() } };
 });
 
-vi.mock("@/lib/db/schema", async (importOriginal) => importOriginal());
+vi.mock("@/shared/infrastructure/db/schema", async (importOriginal) => importOriginal());
 
-vi.mock("@/lib/auth/api-key", () => ({
+vi.mock("@/shared/lib/auth/api-key", () => ({
   requireAuthOrApiKey: vi.fn(async () => ({ id: "user-1", role: "user" })),
 }));
 
-vi.mock("@/lib/auth/permissions", () => ({
+vi.mock("@/shared/lib/auth/permissions", () => ({
   getEffectiveUserId: vi.fn(() => "user-1"),
   resolveFolderAccess: vi.fn(async () => ({ canView: true, canEdit: true })),
   resolveFileAccess: vi.fn(async () => null),
@@ -50,7 +50,7 @@ vi.mock("@/lib/auth/permissions", () => ({
   shareRefusal: vi.fn(() => "no"),
 }));
 
-vi.mock("@/lib/cache/redis", () => ({
+vi.mock("@/shared/infrastructure/cache/redis", () => ({
   cacheGet: vi.fn(async () => null),
   cacheSet: vi.fn(async () => undefined),
   cacheDelPattern: vi.fn(async () => undefined),

@@ -2,14 +2,14 @@ import "./load-env";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "../lib/db/schema";
-import { brains } from "../lib/db/schema";
-import { enrichBrain } from "../lib/brain/enrich/enrich-service";
+import * as schema from "@/shared/infrastructure/db/schema";
+import { brains } from "@/shared/infrastructure/db/schema";
+import { enrichBrain } from "@brain/application/jobs/enrich-service";
 import {
   runRelateBrainJob,
   runRelateMemoryJob,
   type RelateMemoryReport,
-} from "../lib/brain/graph/relate-jobs";
+} from "@brain/application/commands/relate-jobs";
 
 /**
  * One-time operational backfill for PHASE 2 derived relationships.

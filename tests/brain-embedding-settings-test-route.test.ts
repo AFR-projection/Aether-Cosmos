@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { AuthError } from "@/lib/auth/session";
-import { EMBEDDING_DIMENSIONS } from "@/lib/db/schema";
+import { AuthError } from "@/shared/lib/auth/session";
+import { EMBEDDING_DIMENSIONS } from "@/shared/infrastructure/db/schema";
 
 /**
  * The "Test" endpoint is the operator's safety net: it embeds a tiny sample with the key
@@ -12,22 +12,22 @@ import { EMBEDDING_DIMENSIONS } from "@/lib/db/schema";
  * auto-detected via `detect.ts`, which builds the provider (mocked here) in auto mode.
  */
 
-vi.mock("@/lib/auth/api-key", () => ({ requireMasterOrApiKey: vi.fn() }));
-vi.mock("@/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/security")>();
+vi.mock("@/shared/lib/auth/api-key", () => ({ requireMasterOrApiKey: vi.fn() }));
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return { ...actual, validateCsrf: vi.fn() };
 });
-vi.mock("@/lib/brain/embedding/config", () => ({ loadEmbeddingConfig: vi.fn() }));
-vi.mock("@/lib/brain/embedding/openrouter", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/brain/embedding/openrouter")>();
+vi.mock("@brain/infrastructure/providers/config", () => ({ loadEmbeddingConfig: vi.fn() }));
+vi.mock("@brain/infrastructure/providers/openrouter", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@brain/infrastructure/providers/openrouter")>();
   return { ...actual, OpenRouterEmbeddingProvider: vi.fn() };
 });
 
-const { requireMasterOrApiKey } = await import("@/lib/auth/api-key");
-const { validateCsrf } = await import("@/lib/security");
-const { loadEmbeddingConfig } = await import("@/lib/brain/embedding/config");
+const { requireMasterOrApiKey } = await import("@/shared/lib/auth/api-key");
+const { validateCsrf } = await import("@/shared/lib/security");
+const { loadEmbeddingConfig } = await import("@brain/infrastructure/providers/config");
 const { OpenRouterEmbeddingProvider, OpenRouterEmbeddingError } = await import(
-  "@/lib/brain/embedding/openrouter"
+  "@brain/infrastructure/providers/openrouter"
 );
 const { POST } = await import("@/app/api/brain/embedding-settings/test/route");
 

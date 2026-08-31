@@ -12,18 +12,18 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { BrainShell } from "@/components/brain/brain-shell";
-import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
-import { MemoryCard } from "@/components/brain/memory-card";
-import { formatDate } from "@/lib/utils";
-import { BRAIN_OPERATION_COPY } from "@/lib/brain/ui-constants";
+import { Button } from "@/ui/primitives/button";
+import { BrainShell } from "@brain/presentation/components/brain-shell";
+import { BrainErrorState, BrainLoading, BrainPanel } from "@brain/presentation/components/brain-states";
+import { MemoryCard } from "@brain/presentation/components/memory-card";
+import { useFormat, useT } from "@/shared/lib/i18n";
+import { brainOperationLabel } from "@brain/domain/ui-constants";
 import {
   useActiveBrain,
   useBrainAudit,
   useBrainOverview,
   useProjects,
-} from "@/hooks/use-brain";
+} from "@brain/presentation/hooks/use-brain";
 
 function StatTile({
   icon: Icon,
@@ -53,26 +53,28 @@ export default function BrainOverviewPage() {
   const overview = useBrainOverview(brain?.id);
   const projects = useProjects(brain?.id);
   const audit = useBrainAudit(brain?.id, 8);
+  const t = useT();
+  const { formatDate, formatNumber } = useFormat();
 
   return (
     <BrainShell
-      title="Overview"
-      description="Your permanent memory. Agents come and go; what is stored here stays yours."
+      title={t("brain.overview.title")}
+      description={t("brain.overview.description")}
       actions={
         <Button asChild size="sm">
           <Link href="/brain/memories?new=1">
             <Sparkles className="h-4 w-4" aria-hidden="true" />
-            New memory
+            {t("brain.overview.newMemory")}
           </Link>
         </Button>
       }
     >
-      {brainsLoading && <BrainLoading label="Loading brains" />}
-      {brainsError && <BrainErrorState message="Could not load your brains." />}
+      {brainsLoading && <BrainLoading label={t("brain.overview.loadingBrains")} />}
+      {brainsError && <BrainErrorState message={t("brain.overview.brainsFailed")} />}
 
       {brain && overview.isError && (
         <BrainErrorState
-          message="Could not load this brain."
+          message={t("brain.overview.brainFailed")}
           onRetry={() => void overview.refetch()}
         />
       )}
@@ -82,40 +84,40 @@ export default function BrainOverviewPage() {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile
               icon={BrainIcon}
-              label="Memories"
-              value={overview.data.stats.memoryCount.toLocaleString()}
-              hint="live, not archived"
+              label={t("brain.overview.memories")}
+              value={formatNumber(overview.data.stats.memoryCount)}
+              hint={t("brain.overview.memoriesHint")}
             />
             <StatTile
               icon={Archive}
-              label="Archived"
-              value={overview.data.stats.archivedCount.toLocaleString()}
-              hint="kept, out of the way"
+              label={t("brain.overview.archived")}
+              value={formatNumber(overview.data.stats.archivedCount)}
+              hint={t("brain.overview.archivedHint")}
             />
             <StatTile
               icon={FolderKanban}
-              label="Projects"
-              value={(projects.data?.projects.length ?? 0).toLocaleString()}
-              hint="threads of work"
+              label={t("brain.overview.projects")}
+              value={formatNumber(projects.data?.projects.length ?? 0)}
+              hint={t("brain.overview.projectsHint")}
             />
             <StatTile
               icon={Boxes}
-              label="Agents"
-              value={overview.data.stats.agentCount.toLocaleString()}
-              hint="with access to this brain"
+              label={t("brain.overview.agents")}
+              value={formatNumber(overview.data.stats.agentCount)}
+              hint={t("brain.overview.agentsHint")}
             />
           </div>
 
           <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
             <BrainPanel
               icon={BrainIcon}
-              title="Recently updated"
+              title={t("brain.overview.recentlyUpdated")}
               action={
                 <Link
                   href="/brain/memories"
                   className="text-xs font-medium text-accent-ink hover:underline"
                 >
-                  View all
+                  {t("brain.overview.viewAll")}
                 </Link>
               }
             >
@@ -130,12 +132,10 @@ export default function BrainOverviewPage() {
                   <span className="brain-empty__icon">
                     <BrainIcon className="h-5 w-5" aria-hidden="true" />
                   </span>
-                  <p className="brain-empty__title">This brain is empty</p>
-                  <p className="brain-empty__body">
-                    Write your first memory, or connect an agent and let it remember for you.
-                  </p>
+                  <p className="brain-empty__title">{t("brain.overview.emptyTitle")}</p>
+                  <p className="brain-empty__body">{t("brain.overview.emptyBody")}</p>
                   <Button asChild size="sm" className="mt-1">
-                    <Link href="/brain/memories?new=1">Write a memory</Link>
+                    <Link href="/brain/memories?new=1">{t("brain.overview.writeMemory")}</Link>
                   </Button>
                 </div>
               )}
@@ -144,13 +144,13 @@ export default function BrainOverviewPage() {
             <div className="space-y-5">
               <BrainPanel
                 icon={Boxes}
-                title="Agent activity"
+                title={t("brain.overview.agentActivity")}
                 action={
                   <Link
                     href="/brain/activity"
                     className="text-xs font-medium text-accent-ink hover:underline"
                   >
-                    Full log
+                    {t("brain.overview.fullLog")}
                   </Link>
                 }
               >
@@ -174,30 +174,27 @@ export default function BrainOverviewPage() {
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-xs font-medium text-foreground">
-                            {BRAIN_OPERATION_COPY[entry.operation] ?? entry.operation}
+                            {brainOperationLabel(entry.operation, t)}
                           </span>
                           <span className="block text-[11px] text-muted-foreground">
-                            {entry.principalType === "agent" ? "agent" : "you"} ·{" "}
-                            {formatDate(entry.createdAt, "medium")}
+                            {entry.principalType === "agent"
+                              ? t("brain.by.agent")
+                              : t("brain.by.you")}{" "}
+                            · {formatDate(entry.createdAt, "medium")}
                           </span>
                         </span>
                       </li>
                     ))}
                   </ol>
                 ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No activity. Writes and agent reads appear here.
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("brain.overview.noActivity")}</p>
                 )}
               </BrainPanel>
 
-              <BrainPanel icon={Plug} title="Connect an agent">
-                <p className="text-sm text-muted-foreground">
-                  Give OpenClaw, Hermes, or any MCP client scoped access to this brain. Keys are
-                  shown once and can be revoked at any time.
-                </p>
+              <BrainPanel icon={Plug} title={t("brain.overview.connectTitle")}>
+                <p className="text-sm text-muted-foreground">{t("brain.overview.connectBody")}</p>
                 <Button asChild variant="secondary" size="sm" className="mt-3">
-                  <Link href="/brain/agents">Manage agents</Link>
+                  <Link href="/brain/agents">{t("brain.overview.manageAgents")}</Link>
                 </Button>
               </BrainPanel>
             </div>

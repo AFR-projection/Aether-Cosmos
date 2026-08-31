@@ -1,8 +1,8 @@
-import { consumeAuthorizationCode } from "@/lib/oauth/codes";
-import { getOAuthClient } from "@/lib/oauth/clients";
-import { parseOAuthBody, oauthBodyErrorResponse, oauthError, oauthJson } from "@/lib/oauth/http";
-import { issueTokens, refreshAccessToken } from "@/lib/oauth/tokens";
-import { verifySecret } from "@/lib/oauth/constants";
+import { consumeAuthorizationCode } from "@/shared/lib/auth/oauth/codes";
+import { getOAuthClient } from "@/shared/lib/auth/oauth/clients";
+import { parseOAuthBody, oauthBodyErrorResponse, oauthError, oauthJson } from "@/shared/lib/auth/oauth/http";
+import { issueTokens, refreshAccessToken } from "@/shared/lib/auth/oauth/tokens";
+import { verifySecret } from "@/shared/lib/auth/oauth/constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

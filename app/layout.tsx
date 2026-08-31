@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Providers } from "@/components/providers";
-import { APP_NAME, APP_SHORT_NAME } from "@/lib/app-version";
+import { Providers } from "@shell/providers";
+import { APP_NAME, APP_SHORT_NAME } from "@/shared/lib/app-version";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,7 +39,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   // Draw into the notch / safe areas so the app can go edge-to-edge.
   viewportFit: "cover",
   themeColor: [
@@ -49,7 +48,7 @@ export const viewport: Viewport = {
 };
 
 // Resolves lite mode before first paint so a low-end device never renders the
-// expensive chrome once and then drops it. Mirrors lib/system/lite-mode.ts —
+// expensive chrome once and then drops it. Mirrors @/shared/lib/system/lite-mode.ts —
 // keep the two in sync.
 const LITE_MODE_BOOT = `(function(){try{
 var p=localStorage.getItem('lite_mode');
@@ -65,15 +64,31 @@ on=!!c.saveData
 if(on)document.documentElement.classList.add('lite');
 }catch(e){}})();`;
 
+/**
+ * Applies the stored locale to <html> before the first paint, so the CJK font
+ * stack and the `lang` attribute are correct from the first frame even though
+ * the text is still English until hydration finishes.
+ *
+ * The locale list is duplicated as literals because this runs before any
+ * module is loaded. It is validated against @/shared/lib/i18n/config.ts by check:i18n.
+ */
+const LOCALE_BOOT = `(function(){try{
+var m=/(?:^|; *)locale=([^;]*)/.exec(document.cookie);
+var v=m?decodeURIComponent(m[1]):'';
+if(v==='en'||v==='id'||v==='zh-CN'){
+var r=document.documentElement;r.lang=v;r.setAttribute('data-locale',v);}
+}catch(e){}})();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full`}>
+    <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: LITE_MODE_BOOT }} />
+        <script dangerouslySetInnerHTML={{ __html: LOCALE_BOOT }} />
       </head>
       <body className="min-h-full antialiased" suppressHydrationWarning>
         <Providers>{children}</Providers>

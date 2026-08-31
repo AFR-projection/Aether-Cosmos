@@ -4,7 +4,7 @@ import {
   relateMemories,
   type DerivedEdge,
   type RelateMemory,
-} from "@/lib/brain/graph/relate";
+} from "@brain/domain/graph/relate";
 
 /**
  * The derivation is the reason the graph has edges at all: the two explicit

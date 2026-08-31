@@ -1,8 +1,8 @@
-import { requireAuth, AuthError } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { subscribeUser, type RealtimeEvent } from "@/lib/realtime/events";
-import { apiError, handleApiError } from "@/lib/api/response";
-import { SECURITY_HEADERS } from "@/lib/security";
+import { requireAuth, AuthError } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { subscribeUser, type RealtimeEvent } from "@/shared/infrastructure/realtime/events";
+import { apiError, handleApiError } from "@/shared/api/response";
+import { SECURITY_HEADERS } from "@/shared/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

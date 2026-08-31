@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { apiFetch } from "@/lib/api/client";
-import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { apiFetch } from "@/shared/api/client";
+import { Button } from "@/ui/primitives/button";
+import { cn } from "@/shared/lib/utils";
+import { apiErrorMessage, useFormat, useT } from "@/shared/lib/i18n";
 import {
   Share2, Copy, Trash2, Loader2, CheckCircle,
   Link, Clock, Shield, Globe, MapPin, Smartphone,
@@ -68,6 +68,8 @@ function getDeviceIcon(device?: string) {
 }
 
 export default function SharesPage() {
+  const t = useT();
+  const { formatDate } = useFormat();
   const queryClient = useQueryClient();
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -103,9 +105,9 @@ export default function SharesPage() {
       await navigator.clipboard.writeText(`${window.location.origin}/shared/${token}`);
       setCopiedId(token);
       setTimeout(() => setCopiedId(null), 2000);
-      showMsg("Link copied!");
+      showMsg(t("shares.linkCopied"));
     } catch {
-      showMsg("Failed to copy link");
+      showMsg(t("shares.copyFailed"));
     }
   }
 
@@ -113,12 +115,12 @@ export default function SharesPage() {
     setLoadingId(id);
     try {
       const res = await apiFetch("/api/shares", { method: "DELETE", body: JSON.stringify({ id }) });
-      if (!res.success) { showMsg(res.error ?? "Failed to delete share"); return; }
-      showMsg("Share deleted");
+      if (!res.success) { showMsg(apiErrorMessage(res, t, "shares.deleteFailed")); return; }
+      showMsg(t("shares.deleted"));
       if (historyShare === id) setHistoryShare(null);
       queryClient.invalidateQueries({ queryKey: ["shares"] });
     } catch {
-      showMsg("Connection failed");
+      showMsg(t("shares.connectionFailed"));
     } finally {
       setLoadingId(null);
     }
@@ -159,8 +161,8 @@ export default function SharesPage() {
           <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/5 border border-accent/10">
             <Share2 className="h-10 w-10 text-accent-ink/40" />
           </div>
-          <p className="text-lg font-semibold">No shared links</p>
-          <p className="mt-1 text-sm text-muted-foreground/70">Share files from the file browser</p>
+          <p className="text-lg font-semibold">{t("shares.empty")}</p>
+          <p className="mt-1 text-sm text-muted-foreground/70">{t("shares.emptyHint")}</p>
         </motion.div>
       ) : (
         <div className="space-y-3">
@@ -184,21 +186,28 @@ export default function SharesPage() {
                     <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-0.5 text-[10px] font-semibold text-accent-ink uppercase">
                         <Shield className="h-2.5 w-2.5" />
-                        {share.permission}
+                        {share.permission === "edit"
+                          ? t("shares.permission.edit")
+                          : t("shares.permission.view")}
                       </span>
                       <span className="text-xs text-muted-foreground/60">
-                        Shared {formatDate(share.createdAt, "short")}
+                        {t("shares.sharedOn", { date: formatDate(share.createdAt, "short") })}
                       </span>
                       {share.expiresAt && (
                         <span className="inline-flex items-center gap-1 text-xs text-amber-500">
                           <Clock className="h-3 w-3" />
-                          Expires {formatDate(share.expiresAt, "short")}
+                          {t("shares.expiresOn", { date: formatDate(share.expiresAt, "short") })}
                         </span>
                       )}
                       {share.accessCount > 0 && (
                         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/60">
                           <Eye className="h-3 w-3" />
-                          {share.accessCount}{share.maxAccessCount ? ` / ${share.maxAccessCount}` : ""} views
+                          {share.maxAccessCount
+                            ? t("shares.viewCountCapped", {
+                                count: share.accessCount,
+                                max: share.maxAccessCount,
+                              })
+                            : t("shares.viewCount", { count: share.accessCount })}
                         </span>
                       )}
                     </div>
@@ -216,7 +225,7 @@ export default function SharesPage() {
                     ) : (
                       <Copy className="h-3.5 w-3.5" />
                     )}
-                    {copiedId === share.token ? "Copied!" : "Copy Link"}
+                    {copiedId === share.token ? t("shares.copied") : t("shares.copyLink")}
                   </Button>
                   <Button
                     variant="ghost"
@@ -228,7 +237,7 @@ export default function SharesPage() {
                         : "text-muted-foreground/60 hover:text-accent-ink hover:bg-accent/10"
                     )}
                     onClick={() => setHistoryShare(historyShare === share.id ? null : share.id)}
-                    title="View access history"
+                    title={t("shares.viewAccessHistory")}
                   >
                     <History className="h-4 w-4" />
                   </Button>
@@ -238,7 +247,7 @@ export default function SharesPage() {
                     className="h-10 w-10 min-h-[44px] min-w-[44px] sm:h-9 sm:w-9 text-muted-foreground/60 hover:text-danger-ink hover:bg-danger/10"
                     disabled={loadingId === share.id}
                     onClick={() => deleteShare(share.id)}
-                    title="Delete share"
+                    title={t("shares.deleteShare")}
                   >
                     {loadingId === share.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -262,9 +271,9 @@ export default function SharesPage() {
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-sm font-semibold flex items-center gap-2">
                           <Activity className="h-4 w-4 text-accent-ink" />
-                          Access History
+                          {t("shares.accessHistory")}
                           <span className="text-xs font-normal text-muted-foreground/60">
-                            ({share.accessCount} access{share.accessCount !== 1 ? "es" : ""})
+                            ({t("shares.accessCount", { count: share.accessCount })})
                           </span>
                         </h3>
                         <Button
@@ -283,8 +292,8 @@ export default function SharesPage() {
                       ) : !accessLogs || accessLogs.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                           <Globe className="h-8 w-8 mb-2 opacity-30" />
-                          <p className="text-sm font-medium">No access data</p>
-                          <p className="text-xs text-muted-foreground/60 mt-1">Opens show here</p>
+                          <p className="text-sm font-medium">{t("shares.noAccessData")}</p>
+                          <p className="text-xs text-muted-foreground/60 mt-1">{t("shares.noAccessDataHint")}</p>
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -308,15 +317,15 @@ export default function SharesPage() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-xs font-semibold">
-                                      {log.metadata?.device ?? "Unknown device"}
+                                      {log.metadata?.device ?? t("shares.unknownDevice")}
                                     </span>
                                     <span className="text-[10px] text-muted-foreground/50">•</span>
                                     <span className="text-[11px] text-muted-foreground/70">
-                                      {log.metadata?.browser ?? "Unknown"}
+                                      {log.metadata?.browser ?? t("shares.unknown")}
                                     </span>
                                     <span className="text-[10px] text-muted-foreground/50">•</span>
                                     <span className="text-[11px] text-muted-foreground/70">
-                                      {log.metadata?.os ?? "Unknown"}
+                                      {log.metadata?.os ?? t("shares.unknown")}
                                     </span>
                                   </div>
 
@@ -327,18 +336,18 @@ export default function SharesPage() {
                                     </span>
                                     {location && (
                                       <>
-                                        <span className="inline-flex items-center gap-1" title="Location">
+                                        <span className="inline-flex items-center gap-1" title={t("shares.location")}>
                                           <MapPin className="h-3 w-3" />
                                           {[location.city, location.region, location.country].filter(Boolean).join(", ")}
                                         </span>
                                         {location.isp && (
-                                          <span className="inline-flex items-center gap-1" title="ISP">
+                                          <span className="inline-flex items-center gap-1" title={t("shares.isp")}>
                                             <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                                             {location.isp}
                                           </span>
                                         )}
                                         {location.timezone && (
-                                          <span className="inline-flex items-center gap-1" title="Timezone">
+                                          <span className="inline-flex items-center gap-1" title={t("shares.timezone")}>
                                             <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                                             {location.timezone}
                                           </span>
@@ -369,7 +378,7 @@ export default function SharesPage() {
                                     >
                                       <img
                                         src={`https://api.mapbox.com/styles/v1/mapbox/light-v11/static/pin-l+6366f1(${location.lon},${location.lat})/${location.lon},${location.lat},10,0/80x60@2x?access_token=pk.eyJ1IjoiYnlhZnIiLCJhIjoiY2x5MnF3dmdmMDdqYjJrc2NpYzBkOHlwdyJ9.abc123`}
-                                        alt="Map"
+                                        alt={t("shares.mapAlt")}
                                         className="h-full w-full object-cover"
                                         onError={(e) => {
                                           (e.target as HTMLImageElement).style.display = "none";
@@ -388,7 +397,7 @@ export default function SharesPage() {
                               className="w-full py-2 text-xs text-accent-ink hover:text-foreground transition-colors flex items-center justify-center gap-1"
                             >
                               <ChevronDown className="h-3 w-3" />
-                              Show all {accessLogs.length} accesses
+                              {t("shares.showAll", { count: accessLogs.length })}
                             </button>
                           )}
                         </div>
@@ -406,14 +415,15 @@ export default function SharesPage() {
 }
 
 function PageHeader() {
+  const t = useT();
   return (
     <motion.div
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       className="mb-6"
     >
-      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Shared Links</h1>
-      <p className="mt-1 text-sm text-muted-foreground/70">Manage your shared file links and track who accessed them</p>
+      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{t("shares.title")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground/70">{t("shares.subtitle")}</p>
     </motion.div>
   );
 }

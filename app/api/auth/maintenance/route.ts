@@ -1,5 +1,5 @@
-import { getAdminSettings } from "@/lib/admin-settings";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
 
 /** Public: used by /maintenance and login to show maintenance state. */
 export async function GET() {

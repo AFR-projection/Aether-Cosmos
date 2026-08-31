@@ -54,11 +54,11 @@ describe("parseEnvFile", () => {
 
   it("keeps a URL with a query string and a base64 secret intact", () => {
     const text =
-      "DATABASE_URL=postgresql://u:p@ep-x.aws.neon.tech/db?sslmode=require&channel_binding=require\n" +
+      "DATABASE_URL=postgresql://u:p@host:5432/db?sslmode=require&channel_binding=require\n" +
       "SESSION_SECRET=aGVsbG8rd29ybGQvMTIzNA==\n";
     expect(parseEnvFile(text)).toEqual({
       DATABASE_URL:
-        "postgresql://u:p@ep-x.aws.neon.tech/db?sslmode=require&channel_binding=require",
+        "postgresql://u:p@host:5432/db?sslmode=require&channel_binding=require",
       SESSION_SECRET: "aGVsbG8rd29ybGQvMTIzNA==",
     });
   });
@@ -150,8 +150,8 @@ describe("the worker does not depend on a devDependency to boot", () => {
     });
   }
 
-  it("the worker entrypoint loads env through lib/env/load-env", () => {
+  it("the worker entrypoint loads env through @/shared/lib/env/load-env", () => {
     const source = readFileSync(join(WORKERS, "index.ts"), "utf8");
-    expect(source).toContain('import "../lib/env/load-env"');
+    expect(source).toContain('import "@/shared/lib/env/load-env"');
   });
 });

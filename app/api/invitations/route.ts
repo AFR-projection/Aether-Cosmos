@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { folderInvitations, folderMembers, folders, users } from "@/lib/db/schema";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { folderInvitations, folderMembers, folders, users } from "@/shared/infrastructure/db/schema";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 
 // GET: List all pending invitations for current user
 export async function GET(_request: NextRequest) {

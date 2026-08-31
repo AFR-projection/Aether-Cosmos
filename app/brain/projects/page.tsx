@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { FolderKanban, Loader2, Plus, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { BrainShell } from "@/components/brain/brain-shell";
-import { BrainErrorState, BrainLoading, BrainPanel } from "@/components/brain/brain-states";
-import { useDialogs } from "@/components/ui/dialog-prompts";
-import { notify } from "@/lib/system/notify-store";
-import { formatDate } from "@/lib/utils";
-import { PROJECT_STATUS_OPTIONS } from "@/lib/brain/ui-constants";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { BrainShell } from "@brain/presentation/components/brain-shell";
+import { BrainErrorState, BrainLoading, BrainPanel } from "@brain/presentation/components/brain-states";
+import { useDialogs } from "@/ui/primitives/dialog-prompts";
+import { notify } from "@/shared/lib/system/notify-store";
+import { useFormat, useT } from "@/shared/lib/i18n";
+import { PROJECT_STATUS_OPTIONS, projectStatusLabel } from "@brain/domain/ui-constants";
 import {
   useActiveBrain,
   useCreateProject,
@@ -18,7 +18,7 @@ import {
   useProjects,
   useUpdateProject,
   type BrainProject,
-} from "@/hooks/use-brain";
+} from "@brain/presentation/hooks/use-brain";
 
 const STATUS_TONE: Record<BrainProject["status"], string> = {
   active: "success",
@@ -30,6 +30,8 @@ const STATUS_TONE: Record<BrainProject["status"], string> = {
 export default function BrainProjectsPage() {
   const { brain } = useActiveBrain();
   const { dialogs, askConfirm } = useDialogs();
+  const t = useT();
+  const { formatDate } = useFormat();
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -47,14 +49,14 @@ export default function BrainProjectsPage() {
       { name: name.trim(), description: description.trim() || undefined },
       {
         onSuccess: () => {
-          notify({ title: "Project created", tone: "success" });
+          notify({ title: t("brain.projects.created"), tone: "success" });
           setName("");
           setDescription("");
           setCreating(false);
         },
         onError: (error) =>
           notify({
-            title: error instanceof Error ? error.message : "Could not create project",
+            title: error instanceof Error ? error.message : t("brain.projects.createFailed"),
             tone: "error",
           }),
       }
@@ -63,18 +65,18 @@ export default function BrainProjectsPage() {
 
   async function handleDelete(project: BrainProject) {
     const confirmed = await askConfirm({
-      title: `Delete "${project.name}"?`,
-      message: `Its ${project.memoryCount} memor${project.memoryCount === 1 ? "y" : "ies"} are kept — they stop belonging to a project.`,
-      confirmText: "Delete project",
+      title: t("brain.projects.deleteTitle", { name: project.name }),
+      message: t("brain.projects.deleteBody", { count: project.memoryCount }),
+      confirmText: t("brain.projects.deleteConfirm"),
       danger: true,
     });
     if (!confirmed) return;
 
     deleteProject.mutate(project.id, {
-      onSuccess: () => notify({ title: "Project deleted", tone: "success" }),
+      onSuccess: () => notify({ title: t("brain.projects.deleted"), tone: "success" }),
       onError: (error) =>
         notify({
-          title: error instanceof Error ? error.message : "Could not delete project",
+          title: error instanceof Error ? error.message : t("brain.projects.deleteFailed"),
           tone: "error",
         }),
     });
@@ -82,12 +84,12 @@ export default function BrainProjectsPage() {
 
   return (
     <BrainShell
-      title="Projects"
-      description="Group memories by the work they belong to. Agents can narrow recall to one project."
+      title={t("brain.projects.title")}
+      description={t("brain.projects.description")}
       actions={
         <Button size="sm" onClick={() => setCreating((value) => !value)}>
           <Plus className="h-4 w-4" aria-hidden="true" />
-          New project
+          {t("brain.projects.newProject")}
         </Button>
       }
     >
@@ -95,42 +97,42 @@ export default function BrainProjectsPage() {
 
       <div className="space-y-5">
         {creating && (
-          <BrainPanel icon={Plus} title="New project">
+          <BrainPanel icon={Plus} title={t("brain.projects.newProject")}>
             <form onSubmit={handleCreate} className="space-y-3">
               <Input
                 value={name}
                 maxLength={150}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Project name"
-                aria-label="Project name"
+                placeholder={t("brain.projects.namePlaceholder")}
+                aria-label={t("brain.projects.nameLabel")}
                 autoFocus
               />
               <Input
                 value={description}
                 maxLength={1000}
                 onChange={(event) => setDescription(event.target.value)}
-                placeholder="What is this project about? (optional)"
-                aria-label="Project description"
+                placeholder={t("brain.projects.descriptionPlaceholder")}
+                aria-label={t("brain.projects.descriptionLabel")}
               />
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" size="sm" onClick={() => setCreating(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button type="submit" size="sm" disabled={!name.trim() || createProject.isPending}>
                   {createProject.isPending && (
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   )}
-                  Create
+                  {t("brain.projects.create")}
                 </Button>
               </div>
             </form>
           </BrainPanel>
         )}
 
-        {projects.isLoading && <BrainLoading label="Loading projects" />}
+        {projects.isLoading && <BrainLoading label={t("brain.projects.loading")} />}
         {projects.isError && (
           <BrainErrorState
-            message="Could not load projects."
+            message={t("brain.projects.loadFailed")}
             onRetry={() => void projects.refetch()}
           />
         )}
@@ -148,7 +150,7 @@ export default function BrainProjectsPage() {
                       className="brain-chip brain-chip--mono shrink-0"
                       data-tone={STATUS_TONE[project.status]}
                     >
-                      {project.status}
+                      {projectStatusLabel(project.status, t)}
                     </span>
                   </div>
 
@@ -159,18 +161,21 @@ export default function BrainProjectsPage() {
                   )}
 
                   <p className="mt-auto pt-1 text-xs text-muted-foreground">
-                    <span className="font-mono text-foreground">{project.memoryCount}</span> memor
-                    {project.memoryCount === 1 ? "y" : "ies"} · updated{" "}
-                    {formatDate(project.updatedAt, "medium")}
+                    {t("brain.projects.meta", {
+                      memories: t("brain.projects.memoryCount", { count: project.memoryCount }),
+                      date: formatDate(project.updatedAt, "medium"),
+                    })}
                   </p>
 
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <Button asChild variant="secondary" size="sm">
-                      <Link href={`/brain/memories?project=${project.id}`}>Open memories</Link>
+                      <Link href={`/brain/memories?project=${project.id}`}>
+                        {t("brain.projects.openMemories")}
+                      </Link>
                     </Button>
                     <select
                       value={project.status}
-                      aria-label={`Status of ${project.name}`}
+                      aria-label={t("brain.projects.statusOf", { name: project.name })}
                       onChange={(event) =>
                         updateProject.mutate(
                           {
@@ -183,7 +188,7 @@ export default function BrainProjectsPage() {
                                 title:
                                   error instanceof Error
                                     ? error.message
-                                    : "Could not update project",
+                                    : t("brain.projects.updateFailed"),
                                 tone: "error",
                               }),
                           }
@@ -193,14 +198,14 @@ export default function BrainProjectsPage() {
                     >
                       {PROJECT_STATUS_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {option.label}
+                          {t(option.labelKey)}
                         </option>
                       ))}
                     </select>
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Delete ${project.name}`}
+                      aria-label={t("brain.projects.deleteLabel", { name: project.name })}
                       disabled={deleteProject.isPending}
                       onClick={() => void handleDelete(project)}
                     >
@@ -215,14 +220,11 @@ export default function BrainProjectsPage() {
               <span className="brain-empty__icon">
                 <FolderKanban className="h-5 w-5" aria-hidden="true" />
               </span>
-              <p className="brain-empty__title">No projects</p>
-              <p className="brain-empty__body">
-                A project groups the memories of one piece of work, so an agent can load that
-                context.
-              </p>
+              <p className="brain-empty__title">{t("brain.projects.emptyTitle")}</p>
+              <p className="brain-empty__body">{t("brain.projects.emptyBody")}</p>
               <Button size="sm" className="mt-1" onClick={() => setCreating(true)}>
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                Create a project
+                {t("brain.projects.createFirst")}
               </Button>
             </div>
           ))}

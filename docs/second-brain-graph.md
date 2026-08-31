@@ -10,7 +10,7 @@ do with it, and how it stays fast with thousands of nodes.
 Every memory is a node. Edges come from two sources:
 
 - **Derived** — TF-IDF cosine similarity between memory content. Computed in
-  `lib/brain/graph/relate.ts` using term vectors weighted by inverse document
+  `@brain/domain/graph/relate.ts` using term vectors weighted by inverse document
   frequency, **not** embeddings. The top *k* similar memories per memory become
   edges, where *k* is tuned so the graph stays connected without becoming a hairball.
 - **Explicit** — user-created or agent-created links from `memory_links`, with a
@@ -37,10 +37,10 @@ which runs the full pipeline and returns a view ready to render.
 7. canvas       — render in the browser, batched per colour
 ```
 
-Steps 1–6 run server-side in `app/api/brain/[id]/graph/route.ts` → `lib/brain/graph-service.ts`.
-Step 7 is `components/brain/graph/graph-canvas.tsx`.
+Steps 1–6 run server-side in `app/api/brain/[id]/graph/route.ts` → `@brain/application/queries/graph-service.ts`.
+Step 7 is `@brain/presentation/components/graph/graph-canvas.tsx`.
 
-The force worker (`components/brain/graph/force.worker.ts`) ticks the simulation in
+The force worker (`@brain/presentation/canvas/force.worker.ts`) ticks the simulation in
 a background thread using a Barnes–Hut quadtree for O(n log n) force calculation
 instead of O(n²).
 
@@ -131,7 +131,7 @@ per brain in `localStorage` under `brain-graph-settings:{brainId}`. The camera
 position (pan, zoom) is deliberately **not** persisted — every visit starts with
 "fit all."
 
-Access settings state via `lib/brain/graph/use-graph-settings.ts`, which wraps
+Access settings state via `@brain/presentation/hooks/use-graph-settings.ts`, which wraps
 `useSyncExternalStore` so changes from one tab are visible in another instantly.
 
 ---

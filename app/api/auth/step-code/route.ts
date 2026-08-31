@@ -1,22 +1,23 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
-import { verifyPassword } from "@/lib/auth/password";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { getAdminSettings } from "@/lib/admin-settings";
+import { db } from "@/shared/infrastructure/db";
+import { users } from "@/shared/infrastructure/db/schema";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
+import { verifyPassword } from "@/shared/lib/auth/password";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
 import {
   validateStepCode,
   hashStepCode,
   verifyStepCode,
   getStepCodeRules,
+  normalizeStepCodeLength,
   STEP_CODE_MAX_ATTEMPTS,
   STEP_CODE_LOCKOUT_MS,
-} from "@/lib/security/step-code";
+} from "@/shared/lib/security/step-code";
 
 /**
  * Manage the signed-in user's own 2-Step Code.
@@ -34,6 +35,9 @@ export async function GET() {
 
     return apiSuccess({
       enabled: !!row?.stepCodeHash,
+      // Own-account metadata, behind requireAuth: lets Settings state the code's
+      // length instead of the generic 6–10 range. Null until it is known.
+      length: row?.stepCodeHash ? normalizeStepCodeLength(row.stepCodeLength) : null,
       updatedAt: row?.stepCodeUpdatedAt ?? null,
       mustChange: row?.stepCodeMustChange ?? false,
       required: settings?.stepCodeRequired ?? false,
@@ -106,6 +110,9 @@ export async function PUT(request: NextRequest) {
       .update(users)
       .set({
         stepCodeHash: await hashStepCode(body.newCode),
+        // Kept in step with the hash — a stale length would make the login pad
+        // ask for the wrong number of digits.
+        stepCodeLength: body.newCode.length,
         stepCodeUpdatedAt: new Date(),
         stepCodeFailedAttempts: 0,
         stepCodeLockedUntil: null,
@@ -122,6 +129,7 @@ export async function PUT(request: NextRequest) {
     return apiSuccess({
       message: row.stepCodeHash ? "2-Step Code updated" : "2-Step Code set",
       enabled: true,
+      length: body.newCode.length,
     });
   } catch (error) {
     return handleApiError(error);
@@ -164,6 +172,7 @@ export async function DELETE(request: NextRequest) {
       .update(users)
       .set({
         stepCodeHash: null,
+        stepCodeLength: null,
         stepCodeUpdatedAt: null,
         stepCodeFailedAttempts: 0,
         stepCodeLockedUntil: null,

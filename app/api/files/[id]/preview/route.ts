@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/session";
-import { getAccessibleFile } from "@/lib/auth/permissions";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getAccessibleFile } from "@/shared/lib/auth/permissions";
 import {
   downloadFromR2Stream,
   objectExists,
   getPresignedDownloadUrl,
   headObject,
-} from "@/lib/storage/r2";
-import { recordBandwidth, BandwidthQuotaError } from "@/lib/billing/bandwidth";
-import { apiSuccess, apiError } from "@/lib/api/response";
-import { getSafeMimeType, shouldForceDownload } from "@/lib/security/mime";
-import { parseRangeHeader, rangeLength, toReadableStream } from "@/lib/storage/http-range";
+} from "@files/infrastructure/storage/r2";
+import { recordBandwidth, BandwidthQuotaError } from "@/shared/lib/billing/bandwidth";
+import { apiSuccess, apiError } from "@/shared/api/response";
+import { getSafeMimeType, shouldForceDownload } from "@/shared/lib/security/mime";
+import { parseRangeHeader, rangeLength, toReadableStream } from "@files/infrastructure/storage/http-range";
 
 export async function GET(
   request: NextRequest,

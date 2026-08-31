@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, recalculateUsedBytes } from "@/lib/db";
-import { folders, files, type Folder } from "@/lib/db/schema";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { requireAuth, getClientIp } from "@/lib/auth/session";
+import { db, recalculateUsedBytes } from "@/shared/infrastructure/db";
+import { folders, files, type Folder } from "@/shared/infrastructure/db/schema";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { requireAuth, getClientIp } from "@/shared/lib/auth/session";
 import {
   getEffectiveUserId,
   listAccessibleFolders,
   resolveFolderAccess,
   shareRefusal,
-} from "@/lib/auth/permissions";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf, SECURITY_HEADERS, checkUserApiRateLimit } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { escapeRegex } from "@/lib/utils";
-import { cacheDelPattern } from "@/lib/cache/redis";
-import { getAdminSettings } from "@/lib/admin-settings";
-import { deleteR2Objects } from "@/lib/storage/r2";
-import { createFolderDeletionJob } from "@/lib/storage/deletion-service";
+} from "@/shared/lib/auth/permissions";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf, SECURITY_HEADERS, checkUserApiRateLimit } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { escapeRegex } from "@/shared/lib/utils";
+import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
+import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
+import { deleteR2Objects } from "@files/infrastructure/storage/r2";
+import { createFolderDeletionJob } from "@files/infrastructure/storage/deletion-service";
 
 const LARGE_FOLDER_DELETE_THRESHOLD = 500;
 

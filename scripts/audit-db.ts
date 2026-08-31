@@ -1,7 +1,7 @@
 import "./load-env";
 import postgres from "postgres";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
-import * as schema from "../lib/db/schema";
+import * as schema from "@/shared/infrastructure/db/schema";
 
 /**
  * Read-only health audit of the live database.
@@ -34,7 +34,7 @@ function heading(title: string) {
   console.log(`\n${"─".repeat(72)}\n${title}\n${"─".repeat(72)}`);
 }
 
-/** Every pgTable exported from lib/db/schema.ts, keyed by its SQL name. */
+/** Every pgTable exported from src/shared/infrastructure/db/schema.ts, keyed by its SQL name. */
 function schemaTables(): Map<string, ReturnType<typeof getTableConfig>> {
   const out = new Map<string, ReturnType<typeof getTableConfig>>();
   for (const value of Object.values(schema)) {

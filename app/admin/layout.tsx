@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import { getSessionUserForPage } from "@/lib/auth/session-page";
-import { AppShell } from "@/components/layout/app-shell";
-import { AdminTabs } from "@/components/admin/admin-tabs";
+import { getSessionUserForPage } from "@/shared/lib/auth/session-page";
+import { AppShell } from "@shell/layouts/app-shell";
+import { AdminTabs } from "@admin/presentation/components/admin-tabs";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUserForPage();

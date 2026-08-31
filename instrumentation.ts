@@ -4,8 +4,8 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   const [{ warmAdminSettings }, { startCleanupScheduler }] = await Promise.all([
-    import("@/lib/admin-settings"),
-    import("@/lib/system/cleanup-scheduler"),
+    import("@/shared/lib/settings/admin-settings"),
+    import("@/shared/lib/system/cleanup-scheduler"),
   ]);
 
   warmAdminSettings();

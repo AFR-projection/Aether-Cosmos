@@ -1,7 +1,7 @@
-import { FileBrowser, type BrowserCaps } from "@/components/files/file-browser";
-import { LeaveSharedFolderButton } from "@/components/folders/leave-shared-folder-button";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions";
+import { FileBrowser, type BrowserCaps } from "@files/presentation/components/files/file-browser";
+import { LeaveSharedFolderButton } from "@files/presentation/components/folders/leave-shared-folder-button";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId, resolveFolderAccess } from "@/shared/lib/auth/permissions";
 import { notFound } from "next/navigation";
 
 export default async function SharedFolderPage({

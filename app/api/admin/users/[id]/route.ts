@@ -1,26 +1,26 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { eq, desc, count, sum, and, isNull, gt } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { users, files, folders, activityLogs, sessions } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
+import { db } from "@/shared/infrastructure/db";
+import { users, files, folders, activityLogs, sessions } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
 import {
   getClientIp,
   deviceLabelFromUa,
   deviceKindFromUa,
   destroyAllUserSessions,
-} from "@/lib/auth/session";
+} from "@/shared/lib/auth/session";
 import {
   adminUserUpdateSchema,
   normalizeAdminEmail,
   sessionRevocationReason,
-} from "@/lib/admin/user-update";
-import { logActivity } from "@/lib/auth/audit";
-import { validateCsrf } from "@/lib/security";
-import { validatePasswordStrength } from "@/lib/security/password-policy";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { cacheDelPattern } from "@/lib/cache/redis";
-import { deleteR2Object } from "@/lib/storage/r2";
+} from "@admin/domain/services/user-update";
+import { logActivity } from "@/shared/lib/auth/audit";
+import { validateCsrf } from "@/shared/lib/security";
+import { validatePasswordStrength } from "@/shared/lib/security/password-policy";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
+import { deleteR2Object } from "@files/infrastructure/storage/r2";
 
 export async function GET(
   request: NextRequest,
@@ -169,7 +169,7 @@ export async function PATCH(
       if (!passwordCheck.valid) {
         return apiError(`Password too weak: ${passwordCheck.errors.join(", ")}`, 400);
       }
-      const { hashPassword } = await import("@/lib/auth/password");
+      const { hashPassword } = await import("@/shared/lib/auth/password");
       updates.passwordHash = await hashPassword(body.password);
     }
 

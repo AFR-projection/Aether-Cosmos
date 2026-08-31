@@ -9,7 +9,7 @@ Complete guide for installing and configuring Aether Cosmos ByAFR for local deve
 ### Local Development
 - **Node.js** ≥ 20
 - **npm** ≥ 10
-- **PostgreSQL** (Neon or local)
+- **PostgreSQL** (managed provider or local)
 - **Cloudflare R2** account
 - **Redis** (optional, can disable with `REDIS_DISABLED=true`)
 

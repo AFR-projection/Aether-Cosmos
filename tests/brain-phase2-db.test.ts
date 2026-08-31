@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db } from "@/shared/infrastructure/db";
 import {
   brainAccess,
   brainProjects,
@@ -8,12 +8,12 @@ import {
   memories,
   memoryDerivedLinks,
   users,
-} from "@/lib/db/schema";
-import { rememberMemory } from "@/lib/brain/remember";
-import { updateMemory } from "@/lib/brain/memory-service";
-import { buildContext } from "@/lib/brain/context-engine";
-import { findRelatedMemories } from "@/lib/brain/graph/related-service";
-import { explainMemoryProvenance } from "@/lib/brain/provenance-service";
+} from "@/shared/infrastructure/db/schema";
+import { rememberMemory } from "@brain/application/commands/remember";
+import { updateMemory } from "@brain/application/commands/memory-service";
+import { buildContext } from "@brain/application/queries/context-engine";
+import { findRelatedMemories } from "@brain/application/queries/related-service";
+import { explainMemoryProvenance } from "@brain/application/queries/provenance-service";
 import {
   RELATE_POLICY,
   RELATE_VERSION,
@@ -21,8 +21,8 @@ import {
   loadDerivedNeighbors,
   reconcileDerivedEdges,
   type DerivedEdgeInput,
-} from "@/lib/brain/graph/derived-link-service";
-import { runRelateBrainJob, runRelateMemoryJob } from "@/lib/brain/graph/relate-jobs";
+} from "@brain/application/commands/derived-link-service";
+import { runRelateBrainJob, runRelateMemoryJob } from "@brain/application/commands/relate-jobs";
 
 /**
  * PHASE 2 against real PostgreSQL: migration 0020's constraints, the derived-link
@@ -89,14 +89,14 @@ const CORPUS = {
   deploy: {
     title: "Deployment runbook for the hetzner box",
     content:
-      "Always run pending drizzle migrations against neon before deploying the app to the hetzner box.",
+      "Always run pending drizzle migrations against the database before deploying the app to the hetzner box.",
     type: "procedure" as const,
     tags: ["deployment", "hetzner"],
   },
   migration: {
     title: "Migration order matters before a hetzner deploy",
     content:
-      "Pending drizzle migrations must be applied to neon first, otherwise the hetzner deploy serves a schema the app does not expect.",
+      "Pending drizzle migrations must be applied to the database first, otherwise the hetzner deploy serves a schema the app does not expect.",
     type: "knowledge" as const,
     tags: ["deployment", "hetzner"],
   },
@@ -104,7 +104,7 @@ const CORPUS = {
   nearDuplicate: {
     title: "Hetzner deploy checklist",
     content:
-      "Run the pending drizzle migrations against neon before you deploy the app to the hetzner box.",
+      "Run the pending drizzle migrations against the database before you deploy the app to the hetzner box.",
     type: "procedure" as const,
     tags: ["deployment", "hetzner"],
   },
@@ -688,7 +688,7 @@ describe.skipIf(!MIGRATED)("PHASE 2 derived links against real Postgres", () => 
         principal: principalOf(fx.userId),
         data: {
           content:
-            "Pending drizzle migrations must reach neon before the hetzner deploy, or the app serves an unexpected schema.",
+            "Pending drizzle migrations must reach the database before the hetzner deploy, or the app serves an unexpected schema.",
         },
         changeReason: "clarified",
       });

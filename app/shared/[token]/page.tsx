@@ -3,16 +3,17 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Cloud, Loader2, AlertCircle, Eye, Clock } from "lucide-react";
-import { cn, formatBytes, getMimeCategory, getFileExtension } from "@/lib/utils";
+import { cn, getMimeCategory, getFileExtension } from "@/shared/lib/utils";
+import { apiErrorMessage, createTranslator, getLocale, useFormat, useT } from "@/shared/lib/i18n";
 import dynamic from "next/dynamic";
 
-const PdfViewer = dynamic(() => import("@/components/media-viewers/pdf-viewer").then((m) => m.PdfViewer), { ssr: false });
-const ImageViewer = dynamic(() => import("@/components/media-viewers/image-viewer").then((m) => m.ImageViewer), { ssr: false });
-const VideoViewer = dynamic(() => import("@/components/media-viewers/video-viewer").then((m) => m.VideoViewer), { ssr: false });
-const AudioViewer = dynamic(() => import("@/components/media-viewers/audio-viewer").then((m) => m.AudioViewer), { ssr: false });
-const TextViewer = dynamic(() => import("@/components/media-viewers/text-viewer").then((m) => m.TextViewer), { ssr: false });
-const SvgViewer = dynamic(() => import("@/components/media-viewers/svg-viewer").then((m) => m.SvgViewer), { ssr: false });
-const SharedNoteView = dynamic(() => import("@/components/editors/shared-note-view").then((m) => m.SharedNoteView), { ssr: false });
+const PdfViewer = dynamic(() => import("@files/presentation/components/media-viewers/pdf-viewer").then((m) => m.PdfViewer), { ssr: false });
+const ImageViewer = dynamic(() => import("@files/presentation/components/media-viewers/image-viewer").then((m) => m.ImageViewer), { ssr: false });
+const VideoViewer = dynamic(() => import("@files/presentation/components/media-viewers/video-viewer").then((m) => m.VideoViewer), { ssr: false });
+const AudioViewer = dynamic(() => import("@files/presentation/components/media-viewers/audio-viewer").then((m) => m.AudioViewer), { ssr: false });
+const TextViewer = dynamic(() => import("@files/presentation/components/media-viewers/text-viewer").then((m) => m.TextViewer), { ssr: false });
+const SvgViewer = dynamic(() => import("@files/presentation/components/media-viewers/svg-viewer").then((m) => m.SvgViewer), { ssr: false });
+const SharedNoteView = dynamic(() => import("@files/presentation/components/editors/shared-note-view").then((m) => m.SharedNoteView), { ssr: false });
 
 /**
  * The limits attached to the link, as the recipient sees them: how many views are left and
@@ -31,6 +32,8 @@ function ShareMeta({
   expiresAt?: string;
   center?: boolean;
 }) {
+  const t = useT();
+  const { formatDate, formatNumber } = useFormat();
   const hasQuota = typeof maxAccessCount === "number" && maxAccessCount > 0;
   if (!hasQuota && !expiresAt) return null;
   return (
@@ -41,19 +44,19 @@ function ShareMeta({
       )}
     >
       {hasQuota && (
-        <span className="flex items-center gap-1" title="Views used">
+        <span className="flex items-center gap-1" title={t("shares.public.viewsUsed")}>
           <Eye aria-hidden className="h-3 w-3 shrink-0" />
           <span className="tabular-nums">
-            {accessCount ?? 0} / {maxAccessCount}
+            {formatNumber(accessCount ?? 0)} / {formatNumber(maxAccessCount)}
           </span>
           {/* The numbers alone read as "12 slash 20" and mean nothing without this. */}
-          <span className="sr-only">views used</span>
+          <span className="sr-only">{t("shares.public.viewsUsed")}</span>
         </span>
       )}
       {expiresAt && (
-        <span className="flex items-center gap-1" title="When this link stops working">
+        <span className="flex items-center gap-1" title={t("shares.public.expiryTitle")}>
           <Clock aria-hidden className="h-3 w-3 shrink-0" />
-          <span>Expires {new Date(expiresAt).toLocaleString()}</span>
+          <span>{t("shares.expiresOn", { date: formatDate(expiresAt) })}</span>
         </span>
       )}
     </div>
@@ -62,6 +65,8 @@ function ShareMeta({
 
 export default function PublicSharedPage() {
   const params = useParams();
+  const t = useT();
+  const { formatBytes } = useFormat();
   const token = params.token as string;
   const [data, setData] = useState<{
     file: { id: string; name: string; mimeType: string; sizeBytes: number; isNote?: boolean };
@@ -79,9 +84,14 @@ export default function PublicSharedPage() {
       .then((r) => r.json())
       .then((json) => {
         if (json.success) setData(json.data);
-        else setError(json.error ?? "Not found");
+        // Built here rather than captured from render: the effect runs once per
+        // token, so a `t` from the first render would freeze this sentence in
+        // whatever language was active then.
+        else setError(apiErrorMessage(json, createTranslator(getLocale()), "shares.public.loadFailed"));
       })
-      .catch(() => setError("Failed to load shared file"));
+      .catch(() =>
+        setError(createTranslator(getLocale())("shares.public.loadFailed"))
+      );
   }, [token]);
 
   if (!data) {
@@ -100,7 +110,7 @@ export default function PublicSharedPage() {
           ) : (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 aria-hidden className="h-4 w-4 animate-spin text-accent-ink" />
-              Loading shared file…
+              {t("shares.public.loading")}
             </p>
           )}
         </div>
@@ -197,7 +207,7 @@ export default function PublicSharedPage() {
               />
             </div>
             <p className="mt-4 text-xs text-muted-foreground">
-              This file type can&apos;t be previewed here.
+              {t("shares.public.noPreview")}
             </p>
           </div>
         </div>

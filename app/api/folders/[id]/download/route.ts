@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { archiveJobItems, archiveJobs, files, folders } from "@/lib/db/schema";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId, resolveFolderAccess } from "@/lib/auth/permissions";
-import { validateCsrf } from "@/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/lib/api/response";
-import { enqueueJob } from "@/lib/queue";
-import { escapeLike } from "@/lib/utils";
-import { archiveFileName, archiveSegment, uniqueArchivePath } from "@/lib/storage/archive-path";
+import { db } from "@/shared/infrastructure/db";
+import { archiveJobItems, archiveJobs, files, folders } from "@/shared/infrastructure/db/schema";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId, resolveFolderAccess } from "@/shared/lib/auth/permissions";
+import { validateCsrf } from "@/shared/lib/security";
+import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { enqueueJob } from "@/shared/infrastructure/queue";
+import { escapeLike } from "@/shared/lib/utils";
+import { archiveFileName, archiveSegment, uniqueArchivePath } from "@files/infrastructure/storage/archive-path";
 
 const requestSchema = z.object({
   idempotencyKey: z.string().min(16).max(128).optional(),

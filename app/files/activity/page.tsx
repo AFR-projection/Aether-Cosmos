@@ -1,7 +1,7 @@
-import { ActivityPage } from "@/components/files/activity-page";
-import { requireAuth } from "@/lib/auth/session";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { getOrCreateActivityScope } from "@/lib/activity/activity-scope-server";
+import { ActivityPage } from "@files/presentation/components/files/activity-page";
+import { requireAuth } from "@/shared/lib/auth/session";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { getOrCreateActivityScope } from "@/shared/lib/activity/activity-scope-server";
 import { redirect } from "next/navigation";
 
 export default async function FileActivityPage() {

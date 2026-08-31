@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNotNull, desc } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { files, folders } from "@/lib/db/schema";
-import { requireAuth, requireMaster } from "@/lib/auth/session";
-import { getEffectiveUserId, isMaster } from "@/lib/auth/permissions";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
+import { db } from "@/shared/infrastructure/db";
+import { files, folders } from "@/shared/infrastructure/db/schema";
+import { requireAuth, requireMaster } from "@/shared/lib/auth/session";
+import { getEffectiveUserId, isMaster } from "@/shared/lib/auth/permissions";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
 
 export async function GET(request: NextRequest) {
   try {

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { ActivityCenterLayout } from "@/components/layout/activity-center-layout";
-import { APP_NAME } from "@/lib/app-version";
+import { ActivityCenterLayout } from "@shell/layouts/activity-center-layout";
+import { APP_NAME } from "@/shared/lib/app-version";
 
 export const metadata: Metadata = {
   title: `File Activity Center | ${APP_NAME}`,

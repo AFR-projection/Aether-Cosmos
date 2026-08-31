@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { requireBrainOwnerContext } from "@/lib/brain/access";
-import { requireUuid } from "@/lib/brain/http";
-import { listBrainAudit } from "@/lib/brain/audit";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { requireBrainOwnerContext } from "@brain/infrastructure/access";
+import { requireUuid } from "@brain/infrastructure/http";
+import { listBrainAudit } from "@brain/infrastructure/audit";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

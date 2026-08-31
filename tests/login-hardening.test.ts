@@ -30,13 +30,13 @@ const store = vi.hoisted(() => ({
   ip: "203.0.113.1",
 }));
 
-vi.mock("@/lib/cache/redis", () => ({
+vi.mock("@/shared/infrastructure/cache/redis", () => ({
   redisIncr: async () => null,
   redisGetInt: async () => null,
   redisDel: async () => undefined,
 }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/shared/infrastructure/db", () => {
   const selectChain = () => {
     const api = {
       from: () => api,
@@ -62,7 +62,7 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-vi.mock("@/lib/auth/password", () => ({
+vi.mock("@/shared/lib/auth/password", () => ({
   verifyPassword: async () => store.verifyResult,
   verifyDecoyPassword: async () => {
     store.decoyCalls++;
@@ -70,15 +70,15 @@ vi.mock("@/lib/auth/password", () => ({
   },
 }));
 
-vi.mock("@/lib/auth/session", () => ({
+vi.mock("@/shared/lib/auth/session", () => ({
   getClientIp: () => store.ip,
   destroySession: async () => undefined,
   getSessionUser: async () => null,
   AuthError: class AuthError extends Error {},
 }));
 
-vi.mock("@/lib/auth/audit", () => ({ logActivity: async () => undefined }));
-vi.mock("@/lib/email/notify-user", () => ({ notifyUser: async () => undefined }));
+vi.mock("@/shared/lib/auth/audit", () => ({ logActivity: async () => undefined }));
+vi.mock("@/shared/infrastructure/email/notify-user", () => ({ notifyUser: async () => undefined }));
 /*
  * The lockout thresholds moved out of RATE_LIMIT_LOGIN_* env vars into Admin →
  * Settings, so the route reads them per request. The real module is kept (the
@@ -86,8 +86,8 @@ vi.mock("@/lib/email/notify-user", () => ({ notifyUser: async () => undefined })
  * the shipped defaults the assertions below are written against: 5 failures per
  * account, 30 per IP, a 15-minute window.
  */
-vi.mock("@/lib/admin-settings", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/admin-settings")>();
+vi.mock("@/shared/lib/settings/admin-settings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/settings/admin-settings")>();
   return {
     ...actual,
     getAdminSettings: async () => ({
@@ -96,18 +96,18 @@ vi.mock("@/lib/admin-settings", async (importOriginal) => {
     }),
   };
 });
-vi.mock("@/lib/auth/login-complete", () => ({
+vi.mock("@/shared/lib/auth/login-complete", () => ({
   completeLogin: async () => ({ message: "ok", user: { id: "u1" } }),
 }));
 
 const totp = vi.hoisted(() => ({ ok: false }));
-vi.mock("@/lib/security/totp", () => ({
+vi.mock("@/shared/lib/security/totp", () => ({
   verifyTotpCode: () => totp.ok,
   consumeRecoveryCode: async () => ({ ok: false, remaining: [] }),
 }));
 
 const { POST } = await import("@/app/api/auth/login/route");
-const { createStagedToken } = await import("@/lib/security/step-code");
+const { createStagedToken } = await import("@/shared/lib/security/step-code");
 
 function post(body: unknown): Promise<Response> {
   return POST(
@@ -151,6 +151,15 @@ beforeEach(() => {
 });
 
 describe("password layer does not answer 'does this account exist?'", () => {
+  it("rejects an oversized public request before password work", async () => {
+    const res = await post({ identifier: "x".repeat(70 * 1024), password: "hunter2" });
+    const body = await res.json();
+
+    expect(res.status).toBe(413);
+    expect(body.code).toBe("BODY_TOO_LARGE");
+    expect(store.decoyCalls).toBe(0);
+  });
+
   it("returns an identical status and body for an unknown identifier and a wrong password", async () => {
     store.user = null;
     const unknown = await post({ identifier: "nobody", password: "hunter2" });
@@ -289,5 +298,4 @@ describe("authenticator layer has a per-account ceiling", () => {
     expect((await res.json()).code).toBe("2FA_EXPIRED");
   });
 });
-
 

@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { eq, desc, count, sum, and, isNull, gte, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { users, files, folders, activityLogs, shares, sessions } from "@/lib/db/schema";
-import { requireMasterOrApiKey } from "@/lib/auth/api-key";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { getRedis } from "@/lib/cache/redis";
+import { db } from "@/shared/infrastructure/db";
+import { users, files, folders, activityLogs, shares, sessions } from "@/shared/infrastructure/db/schema";
+import { requireMasterOrApiKey } from "@/shared/lib/auth/api-key";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { getRedis } from "@/shared/infrastructure/cache/redis";
 
 export async function GET(request: NextRequest) {
   try {

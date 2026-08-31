@@ -1,14 +1,14 @@
 import { NextRequest } from "next/server";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { appPublicUrl } from "@/lib/env/runtime";
-import { requireBrainOwnerContext } from "@/lib/brain/access";
-import { requireUuid } from "@/lib/brain/http";
-import { listAgentsForBrain } from "@/lib/brain/agent-service";
-import { BRAIN_API_SCOPES, DEFAULT_BRAIN_AGENT_SCOPES } from "@/lib/brain/constants";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { appPublicUrl } from "@/shared/lib/env/runtime";
+import { requireBrainOwnerContext } from "@brain/infrastructure/access";
+import { requireUuid } from "@brain/infrastructure/http";
+import { listAgentsForBrain } from "@brain/application/commands/agent-service";
+import { BRAIN_API_SCOPES, DEFAULT_BRAIN_AGENT_SCOPES } from "@brain/domain/constants";
 import {
   BRAIN_MCP_SERVER_NAME,
   BRAIN_MCP_SERVER_VERSION,
-} from "@/lib/brain/mcp/server";
+} from "@brain/infrastructure/mcp/server";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

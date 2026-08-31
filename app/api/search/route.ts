@@ -1,14 +1,14 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull, ilike, gte, lte, desc, lt } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { cacheGet, cacheSet } from "@/lib/cache/redis";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { MAX_SEARCH_QUERY_LENGTH, timestampParam } from "@/lib/api/query-params";
-import { hasSearchTerms, ftsMatch, ftsRank } from "@/lib/search/fts";
+import { db } from "@/shared/infrastructure/db";
+import { files } from "@/shared/infrastructure/db/schema";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { cacheGet, cacheSet } from "@/shared/infrastructure/cache/redis";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { MAX_SEARCH_QUERY_LENGTH, timestampParam } from "@/shared/api/query-params";
+import { hasSearchTerms, ftsMatch, ftsRank } from "@/shared/lib/search/fts";
 
 /**
  * Every parameter is bounded. `from`/`to`/`cursor` used to be bare strings fed to

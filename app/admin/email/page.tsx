@@ -24,9 +24,9 @@ import {
   Inbox,
   Info,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useConfirm } from "@/components/admin/confirm-dialog";
+import { Button } from "@/ui/primitives/button";
+import { Input } from "@/ui/primitives/input";
+import { useConfirm } from "@admin/presentation/components/confirm-dialog";
 import {
   AdminEmpty,
   AdminHeader,
@@ -39,10 +39,11 @@ import {
   Skeleton,
   StatusDot,
   type Tone,
-} from "@/components/admin/admin-ui";
-import { apiFetch } from "@/lib/api/client";
-import { APP_NAME } from "@/lib/app-version";
-import { cn } from "@/lib/utils";
+} from "@admin/presentation/components/admin-ui";
+import { apiFetch } from "@/shared/api/client";
+import { APP_NAME } from "@/shared/lib/app-version";
+import { cn } from "@/shared/lib/utils";
+import { useFormat, useT } from "@/shared/lib/i18n";
 
 type MailStatus = "unverified" | "ok" | "error";
 type MailSenderRow = {
@@ -74,6 +75,7 @@ type MailHealth = {
   coolingSenders: number;
   defaultDailyLimit: number;
   problems: string[];
+  problemCodes?: Array<"none" | "unverified" | "unavailable">;
 };
 
 /** A "now" timestamp that ticks on an interval, so time-based UI stays live
@@ -93,13 +95,14 @@ function useNow(intervalMs = 30_000): number {
  * platform, are announced as "large green circle" by screen readers, and are an
  * explicit anti-pattern in this project's design system.
  */
-const SENDER_STATUS: Record<MailStatus, { label: string; tone: Tone; icon: typeof CircleCheck }> = {
-  ok: { label: "Verified", tone: "success", icon: CircleCheck },
-  error: { label: "Login failed", tone: "danger", icon: CircleX },
-  unverified: { label: "Not verified", tone: "muted", icon: CircleDashed },
+const SENDER_STATUS: Record<MailStatus, { labelKey: "statusVerified" | "statusFailed" | "statusUnverified"; tone: Tone; icon: typeof CircleCheck }> = {
+  ok: { labelKey: "statusVerified", tone: "success", icon: CircleCheck },
+  error: { labelKey: "statusFailed", tone: "danger", icon: CircleX },
+  unverified: { labelKey: "statusUnverified", tone: "muted", icon: CircleDashed },
 };
 
 export default function EmailSettings() {
+  const t = useT();
   const now = useNow();
   const confirm = useConfirm();
   const [showAddModal, setShowAddModal] = useState(false);
@@ -168,7 +171,7 @@ export default function EmailSettings() {
           body: JSON.stringify({ email, appPassword, displayName, fromName }),
         }
       );
-      if (!res.success) throw new Error(res.error ?? "Failed to add sender");
+      if (!res.success) throw new Error(res.error ?? t("admin.email.addFailed"));
       return res.data;
     },
     onSuccess: (data) => {
@@ -176,7 +179,7 @@ export default function EmailSettings() {
       queryClient.invalidateQueries({ queryKey: ["mail-health"] });
       if (data && !data.verify.ok) {
         // Saved, but Gmail rejected the login — keep the modal open with the reason.
-        setFormError(data.verify.error ?? "Gmail rejected the login");
+        setFormError(data.verify.error ?? t("admin.email.gmailRejected"));
         return;
       }
       setShowAddModal(false);
@@ -191,7 +194,7 @@ export default function EmailSettings() {
         method: "POST",
         body: JSON.stringify({ id }),
       });
-      if (!res.success) throw new Error(res.error ?? "Verify failed");
+      if (!res.success) throw new Error(res.error ?? t("admin.email.verifyFailed"));
       return res.data;
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["mail-senders"] }),
@@ -218,12 +221,12 @@ export default function EmailSettings() {
   function askDelete(sender: MailSenderRow) {
     confirm.open(
       {
-        title: `Remove ${sender.displayName}?`,
+        title: t("admin.email.removeTitle", { name: sender.displayName }),
         message:
           senders.filter((s) => s.isActive && s.status === "ok").length <= 1
-            ? "This is the last verified sender. Removing it will stop OTP and security emails from going out until another one is added."
-            : "Its stored app password is deleted with it. Mail already sent is unaffected.",
-        confirmLabel: "Remove sender",
+            ? t("admin.email.removeLast")
+            : t("admin.email.removeBody"),
+        confirmLabel: t("admin.email.remove"),
         danger: true,
       },
       async () => {
@@ -236,11 +239,11 @@ export default function EmailSettings() {
     <div className="space-y-5">
       <AdminHeader
         icon={Mail}
-        kicker="Email gateway"
-        title="Outbound mail"
-        lede="Gmail senders that deliver one-time codes and security notices. The router picks whichever verified sender still has headroom today."
+        kicker={t("admin.email.kicker")}
+        title={t("admin.email.title")}
+        lede={t("admin.email.lede")}
         live
-        liveLabel="Polling every 10s"
+        liveLabel={t("admin.email.polling")}
         actions={
           <Button
             size="sm"
@@ -250,7 +253,7 @@ export default function EmailSettings() {
             }}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
-            Add sender
+            {t("admin.email.addSender")}
           </Button>
         }
       />
@@ -258,28 +261,28 @@ export default function EmailSettings() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <AdminMetric
           icon={ShieldCheck}
-          label="Ready now"
+          label={t("admin.email.readyNow")}
           value={health ? health.eligibleSenders : "—"}
           tone={health && health.eligibleSenders > 0 ? "success" : "danger"}
-          hint={health ? `of ${health.totalSenders} configured` : "Checking…"}
+          hint={health ? t("admin.email.configured", { count: health.totalSenders }) : t("admin.email.checking")}
         />
         <AdminMetric
           icon={CircleCheck}
-          label="Verified"
+          label={t("admin.email.verified")}
           value={health ? health.readySenders : "—"}
           tone="accent"
-          hint="Gmail accepted the login"
+          hint={t("admin.email.accepted")}
         />
         <AdminMetric
           icon={AlertTriangle}
-          label="Resting"
+          label={t("admin.email.resting")}
           value={health ? health.coolingSenders : "—"}
           tone={health && health.coolingSenders > 0 ? "warning" : "muted"}
-          hint="In cooldown after failures"
+          hint={t("admin.email.cooldownHint")}
         />
         <AdminMetric
           icon={Gauge}
-          label="Sent today"
+          label={t("admin.email.sentToday")}
           value={capacity.used}
           unit={capacity.total > 0 ? `/ ${capacity.total}` : undefined}
           tone={capacity.total > 0 && capacity.used / capacity.total >= 0.8 ? "warning" : "info"}
@@ -290,7 +293,7 @@ export default function EmailSettings() {
                 tone={capacity.used / capacity.total >= 0.8 ? "warning" : "accent"}
               />
             ) : (
-              "No active sender"
+              t("admin.email.noActive")
             )
           }
         />
@@ -300,8 +303,8 @@ export default function EmailSettings() {
 
       <AdminPanel
         icon={Inbox}
-        title={`Senders (${senders.length})`}
-        sub="Ordered by priority — the router walks this list top-down."
+        title={t("admin.email.senders", { count: senders.length })}
+        sub={t("admin.email.senderOrder")}
         flush
       >
         {isLoading ? (
@@ -311,8 +314,8 @@ export default function EmailSettings() {
         ) : senders.length === 0 ? (
           <AdminEmpty
             icon={Mail}
-            title="No sender configured"
-            body="Without a verified Gmail sender the app cannot deliver one-time codes, so sign-in and 2FA fail. Add one to bring the gateway up."
+            title={t("admin.email.emptyTitle")}
+            body={t("admin.email.emptyBody")}
             action={
               <Button
                 size="sm"
@@ -323,7 +326,7 @@ export default function EmailSettings() {
                 }}
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                Add sender
+                {t("admin.email.addSender")}
               </Button>
             }
           />
@@ -390,6 +393,8 @@ function SenderCard({
   onTest: () => void;
   onDelete: () => void;
 }) {
+  const t = useT();
+  const { formatTimestamp } = useFormat();
   const status = SENDER_STATUS[sender.status];
   const limit = sender.dailyLimit > 0 ? sender.dailyLimit : defaultLimit;
 
@@ -418,13 +423,13 @@ function SenderCard({
           <StatusDot tone={status.tone} ring={sender.status === "ok"} />
           <h3 className="text-sm font-semibold">{sender.displayName}</h3>
           <Chip mono>{sender.email}</Chip>
-          {!sender.isActive && <Chip tone="muted">Inactive</Chip>}
+          {!sender.isActive && <Chip tone="muted">{t("admin.email.inactive")}</Chip>}
         </div>
 
         <p className="flex items-center gap-1.5 text-[0.78rem] font-medium" data-tone={status.tone}>
           <status.icon className="h-3.5 w-3.5" style={{ color: "var(--tone)" }} aria-hidden="true" />
-          <span style={{ color: "var(--tone)" }}>{status.label}</span>
-          <span className="adm-sub">· sends as “{sender.fromName}”</span>
+          <span style={{ color: "var(--tone)" }}>{t(`admin.email.${status.labelKey}`)}</span>
+          <span className="adm-sub">· {t("admin.email.sendsAs", { name: sender.fromName })}</span>
         </p>
 
         {sender.status === "error" && sender.lastError && (
@@ -435,7 +440,7 @@ function SenderCard({
 
         <div className="max-w-sm space-y-1.5 pt-0.5">
           <div className="flex items-center justify-between text-[0.7rem]">
-            <span className="adm-sub">Daily usage</span>
+            <span className="adm-sub">{t("admin.email.dailyUsage")}</span>
             <span className="adm-num">
               {used} / {limit}
             </span>
@@ -444,19 +449,18 @@ function SenderCard({
           <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
             {cooling && (
               <Chip tone="warning" icon={AlertTriangle}>
-                Resting ~{cooldownMins}m
+                {t("admin.email.cooling", { count: cooldownMins })}
               </Chip>
             )}
-            {!cooling && ratio >= 1 && <Chip tone="danger">Daily limit reached</Chip>}
+            {!cooling && ratio >= 1 && <Chip tone="danger">{t("admin.email.limitReached")}</Chip>}
             {sender.consecutiveFailures > 0 && !cooling && (
               <Chip tone="muted">
-                {sender.consecutiveFailures} recent failure
-                {sender.consecutiveFailures > 1 ? "s" : ""}
+                {t("admin.email.recentFailures", { count: sender.consecutiveFailures })}
               </Chip>
             )}
             {sender.lastUsedAt && (
               <span className="adm-sub">
-                last used {new Date(sender.lastUsedAt).toLocaleString("en-GB")}
+                {t("admin.email.lastUsed", { date: formatTimestamp(sender.lastUsedAt) })}
               </span>
             )}
           </div>
@@ -464,18 +468,18 @@ function SenderCard({
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        <Button variant="outline" size="sm" onClick={onTest} disabled={testing} title="Re-test this sender">
+        <Button variant="outline" size="sm" onClick={onTest} disabled={testing} title={t("admin.email.retest")}>
           {testing ? (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           ) : (
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
           )}
-          Test
+          {t("admin.email.test")}
         </Button>
         <IconButton
           icon={deleting ? Loader2 : Trash2}
           tone="danger"
-          label={`Remove ${sender.displayName}`}
+          label={t("admin.email.removeNamed", { name: sender.displayName })}
           disabled={deleting}
           onClick={onDelete}
           className={deleting ? "[&_svg]:animate-spin" : undefined}
@@ -490,9 +494,10 @@ function SenderCard({
 
 /** The one-line answer to "can this app send mail right now", plus why not. */
 function GatewayStatus({ data, loading }: { data?: MailHealth; loading: boolean }) {
+  const t = useT();
   if (loading || !data) {
     return (
-      <AdminPanel icon={ShieldCheck} title="Gateway status">
+      <AdminPanel icon={ShieldCheck} title={t("admin.email.gatewayStatus")}>
         <Skeleton className="h-4 w-52" />
       </AdminPanel>
     );
@@ -504,16 +509,16 @@ function GatewayStatus({ data, loading }: { data?: MailHealth; loading: boolean 
     <AdminPanel
       icon={ok ? ShieldCheck : ShieldAlert}
       tone={ok ? "success" : "warning"}
-      title={ok ? "Gateway healthy" : "Gateway needs attention"}
+      title={ok ? t("admin.email.gatewayHealthy") : t("admin.email.gatewayAttention")}
       sub={
         ok
-          ? "At least one verified sender has headroom, so outbound mail is going out."
-          : "Mail may be delayed or failing. The reasons are listed below."
+          ? t("admin.email.healthyBody")
+          : t("admin.email.attentionBody")
       }
       variant={ok ? undefined : "warn"}
       tools={
         <Chip tone={ok ? "success" : "warning"} mono>
-          {data.eligibleSenders} eligible
+          {t("admin.email.eligible", { count: data.eligibleSenders })}
         </Chip>
       }
     >
@@ -522,16 +527,16 @@ function GatewayStatus({ data, loading }: { data?: MailHealth; loading: boolean 
           {data.problems.map((problem, index) => (
             <li key={index}>
               <Note icon={AlertTriangle} tone="warning">
-                {problem}
+                {data.problemCodes?.[index]
+                  ? t(`admin.email.problem${data.problemCodes[index] === "none" ? "None" : data.problemCodes[index] === "unverified" ? "Unverified" : "Unavailable"}`)
+                  : problem}
               </Note>
             </li>
           ))}
         </ul>
       ) : (
         <p className="adm-sub">
-          <span className="adm-num">{data.activeSenders}</span> active ·{" "}
-          <span className="adm-num">{data.readySenders}</span> verified · daily cap{" "}
-          <span className="adm-num">{data.defaultDailyLimit}</span> per sender by default.
+          {t("admin.email.gatewaySummary", { active: data.activeSenders, verified: data.readySenders, limit: data.defaultDailyLimit })}
         </p>
       )}
     </AdminPanel>
@@ -569,6 +574,7 @@ function AddSenderSheet({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const t = useT();
   const ready = !!values.email && !!values.appPassword && !!values.displayName;
 
   return (
@@ -597,37 +603,37 @@ function AddSenderSheet({
           </span>
           <div className="min-w-0 flex-1">
             <h2 id="add-sender-title" className="adm-panel__title">
-              Add a Gmail sender
+              {t("admin.email.addTitle")}
             </h2>
-            <p className="adm-panel__sub">Saved only if Gmail accepts the login.</p>
+            <p className="adm-panel__sub">{t("admin.email.addSubtitle")}</p>
           </div>
-          <IconButton icon={X} label="Close" onClick={onClose} />
+          <IconButton icon={X} label={t("admin.email.close")} onClick={onClose} />
         </div>
 
         <div className="adm-sheet__body space-y-3.5">
-          <Field label="Display name" hint="How this sender is labelled in the console.">
+          <Field label={t("admin.email.displayName")} hint={t("admin.email.displayHint")}>
             <Input
-              placeholder="e.g. Main sender"
+              placeholder={t("admin.email.displayPlaceholder")}
               value={values.displayName}
               onChange={(e) => onChange.setDisplayName(e.target.value)}
               autoFocus
             />
           </Field>
 
-          <Field label="Gmail address">
+          <Field label={t("admin.email.gmailAddress")}>
             <Input
               type="email"
-              placeholder="you@gmail.com"
+              placeholder={t("admin.email.gmailAddress")}
               value={values.email}
               onChange={(e) => onChange.setEmail(e.target.value)}
             />
           </Field>
 
-          <Field label="App password" hint="Stored encrypted. It is never shown again after saving.">
+          <Field label={t("admin.email.appPassword")} hint={t("admin.email.appPasswordHint")}>
             <div className="relative">
               <Input
                 type={showPw ? "text" : "password"}
-                placeholder="16-character app password"
+                placeholder={t("admin.email.appPasswordPlaceholder")}
                 value={values.appPassword}
                 onChange={(e) => onChange.setAppPassword(e.target.value)}
                 className="pr-10 font-mono"
@@ -635,7 +641,7 @@ function AddSenderSheet({
               <button
                 type="button"
                 onClick={onTogglePw}
-                aria-label={showPw ? "Hide app password" : "Show app password"}
+                aria-label={showPw ? t("admin.email.hidePassword") : t("admin.email.showPassword")}
                 className="adm-iconbtn absolute right-1.5 top-1/2 -translate-y-1/2"
               >
                 {showPw ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
@@ -643,7 +649,7 @@ function AddSenderSheet({
             </div>
           </Field>
 
-          <Field label="From name" hint="What recipients see in their inbox.">
+          <Field label={t("admin.email.fromName")} hint={t("admin.email.fromHint")}>
             <Input
               placeholder={APP_NAME}
               value={values.fromName}
@@ -652,9 +658,7 @@ function AddSenderSheet({
           </Field>
 
           <Note icon={Info}>
-            <strong>Getting an app password:</strong> turn on 2-Step Verification for the Google
-            account, then open Google Account → Security → App passwords, create one for
-            “Mail”, and paste the 16-character code above.
+            {t("admin.email.appPasswordHelp")}
           </Note>
 
           {error && (
@@ -666,7 +670,7 @@ function AddSenderSheet({
 
         <div className="adm-sheet__foot">
           <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
+            {t("admin.email.cancel")}
           </Button>
           <Button size="sm" onClick={onSubmit} disabled={!ready || pending}>
             {pending ? (
@@ -674,7 +678,7 @@ function AddSenderSheet({
             ) : (
               <Send className="h-4 w-4" aria-hidden="true" />
             )}
-            Verify &amp; save
+            {t("admin.email.verifySave")}
           </Button>
         </div>
       </motion.div>
@@ -717,6 +721,8 @@ const LEVEL_TONE: Record<EmailLogEntry["level"], Tone | undefined> = {
 };
 
 function EmailActivityLog() {
+  const t = useT();
+  const { formatTimeSeconds } = useFormat();
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["mail-logs"],
     queryFn: async () => {
@@ -730,12 +736,12 @@ function EmailActivityLog() {
   return (
     <AdminPanel
       icon={ScrollText}
-      title="Recent email activity"
-      sub="Live tail from this server process — last 100 events, cleared on restart."
+      title={t("admin.email.activityTitle")}
+      sub={t("admin.email.activitySub")}
       tools={
         <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching}>
           <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} aria-hidden="true" />
-          Refresh
+          {t("admin.email.refresh")}
         </Button>
       }
     >
@@ -743,13 +749,13 @@ function EmailActivityLog() {
         <Skeleton className="h-3 w-full" rows={5} />
       ) : !data || data.length === 0 ? (
         <p className="adm-sub py-4 text-center">
-          No email events. Sends, verifications, and OTP events show here.
+          {t("admin.email.noEvents")}
         </p>
       ) : (
-        <div className="adm-log" role="log" aria-label="Recent email activity">
+        <div className="adm-log" role="log" aria-label={t("admin.email.activityLabel")}>
           {data.map((entry, index) => (
             <span key={index} className="adm-log__line" data-tone={LEVEL_TONE[entry.level]}>
-              <span className="opacity-60">{new Date(entry.ts).toLocaleTimeString("en-GB")}</span>{" "}
+              <span className="opacity-60">{formatTimeSeconds(new Date(entry.ts))}</span>{" "}
               <span className="font-semibold uppercase opacity-80">{entry.type}</span>{" "}
               {entry.message}
             </span>

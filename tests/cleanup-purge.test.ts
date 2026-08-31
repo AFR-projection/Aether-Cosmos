@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { otpTokens, sessions, users } from "@/lib/db/schema";
+import { db } from "@/shared/infrastructure/db";
+import { otpTokens, sessions, users } from "@/shared/infrastructure/db/schema";
 import { cleanupExpiredSessions, cleanupExpiredOtpTokens } from "@/workers/cleanup";
 
 /**

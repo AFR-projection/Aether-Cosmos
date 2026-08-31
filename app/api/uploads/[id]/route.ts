@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { requireAuthOrApiKey } from "@/lib/auth/api-key";
-import { getEffectiveUserId } from "@/lib/auth/permissions";
-import { apiSuccess, handleApiError } from "@/lib/api/response";
-import { getUpload } from "@/lib/storage/upload-service";
+import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
+import { getEffectiveUserId } from "@/shared/lib/auth/permissions";
+import { apiSuccess, handleApiError } from "@/shared/api/response";
+import { getUpload } from "@files/infrastructure/storage/upload-service";
 
 export async function GET(
   request: NextRequest,

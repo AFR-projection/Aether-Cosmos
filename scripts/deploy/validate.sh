@@ -48,7 +48,7 @@ validate_database_url() {
     return
   fi
   if [[ "$DATABASE_URL" == *'>' ]] || [[ "$DATABASE_URL" != *'sslmode='* ]]; then
-    check_mark 1 "DATABASE_URL IS TRUNCATED — paste the full single line from Neon (it ends with sslmode=require)"
+    check_mark 1 "DATABASE_URL IS TRUNCATED — paste the full single line from your provider (it ends with sslmode=require)"
     return
   fi
   check_mark 0 "DATABASE_URL format OK"
@@ -60,7 +60,7 @@ validate_database_url() {
   else
     local vps_ip
     vps_ip="$(get_public_ip)"
-    check_warn 1 "Database live test skipped/failed — continuing deploy (check Neon IP Allow: ${vps_ip})"
+    check_warn 1 "Database live test skipped/failed — continuing deploy (check your provider's IP Allow: ${vps_ip})"
   fi
 }
 

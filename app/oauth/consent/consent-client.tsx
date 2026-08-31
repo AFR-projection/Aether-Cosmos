@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Loader2, Shield } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { apiFetch } from "@/lib/api/client";
-import { APP_NAME } from "@/lib/app-version";
+import { Button } from "@/ui/primitives/button";
+import { Card } from "@/ui/primitives/card";
+import { apiFetch } from "@/shared/api/client";
+import { APP_NAME } from "@/shared/lib/app-version";
+import { apiErrorMessage, useT, type TranslationKey } from "@/shared/lib/i18n";
 
 const STORAGE_SCOPES = ["read", "upload", "download", "write", "delete", "full"] as const;
 const MASTER_SCOPES = [
@@ -22,21 +23,70 @@ const MASTER_SCOPES = [
 
 type AnyScope = (typeof STORAGE_SCOPES)[number] | (typeof MASTER_SCOPES)[number];
 
-const SCOPE_LABELS: Record<AnyScope, { label: string; description: string; danger?: boolean }> = {
-  read: { label: "Read", description: "List files, folders, search, and metadata" },
-  upload: { label: "Upload", description: "Upload new files to your storage" },
-  download: { label: "Download", description: "Download your files and archives" },
-  write: { label: "Write", description: "Rename, move, favorite, and edit notes" },
-  delete: { label: "Delete", description: "Move files to trash or delete permanently", danger: true },
-  full: { label: "Full storage access", description: "All storage permissions (excludes admin)", danger: true },
-  supreme: { label: "Supreme", description: "Unrestricted platform + admin control", danger: true },
-  admin: { label: "Admin (all)", description: "Full admin panel API access", danger: true },
-  "admin:users": { label: "Manage users", description: "Create, update, suspend, delete users", danger: true },
-  "admin:settings": { label: "Platform settings", description: "Change platform configuration", danger: true },
-  "admin:stats": { label: "Statistics", description: "Read dashboard statistics" },
-  "admin:monitoring": { label: "Monitoring", description: "System health and monitoring" },
-  "admin:shares": { label: "All shares", description: "Manage every shared link platform-wide", danger: true },
-  "admin:email": { label: "Email", description: "Gmail sender management for OTP + notifications", danger: true },
+/**
+ * The scope wire value (`admin:users`) is what the API speaks; the copy for it
+ * lives in the dictionary. Only `danger` stays here — it drives styling, not text.
+ * Key paths are typed, so a renamed dictionary entry is a compile error.
+ */
+const SCOPE_META: Record<
+  AnyScope,
+  { labelKey: TranslationKey; descriptionKey: TranslationKey; danger?: boolean }
+> = {
+  read: { labelKey: "oauth.scope.read.label", descriptionKey: "oauth.scope.read.description" },
+  upload: { labelKey: "oauth.scope.upload.label", descriptionKey: "oauth.scope.upload.description" },
+  download: {
+    labelKey: "oauth.scope.download.label",
+    descriptionKey: "oauth.scope.download.description",
+  },
+  write: { labelKey: "oauth.scope.write.label", descriptionKey: "oauth.scope.write.description" },
+  delete: {
+    labelKey: "oauth.scope.delete.label",
+    descriptionKey: "oauth.scope.delete.description",
+    danger: true,
+  },
+  full: {
+    labelKey: "oauth.scope.full.label",
+    descriptionKey: "oauth.scope.full.description",
+    danger: true,
+  },
+  supreme: {
+    labelKey: "oauth.scope.supreme.label",
+    descriptionKey: "oauth.scope.supreme.description",
+    danger: true,
+  },
+  admin: {
+    labelKey: "oauth.scope.admin.label",
+    descriptionKey: "oauth.scope.admin.description",
+    danger: true,
+  },
+  "admin:users": {
+    labelKey: "oauth.scope.adminUsers.label",
+    descriptionKey: "oauth.scope.adminUsers.description",
+    danger: true,
+  },
+  "admin:settings": {
+    labelKey: "oauth.scope.adminSettings.label",
+    descriptionKey: "oauth.scope.adminSettings.description",
+    danger: true,
+  },
+  "admin:stats": {
+    labelKey: "oauth.scope.adminStats.label",
+    descriptionKey: "oauth.scope.adminStats.description",
+  },
+  "admin:monitoring": {
+    labelKey: "oauth.scope.adminMonitoring.label",
+    descriptionKey: "oauth.scope.adminMonitoring.description",
+  },
+  "admin:shares": {
+    labelKey: "oauth.scope.adminShares.label",
+    descriptionKey: "oauth.scope.adminShares.description",
+    danger: true,
+  },
+  "admin:email": {
+    labelKey: "oauth.scope.adminEmail.label",
+    descriptionKey: "oauth.scope.adminEmail.description",
+    danger: true,
+  },
 };
 
 const MASTER_SET = new Set<string>(MASTER_SCOPES);
@@ -53,6 +103,7 @@ export default function OAuthConsentClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [role, setRole] = useState<string | null>(null);
+  const t = useT();
 
   const oauth = useMemo(
     () => ({
@@ -102,7 +153,7 @@ export default function OAuthConsentClient() {
     setGranted(new Set(requestedScopes));
   }
 
-  const appLabel = oauth.client_name?.trim() || "An external application";
+  const appLabel = oauth.client_name?.trim() || t("oauth.defaultApp");
   let redirectHost = oauth.redirect_uri;
   try {
     redirectHost = new URL(oauth.redirect_uri).host || oauth.redirect_uri;
@@ -137,12 +188,12 @@ export default function OAuthConsentClient() {
         }),
       });
       if (!res.success || !res.data?.redirect_to) {
-        setError(res.error ?? "Authorization failed");
+        setError(apiErrorMessage(res, t, "oauth.failed"));
         return;
       }
       window.location.href = res.data.redirect_to;
     } catch {
-      setError("Connection failed");
+      setError(t("errors.network"));
     } finally {
       setLoading(false);
     }
@@ -152,41 +203,42 @@ export default function OAuthConsentClient() {
     return (
       <div className="flex min-h-dvh items-center justify-center p-4">
         <Card className="max-w-md p-6 text-sm text-muted-foreground">
-          Invalid OAuth request. Missing client_id, redirect_uri, or PKCE challenge.
+          {t("oauth.invalidRequest")}
         </Card>
       </div>
     );
   }
 
-  const grantsDangerous = requestedScopes.some((s) => granted.has(s) && SCOPE_LABELS[s].danger);
+  const grantsDangerous = requestedScopes.some((s) => granted.has(s) && SCOPE_META[s].danger);
 
   return (
     <div className="flex min-h-dvh items-center justify-center p-4 bg-background">
       <Card className="w-full max-w-md space-y-4 p-6">
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-violet-400" />
-          <h1 className="text-lg font-semibold">Authorize connection</h1>
+          <h1 className="text-lg font-semibold">{t("oauth.title")}</h1>
         </div>
+        {/* The app name is no longer bolded inside the sentence: the emphasis span
+            cannot survive a translation that reorders the clause. */}
         <p className="text-sm text-muted-foreground leading-relaxed">
-          <span className="font-medium text-foreground">{appLabel}</span> wants to connect to your
-          {APP_NAME} account. Choose what it can do, then allow access.
+          {t("oauth.intro", { app: appLabel, product: APP_NAME })}
         </p>
 
         {/* Awareness: this grants an outside app direct access to your data */}
         <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/[0.07] p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-100/90">
-            This gives an <span className="font-semibold">external app direct access to your data</span>{" "}
-            with the permissions you check below. Only allow apps you trust — you can revoke this
-            anytime from the Connection page. Never approve a request you didn&apos;t start yourself.
+            {t("oauth.warning")}
           </p>
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground">Permissions requested</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("oauth.permissionsRequested")}
+          </p>
           <div className="space-y-1.5">
             {requestedScopes.map((scope) => {
-              const meta = SCOPE_LABELS[scope];
+              const meta = SCOPE_META[scope];
               const checked = granted.has(scope);
               const locked = scope === "read";
               return (
@@ -209,35 +261,34 @@ export default function OAuthConsentClient() {
                   />
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                      {meta.label}
+                      {t(meta.labelKey)}
                       {meta.danger && (
                         <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                          sensitive
+                          {t("oauth.sensitive")}
                         </span>
                       )}
                       {locked && (
                         <span className="rounded-full bg-muted/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
-                          always
+                          {t("oauth.always")}
                         </span>
                       )}
                     </span>
-                    <span className="block text-[11px] text-muted-foreground">{meta.description}</span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      {t(meta.descriptionKey)}
+                    </span>
                   </span>
                 </label>
               );
             })}
           </div>
           {droppedMasterScopes.length > 0 && (
-            <p className="text-[10px] text-muted-foreground">
-              This app also requested admin permissions, which were hidden because your account
-              isn&apos;t a master account. They will not be granted.
-            </p>
+            <p className="text-[10px] text-muted-foreground">{t("oauth.adminHidden")}</p>
           )}
         </div>
 
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs space-y-1">
           <p>
-            <span className="text-muted-foreground">Redirects to:</span>{" "}
+            <span className="text-muted-foreground">{t("oauth.redirectsTo")}</span>{" "}
             <span className="break-all">{redirectHost}</span>
           </p>
         </div>
@@ -249,7 +300,7 @@ export default function OAuthConsentClient() {
             onClick={handleApprove}
             disabled={loading}
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Allow access"}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t("oauth.allow")}
           </Button>
           <Button
             variant="ghost"
@@ -257,13 +308,10 @@ export default function OAuthConsentClient() {
             onClick={() => router.push("/dashboard")}
             disabled={loading}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
-        <p className="text-[10px] text-muted-foreground">
-          After allowing access, you&apos;ll be redirected back to the connector app. OAuth tokens are
-          used for API access — your sk_ API keys are never shared with the app.
-        </p>
+        <p className="text-[10px] text-muted-foreground">{t("oauth.afterNote")}</p>
       </Card>
     </div>
   );
