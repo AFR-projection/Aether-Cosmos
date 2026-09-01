@@ -2,7 +2,17 @@
 
 import { useCallback, useRef } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
-import { Download, Folder, MoreHorizontal, Pencil, Trash2, Users } from "lucide-react";
+import {
+  ClipboardPaste,
+  Copy,
+  Download,
+  Folder,
+  MoreHorizontal,
+  Pencil,
+  Scissors,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/ui/primitives/button";
 import { FloatingActionMenu, useFloatingMenu, type FloatingMenuItem } from "@/ui/primitives/floating-action-menu";
@@ -20,11 +30,20 @@ interface FolderCardProps {
    * viewer may write, so a drag never ends in a refusal the card could have predicted.
    */
   canDrag?: boolean;
+  /**
+   * On the clipboard as part of a *cut*. Explorer fades what is about to move, which is
+   * the only signal that Ctrl+X did anything at all before the paste lands.
+   */
+  ghosted?: boolean;
   /** Omit to hide the action — a `view` member may not rename or delete. */
   onRename?: (folder: FolderRecord) => void;
   onDelete?: (folder: FolderRecord) => void;
   onShare?: (folder: FolderRecord) => void;
   onDownload?: (folder: FolderRecord) => void;
+  onCopy?: (folder: FolderRecord) => void;
+  onCut?: (folder: FolderRecord) => void;
+  /** Paste the clipboard *into* this folder without opening it first. */
+  onPasteInto?: (folder: FolderRecord) => void;
 }
 
 export function FolderCard({
@@ -32,10 +51,14 @@ export function FolderCard({
   trash = false,
   href,
   canDrag = false,
+  ghosted = false,
   onRename,
   onDelete,
   onShare,
   onDownload,
+  onCopy,
+  onCut,
+  onPasteInto,
 }: FolderCardProps) {
   const t = useT();
   const { isOver, setNodeRef: setDropRef } = useDroppable({ id: folder.id });
@@ -82,6 +105,33 @@ export function FolderCard({
       label: t("files.folderCard.download"),
       icon: Download,
       onClick: () => onDownload(folder),
+    });
+  }
+
+  if (!trash && onCopy) {
+    menuItems.push({
+      id: "clip-copy",
+      label: t("common.copy"),
+      icon: Copy,
+      onClick: () => onCopy(folder),
+    });
+  }
+
+  if (!trash && onCut) {
+    menuItems.push({
+      id: "clip-cut",
+      label: t("files.list.cut"),
+      icon: Scissors,
+      onClick: () => onCut(folder),
+    });
+  }
+
+  if (!trash && onPasteInto) {
+    menuItems.push({
+      id: "clip-paste",
+      label: t("files.browser.pasteInto"),
+      icon: ClipboardPaste,
+      onClick: () => onPasteInto(folder),
     });
   }
 
@@ -139,13 +189,19 @@ export function FolderCard({
             ? "border-accent bg-accent/10 scale-[1.02] shadow-md shadow-accent/10"
             : "border-border/60 bg-surface hover:border-accent/30 hover:bg-surface-hover hover:shadow-sm",
           // Held in place at reduced opacity while the overlay follows the pointer.
-          isDragging && "opacity-40"
+          isDragging && "opacity-40",
+          // Cut, not yet pasted. A dashed edge carries the state on its own, and it does
+          // it without fading the label — a card at 60% opacity takes its text and its
+          // folder glyph down with it.
+          ghosted && !isDragging && "border-dashed border-accent/50"
         )}
       >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-          <Folder className="h-4 w-4 text-accent-ink" />
+          <Folder className={cn("h-4 w-4 text-accent-ink", ghosted && !isDragging && "opacity-60")} />
         </div>
         <span className="truncate font-medium leading-tight">{folder.name}</span>
+        {/* The dash is a visual-only cue, so the state is spoken as well. */}
+        {ghosted && <span className="sr-only">{t("files.paste.cutPending")}</span>}
       </a>
 
       {/* No actions at all (a `view` member) → no menu affordance to click. */}

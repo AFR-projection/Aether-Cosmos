@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/shared/api/client";
+import { useDebouncedValue } from "@/ui/hooks/use-debounced-value";
+import { useAdminEvents } from "@admin/presentation/hooks/use-admin-events";
 import { Button } from "@/ui/primitives/button";
 import {
   AdminEmpty,
@@ -41,6 +43,7 @@ import {
   Play,
   Pause,
   X,
+  AlertTriangle,
 } from "lucide-react";
 import { relativeTime, useFormat, useT } from "@/shared/lib/i18n";
 import { cn } from "@/shared/lib/utils";
@@ -58,6 +61,21 @@ type LogEntry = {
   email: string | null;
   userRole: string;
 };
+
+type TimeWindow = "hour" | "day" | "week" | "all";
+
+const ADMIN_LOGS_QUERY_KEY = ["admin-logs"] as const;
+const LOG_EVENT_TYPES = ["activity_log_created"] as const;
+
+function windowStart(window: TimeWindow): string | undefined {
+  const duration = {
+    hour: 60 * 60 * 1000,
+    day: 24 * 60 * 60 * 1000,
+    week: 7 * 24 * 60 * 60 * 1000,
+    all: 0,
+  }[window];
+  return duration === 0 ? undefined : new Date(Date.now() - duration).toISOString();
+}
 
 /** Ticking clock so relative timestamps stay honest without an impure render. */
 function useNow(intervalMs = 30_000): number {
@@ -239,13 +257,16 @@ function AdminLogsContent() {
   const [search, setSearch] = useState(
     searchParams.get("user") ?? searchParams.get("search") ?? ""
   );
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
   const [group, setGroup] = useState<GroupFilter>(() => {
     const seeded = searchParams.get("action");
     return seeded ? auditAction(seeded).group : "all";
   });
   const [exporting, setExporting] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("day");
+  const liveStatus = useAdminEvents(ADMIN_LOGS_QUERY_KEY, autoRefresh, LOG_EVENT_TYPES);
 
   // Other pages deep-link in here ("view all logins", a user's action count), so a
   // new query string has to win over whatever is currently in the boxes. Adopting
@@ -266,23 +287,33 @@ function AdminLogsContent() {
     if (u) setSearch(u);
   }
 
-  const { data: logs, refetch, isLoading, isFetching } = useQuery({
-    queryKey: ["admin-logs", action, search],
+  const { data, refetch, isLoading, isFetching, isError, dataUpdatedAt } = useQuery({
+    queryKey: [...ADMIN_LOGS_QUERY_KEY, action, debouncedSearch, timeWindow],
     queryFn: async () => {
-      const res = await apiFetch<{ logs: Array<LogEntry> }>("/api/admin/monitoring", {
-        method: "POST",
-        body: JSON.stringify({
-          action: action || undefined,
-          search: search || undefined,
-          limit: 200,
-        }),
-      });
-      return res.data?.logs ?? [];
+      const res = await apiFetch<{ logs: Array<LogEntry>; serverTime: number }>(
+        "/api/admin/monitoring",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action: action || undefined,
+            search: debouncedSearch || undefined,
+            since: windowStart(timeWindow),
+            limit: 200,
+          }),
+        }
+      );
+      if (!res.success || !res.data) {
+        throw new Error(res.error ?? "Failed to load activity logs");
+      }
+      return res.data;
     },
-    refetchInterval: autoRefresh ? 10000 : false,
+    // SSE is the fast path. Polling remains a safety net while it reconnects or
+    // when a proxy/browser blocks the event stream.
+    refetchInterval: autoRefresh ? (liveStatus === "live" ? 60_000 : 10_000) : false,
+    refetchOnWindowFocus: autoRefresh,
   });
 
-  const rows = useMemo(() => logs ?? [], [logs]);
+  const rows = useMemo(() => data?.logs ?? [], [data?.logs]);
 
   // Built in the component, not at module scope: the group labels are keys now, and
   // a module-level array would have frozen whichever language loaded first.
@@ -297,6 +328,28 @@ function AdminLogsContent() {
     ],
     [t]
   );
+
+  const timeOptions = useMemo(
+    () => [
+      { value: "hour" as const, label: t("admin.logs.timeHour") },
+      { value: "day" as const, label: t("admin.logs.timeDay") },
+      { value: "week" as const, label: t("admin.logs.timeWeek") },
+      { value: "all" as const, label: t("admin.logs.timeAll") },
+    ],
+    [t]
+  );
+
+  const liveLabel = !autoRefresh
+    ? t("admin.logs.paused")
+    : liveStatus === "live"
+      ? t("admin.logs.live")
+      : liveStatus === "connecting"
+        ? t("admin.logs.connecting")
+        : liveStatus === "reconnecting"
+          ? t("admin.logs.reconnecting")
+          : t("admin.logs.offlineFallback");
+  const liveTone: Tone =
+    liveStatus === "live" ? "success" : liveStatus === "offline" ? "danger" : "warning";
 
   /** Chips are gated behind the group segment — 21 of them at once is a wall. */
   const chipActions = useMemo(() => (group === "all" ? [] : actionsInGroup(group)), [group]);
@@ -373,7 +426,8 @@ function AdminLogsContent() {
         title={t("admin.logs.title")}
         lede={t("admin.logs.lede")}
         live={autoRefresh}
-        liveLabel={t("admin.logs.polling")}
+        liveLabel={liveLabel}
+        liveTone={liveTone}
         actions={
           <>
             <Button
@@ -458,6 +512,12 @@ function AdminLogsContent() {
           options={groupOptions}
           label={t("admin.logs.areaLabel")}
         />
+        <Segment
+          value={timeWindow}
+          onChange={setTimeWindow}
+          options={timeOptions}
+          label={t("admin.logs.timeLabel")}
+        />
       </div>
       {/* Second tier of the filter: only the actions that live in the chosen area,
           plus an escape hatch for an action that arrived by query string. */}
@@ -504,12 +564,33 @@ function AdminLogsContent() {
                     "admin.logs.allAreas"
                 )
         }
+        tools={
+          dataUpdatedAt > 0 ? (
+            <span className="adm-sub adm-num" aria-live="polite">
+              {t("admin.logs.lastUpdated", {
+                time: relativeTime(new Date(dataUpdatedAt).toISOString(), now, t),
+              })}
+            </span>
+          ) : undefined
+        }
         flush
       >
         {isLoading ? (
           <div className="space-y-2 p-4">
             <Skeleton className="h-14 w-full" rows={7} />
           </div>
+        ) : isError ? (
+          <AdminEmpty
+            icon={AlertTriangle}
+            title={t("admin.logs.loadFailed")}
+            body={t("admin.logs.loadFailedBody")}
+            action={
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                {t("common.retry")}
+              </Button>
+            }
+          />
         ) : filtered.length === 0 ? (
           <AdminEmpty
             icon={ScrollText}

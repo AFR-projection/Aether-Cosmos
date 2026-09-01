@@ -1703,6 +1703,16 @@ body {
   transform: scale(1.04);
 }
 
+.auth-visual__video {
+  width: 100%;
+  height: 100%;
+  contain: paint;
+  object-fit: cover;
+  object-position: center;
+  filter: saturate(0.82) contrast(1.06) brightness(0.82);
+  transform: scale(1.025);
+}
+
 .auth-visual__shade {
   background:
     linear-gradient(180deg, rgba(9, 11, 18, 0.12), rgba(9, 11, 18, 0.32) 42%, rgba(9, 11, 18, 0.92)),
@@ -1717,6 +1727,51 @@ body {
   justify-content: space-between;
   min-height: inherit;
   padding: clamp(1.75rem, 4vw, 3.25rem);
+}
+
+.auth-visual__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.auth-video-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0 0.8rem;
+  border: 1px solid rgba(221, 226, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(9, 11, 18, 0.38);
+  color: rgba(244, 247, 255, 0.82);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 560;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.auth-video-toggle:hover {
+  border-color: rgba(161, 170, 255, 0.42);
+  background: rgba(28, 32, 54, 0.62);
+  color: var(--auth-text);
+}
+
+.auth-video-toggle:focus-visible {
+  outline: 2px solid var(--auth-accent);
+  outline-offset: 3px;
+}
+
+.auth-video-toggle svg {
+  width: 0.8rem;
+  height: 0.8rem;
 }
 
 .auth-brand {
@@ -6422,4 +6477,3 @@ button.adm-tile:focus-visible {
 }
 
 .lite .set-page::before { display: none; }
-

@@ -53,6 +53,7 @@ export type AdminRealtimeEvent =
   | { type: "user_updated"; userId: string; at: number }
   | { type: "user_deleted"; userId: string; at: number }
   | { type: "user_presence"; userId: string; online: boolean; at: number }
+  | { type: "activity_log_created"; userId: string; action: string; at: number }
   | { type: "heartbeat"; at: number };
 
 export type AdminRealtimeEventHandler = (event: AdminRealtimeEvent) => void;

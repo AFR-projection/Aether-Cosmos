@@ -201,6 +201,10 @@ export const en = {
     encryptedWorkspace: "Encrypted workspace",
     privateByDefault: "Private by default",
     privateByDefaultNote: "Every layer has a purpose.",
+    pauseVisual: "Pause background animation",
+    playVisual: "Play background animation",
+    pauseMotion: "Pause motion",
+    playMotion: "Play motion",
     login: {
       title: "Welcome back",
       description: "Sign in to open your private workspace.",
@@ -725,6 +729,78 @@ export const en = {
         "This is as deep as it goes — use Move here to drop the items in this folder.",
       sourceTitle: "The items are already in this folder",
       sourceBadge: "Current",
+    },
+    /**
+     * Clipboard paste. A paste is three server round-trips (plan → folders → files), so
+     * the copy has to cover a refusal before anything moved, a partial result, and a
+     * cancel that already landed some items.
+     */
+    paste: {
+      /** Refusals decided on the client, before any request goes out. */
+      blocked: {
+        trash: "Items cannot be pasted into the trash.",
+        self: "A folder cannot be pasted into itself.",
+        descendant: "A folder cannot be pasted into one of its own subfolders.",
+        sameFolder: "These items are already in this folder.",
+        readOnly: "You do not have permission to paste here.",
+      },
+      progress: {
+        planning: "Preparing…",
+        structure: "Creating folders…",
+        /** `aria-valuetext` for the progress chip, so the fraction is read as a sentence. */
+        count: "{done} of {total} pasted",
+        /** Names the progressbar; a spinner and a fraction on their own say nothing. */
+        copyingLabel: "Copying to this folder",
+        movingLabel: "Moving to this folder",
+      },
+      /** Spoken state for an item on a cut clipboard — the dashed edge is visual only. */
+      cutPending: "Cut — waiting to be pasted",
+      cancel: "Cancel paste",
+      /** The toolbar chip: what is waiting on the clipboard. */
+      clipCount: { one: "{count} item ready to paste", other: "{count} items ready to paste" },
+      nothing: "Nothing left to paste.",
+      failed: "The paste could not be completed.",
+      busy: "A paste is already running.",
+      quotaShort: "Not enough storage to paste this.",
+      quotaDetail: "Needs {required}, only {remaining} free.",
+      allSkipped: { one: "{count} item skipped", other: "{count} items skipped" },
+      oversized: {
+        one: "{count} file is too large to copy and was left behind",
+        other: "{count} files are too large to copy and were left behind",
+      },
+      deniedSome: {
+        one: "{count} item was not yours to paste",
+        other: "{count} items were not yours to paste",
+      },
+      someFailed: { one: "{count} failed", other: "{count} failed" },
+      someSkipped: { one: "{count} skipped", other: "{count} skipped" },
+      someRemaining: {
+        one: "{count} still on the clipboard",
+        other: "{count} still on the clipboard",
+      },
+      cancelled: {
+        one: "Paste cancelled after {count} item",
+        other: "Paste cancelled after {count} items",
+      },
+      doneCopy: { one: "{count} item copied", other: "{count} items copied" },
+      doneMove: { one: "{count} item moved", other: "{count} items moved" },
+      /** The name-clash dialog. One decision applies to every clash in the paste. */
+      conflict: {
+        title: { one: "{count} name already exists", other: "{count} names already exist" },
+        bodyCopy: "Choose what to do with every name that clashes in “{folder}”.",
+        /** Only the cut wording differs: nothing is left behind at the source. */
+        bodyMove: "Choose what to do with every name already taken in “{folder}”.",
+        filesLabel: "Files",
+        foldersLabel: "Folders",
+        more: { one: "and {count} more", other: "and {count} more" },
+        keepBoth: "Keep both",
+        keepBothHint: "Adds a number, so nothing is overwritten.",
+        replace: "Replace",
+        replaceHint: "The file already there is moved to the trash first.",
+        replaceFolders: "Folders are always merged, never replaced.",
+        skip: "Skip",
+        skipHint: "Leaves what is already there untouched.",
+      },
     },
     bulkRename: {
       title: { one: "Bulk rename {count} file", other: "Bulk rename {count} files" },
@@ -1480,6 +1556,10 @@ export const en = {
       pasteMove: { one: "Paste {count} item (move)", other: "Paste {count} items (move)" },
       pasteCopy: { one: "Paste {count} item (copy)", other: "Paste {count} items (copy)" },
       pasteHere: "Paste here",
+      /** On a folder card: paste into that folder without opening it first. */
+      pasteInto: "Paste into folder",
+      /** Right-click on empty space in the file area. */
+      areaMenu: "Folder area actions",
       thisFolder: "this folder",
       sort: "Sort",
       sortMenu: "Sort files",
@@ -2900,6 +2980,11 @@ export const en = {
       title: "Activity logs",
       lede: "Every privileged action, newest first. Pick an area, then narrow to a single kind of event — the raw payload is one click away on any row.",
       polling: "Polling 10s",
+      live: "Live",
+      connecting: "Connecting…",
+      reconnecting: "Reconnecting…",
+      offlineFallback: "SSE offline · polling 10s",
+      paused: "Live updates paused",
       pause: "Pause",
       auto: "Auto",
       export: "Export",
@@ -2916,7 +3001,15 @@ export const en = {
       searchPlaceholder: "User, email, or IP…",
       areaLabel: "Log area",
       areaAll: "All",
+      timeLabel: "Time range",
+      timeHour: "1h",
+      timeDay: "24h",
+      timeWeek: "7d",
+      timeAll: "All time",
       clearActionFilter: "Clear the action filter",
+      lastUpdated: "Updated {time}",
+      loadFailed: "Could not load activity logs",
+      loadFailedBody: "The audit trail is temporarily unreachable. Your filters are preserved; try the request again.",
       panelTitle: { one: "{count} event", other: "{count} events" },
       filteredTo: "Filtered to {action}",
       allAreas: "All areas",
@@ -3278,6 +3371,7 @@ export const en = {
       updateFailed: "Failed to update user",
 
       twoFactorTitle: "Two-factor authentication",
+      stepCodeTitle: "2-Step Code",
     },
     settings: {
       kicker: "Configuration",

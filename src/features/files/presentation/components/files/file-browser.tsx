@@ -8,6 +8,7 @@ import {
   Image, Film, Music, FileText, FileArchive, Star, X, Files, FolderOpen,
   Download, File, Lock, Move, ArrowDownUp, ArrowUp, ArrowDown, PencilRuler,
   Copy, Scissors, ClipboardPaste, ArrowLeft, Plus, ChevronDown, PanelLeft,
+  Loader2, CheckSquare,
 } from "lucide-react";
 import { Button } from "@/ui/primitives/button";
 import { Input } from "@/ui/primitives/input";
@@ -61,8 +62,11 @@ import {
   type UploadEntry,
 } from "@files/domain/services/folder-tree-upload";
 import {
-  setClipboard, clearClipboard, getClipboard, useFileClipboard,
+  setClipboard, clearClipboard, getClipboard, useFileClipboard, cutIds,
+  type ClipboardEntry,
 } from "@files/domain/services/clipboard";
+import { usePaste } from "@files/presentation/hooks/use-paste";
+import { PasteConflictDialog } from "./paste-conflict-dialog";
 import { notify } from "@/shared/lib/system/notify-store";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { recordActivity } from "@/shared/lib/activity/activity-store";
@@ -305,6 +309,14 @@ export function FileBrowser({
   // Toolbar menus ("new" and "sort") share one open-state so only one is ever up,
   // but each needs its own anchor to position against.
   const toolbarMenu = useFloatingMenu();
+  // Where the background context menu opened, in viewport coordinates. `null` = closed.
+  const [areaPoint, setAreaPoint] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * Name of the folder the running paste is aimed at. Kept here rather than read off the
+   * breadcrumb, because "Paste into" on a folder card targets a child — the conflict
+   * dialog has to name that child, not the folder being viewed.
+   */
+  const [pasteTargetName, setPasteTargetName] = useState("");
   const newMenuRef = useRef<HTMLButtonElement>(null);
   const sortMenuRef = useRef<HTMLButtonElement>(null);
 
@@ -328,6 +340,17 @@ export function FileBrowser({
   const [bulkRenameIds, setBulkRenameIds] = useState<string[] | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const clipboard = useFileClipboard();
+  // Owns the whole three-round-trip paste: progress, cancellation and the conflict prompt.
+  // Destructured because the hook returns a fresh object every progress tick — depending on
+  // that object would rebuild the keyboard listener mid-transfer.
+  const {
+    progress: pasteProgress,
+    conflict: pasteConflict,
+    run: runPaste,
+    cancel: cancelPaste,
+  } = usePaste();
+  // Items waiting to be moved out of here are shown faded, the way Explorer does it.
+  const ghostIds = useMemo(() => cutIds(clipboard), [clipboard]);
 
   // File preview / note editor
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
@@ -661,33 +684,65 @@ export function FileBrowser({
   );
 
   // ── Clipboard: copy / cut (paste lives below, needs folderId handlers) ──
-  const copyToClipboard = useCallback((ids: string[]) => {
-    if (ids.length === 0) return;
-    const label = ids.length === 1
-      ? (allFiles.find((x) => x.id === ids[0])?.name ?? t("files.browser.fileCount", { count: 1 }))
-      : t("files.browser.fileCount", { count: ids.length });
-    setClipboard("copy", ids, label);
-    notify({
-      title: t("common.copied"),
-      description: t("files.browser.notify.readyToPaste", { label }),
-      tone: "info",
-      duration: 2500,
-    });
-  }, [allFiles, t]);
+  /**
+   * One writer for both modes and both kinds. The clipboard records where the items came
+   * from, which is what lets a cut refuse a paste back into its own folder instead of
+   * running a no-op move, and what lets a folder be carried the same way a file is.
+   */
+  const putOnClipboard = useCallback(
+    (mode: "copy" | "cut", entries: ClipboardEntry[]) => {
+      if (entries.length === 0) return;
+      const label =
+        entries.length === 1
+          ? entries[0].name
+          : t("files.browser.fileCount", { count: entries.length });
+      setClipboard(mode, entries, folderId, label);
+      notify({
+        title: mode === "cut" ? t("files.list.cut") : t("common.copied"),
+        description: t(
+          mode === "cut" ? "files.browser.notify.readyToMove" : "files.browser.notify.readyToPaste",
+          { label }
+        ),
+        tone: "info",
+        duration: 2500,
+      });
+    },
+    [folderId, t]
+  );
 
-  const cutToClipboard = useCallback((ids: string[]) => {
-    if (ids.length === 0) return;
-    const label = ids.length === 1
-      ? (allFiles.find((x) => x.id === ids[0])?.name ?? t("files.browser.fileCount", { count: 1 }))
-      : t("files.browser.fileCount", { count: ids.length });
-    setClipboard("cut", ids, label);
-    notify({
-      title: t("files.list.cut"),
-      description: t("files.browser.notify.readyToMove", { label }),
-      tone: "info",
-      duration: 2500,
-    });
-  }, [allFiles, t]);
+  // Names are looked up now so the chip can say "report.pdf" rather than "1 file", but the
+  // paste re-reads them from the server: a rename between copy and paste wins.
+  const fileEntries = useCallback(
+    (ids: readonly string[]): ClipboardEntry[] =>
+      ids.map((id) => ({
+        kind: "file" as const,
+        id,
+        name: allFiles.find((x) => x.id === id)?.name ?? id,
+      })),
+    [allFiles]
+  );
+
+  const copyToClipboard = useCallback(
+    (ids: string[]) => putOnClipboard("copy", fileEntries(ids)),
+    [putOnClipboard, fileEntries]
+  );
+
+  const cutToClipboard = useCallback(
+    (ids: string[]) => putOnClipboard("cut", fileEntries(ids)),
+    [putOnClipboard, fileEntries]
+  );
+
+  const copyFolderToClipboard = useCallback(
+    (folder: FolderRecord) =>
+      putOnClipboard("copy", [{ kind: "folder", id: folder.id, name: folder.name }]),
+    [putOnClipboard]
+  );
+
+  const cutFolderToClipboard = useCallback(
+    (folder: FolderRecord) =>
+      putOnClipboard("cut", [{ kind: "folder", id: folder.id, name: folder.name }]),
+    [putOnClipboard]
+  );
 
   // ── File actions ──
   const handleFileAction = useCallback(async (action: string, file: FileRecord) => {
@@ -1238,48 +1293,42 @@ export function FileBrowser({
     queryClient.invalidateQueries({ queryKey: ["files"] });
   }
 
-  // Paste = copy or move the clipboard contents INTO the current folder.
-  async function pasteHere() {
-    const clip = getClipboard();
-    if (!clip) return;
-    if (!caps.canEdit) { refuse("edit"); return; }
-    try {
-      if (clip.mode === "cut") {
-        const res = await apiFetch("/api/files/batch", {
-          method: "PATCH",
-          body: JSON.stringify({ ids: clip.ids, action: "move", folderId }),
-        });
-        if (!res.success) { showError(apiErrorMessage(res, t, "files.browser.error.move")); return; }
-        recordActivity("move", clip.label, "done", { destination: folderId === null ? t("files.myFiles") : undefined });
-      } else {
-        let failed = 0;
-        for (const id of clip.ids) {
-          const res = await apiFetch("/api/files", {
-            method: "PATCH",
-            body: JSON.stringify({ id, action: "copy", targetFolderId: folderId }),
-          });
-          if (!res.success) failed++;
-        }
-        if (failed > 0) showError(t("files.browser.error.copyBatch", { count: failed }));
-        else recordActivity("copy", clip.label, "done");
-      }
-      // A cut is consumed on paste; a copy stays so it can be pasted again.
-      if (clip.mode === "cut") clearClipboard();
-      setSelectedIds(new Set());
-      queryClient.invalidateQueries({ queryKey: ["files"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      notify({
-        title: t("files.browser.notify.pastedTitle"),
-        description: t("files.browser.notify.pastedBody", {
-          destination: folderId ? t("files.browser.thisFolder") : t("files.myFiles"),
-        }),
-        tone: "success",
-        duration: 2500,
+  /**
+   * Paste = copy or move the clipboard contents INTO a folder. All three entry points
+   * (the toolbar chip, Ctrl+V, and "Paste into" on a folder card) funnel through here, so
+   * the destination is a parameter rather than always "the folder being viewed".
+   *
+   * `pathIds` is the destination's own id plus every ancestor. For the current folder that
+   * is exactly the breadcrumb chain; for a child card it is that chain plus the child.
+   */
+  const pasteInto = useCallback(
+    (destination: string | null, destinationName: string, extraPathId?: string) => {
+      const crumbs = (folderPath.data?.crumbs ?? []).map((crumb) => crumb.id);
+      setPasteTargetName(destinationName);
+      void runPaste({
+        clipboard: getClipboard(),
+        destinationFolderId: destination,
+        destinationPathIds: extraPathId ? [...crumbs, extraPathId] : crumbs,
+        canEdit: caps.canEdit,
+        trash,
+        destinationName,
       });
-    } catch {
-      showError(t("errors.connectionFailed"));
-    }
-  }
+    },
+    [runPaste, folderPath.data, caps.canEdit, trash]
+  );
+
+  const pasteHere = useCallback(() => {
+    pasteInto(folderId, folderId ? t("files.browser.thisFolder") : t("files.myFiles"));
+    setSelectedIds(new Set());
+  }, [pasteInto, folderId, t]);
+
+  const pasteIntoFolder = useCallback(
+    (folder: FolderRecord) => {
+      pasteInto(folder.id, folder.name, folder.id);
+      setSelectedIds(new Set());
+    },
+    [pasteInto]
+  );
 
   async function batchDownload() {
     const ids = Array.from(selectedIds);
@@ -1383,10 +1432,19 @@ export function FileBrowser({
 
       if (typing) return;
 
-      // Esc clears the current selection.
-      if (e.key === "Escape" && selectedIds.size > 0) {
-        e.preventDefault();
-        setSelectedIds(new Set());
+      // Esc clears the selection first, then the clipboard. Explorer drops its cut
+      // marquee on Escape, and since this clipboard survives a reload there would
+      // otherwise be no way to put it down.
+      if (e.key === "Escape") {
+        if (selectedIds.size > 0) {
+          e.preventDefault();
+          setSelectedIds(new Set());
+          return;
+        }
+        if (getClipboard()) {
+          e.preventDefault();
+          clearClipboard();
+        }
         return;
       }
 
@@ -1457,8 +1515,11 @@ export function FileBrowser({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+    // `folderId`/`folderPath.data` are listed because Ctrl+V reads the destination and its
+    // ancestor chain out of this closure — a stale one would paste into the folder the user
+    // was looking at a navigation ago.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIds, filteredFiles, trash, overlayOpen]);
+  }, [selectedIds, filteredFiles, trash, overlayOpen, folderId, folderPath.data, pasteHere]);
 
   useEffect(() => {
     if (filesQuery.isError) {
@@ -1544,6 +1605,52 @@ export function FileBrowser({
       onClick: () => void pickAndUploadFolder(),
     },
   ];
+
+  /**
+   * Right-click on the background between cards — Explorer's area menu, trimmed to what is
+   * reachable from empty space. Built unconditionally so the handler can tell "nothing to
+   * offer" (a read-only trash view) from "menu suppressed".
+   */
+  const areaMenuItems: FloatingMenuItem[] = [];
+  if (clipboard && canCreate) {
+    areaMenuItems.push({
+      id: "area-paste",
+      label: t(
+        clipboard.mode === "cut" ? "files.browser.pasteMove" : "files.browser.pasteCopy",
+        { count: clipboard.count }
+      ),
+      icon: ClipboardPaste,
+      shortcut: "Ctrl+V",
+      onClick: pasteHere,
+    });
+  }
+  if (filteredFiles.length > 0) {
+    areaMenuItems.push({
+      id: "area-select-all",
+      label: t("files.list.selectAll"),
+      icon: CheckSquare,
+      shortcut: "Ctrl+A",
+      separatorBefore: areaMenuItems.length > 0,
+      onClick: () => setSelectedIds(new Set(filteredFiles.map((f) => f.id))),
+    });
+  }
+  if (canCreate) {
+    areaMenuItems.push(
+      {
+        id: "area-folder",
+        label: t("quickActions.folder"),
+        icon: FolderPlus,
+        separatorBefore: areaMenuItems.length > 0,
+        onClick: () => void createFolder(),
+      },
+      {
+        id: "area-upload",
+        label: t("quickActions.upload"),
+        icon: Upload,
+        onClick: () => uploadInputRef.current?.click(),
+      }
+    );
+  }
 
   const sortItems: FloatingMenuItem[] = [
     ...SORT_OPTIONS.map((opt) => ({
@@ -1856,18 +1963,86 @@ export function FileBrowser({
                   </span>
                 </Button>
 
-                {clipboard && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className={cn(CONTROL_H, "cursor-pointer gap-1.5 border border-accent/25 bg-accent/5 px-2.5 text-accent-ink hover:bg-accent/10")}
-                    onClick={pasteHere}
-                    title={t(clipboard.mode === "cut" ? "files.browser.pasteMove" : "files.browser.pasteCopy", { count: clipboard.count })}
+                {/* One slot, two states: what is waiting to be pasted, or what is being
+                    pasted right now. A running paste is the more urgent of the two, and
+                    it is also the only one that can be stopped. */}
+                {pasteProgress ? (
+                  // A progressbar, not a live region: `aria-live` here would announce
+                  // every tick, so a 400-file paste would talk 400 times. A progressbar's
+                  // value changes are readable on demand and silent until asked.
+                  <div
+                    role="progressbar"
+                    aria-label={t(
+                      pasteProgress.mode === "cut"
+                        ? "files.paste.progress.movingLabel"
+                        : "files.paste.progress.copyingLabel"
+                    )}
+                    // Left indeterminate outside the transfer phase, where there is no
+                    // total yet to be a fraction of.
+                    aria-valuemin={pasteProgress.phase === "transfer" ? 0 : undefined}
+                    aria-valuemax={pasteProgress.phase === "transfer" ? pasteProgress.total : undefined}
+                    aria-valuenow={pasteProgress.phase === "transfer" ? pasteProgress.done : undefined}
+                    aria-valuetext={
+                      pasteProgress.phase === "transfer"
+                        ? t("files.paste.progress.count", {
+                            done: pasteProgress.done,
+                            total: pasteProgress.total,
+                          })
+                        : t(
+                            pasteProgress.phase === "planning"
+                              ? "files.paste.progress.planning"
+                              : "files.paste.progress.structure"
+                          )
+                    }
+                    className={cn(
+                      CONTROL_H,
+                      "flex items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/5 pl-2.5 pr-1 text-accent-ink"
+                    )}
                   >
-                    <ClipboardPaste aria-hidden className="h-3.5 w-3.5" />
-                    <span className="text-xs tabular-nums">{clipboard.count}</span>
-                    <span className="sr-only">{t("files.browser.pasteHere")}</span>
-                  </Button>
+                    <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" />
+                    {/* Already spoken by `aria-valuetext`; repeating it as content would
+                        read the fraction twice. */}
+                    <span aria-hidden className="text-xs tabular-nums">
+                      {pasteProgress.phase === "transfer"
+                        ? `${pasteProgress.done}/${pasteProgress.total}`
+                        : t(
+                            pasteProgress.phase === "planning"
+                              ? "files.paste.progress.planning"
+                              : "files.paste.progress.structure"
+                          )}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      onClick={cancelPaste}
+                      aria-label={t("files.paste.cancel")}
+                      title={t("files.paste.cancel")}
+                      className="h-6 w-6 rounded-md text-accent-ink hover:bg-accent/15"
+                    >
+                      <X aria-hidden className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  clipboard && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className={cn(CONTROL_H, "cursor-pointer gap-1.5 border border-accent/25 bg-accent/5 px-2.5 text-accent-ink hover:bg-accent/10")}
+                      onClick={pasteHere}
+                      title={t(clipboard.mode === "cut" ? "files.browser.pasteMove" : "files.browser.pasteCopy", { count: clipboard.count })}
+                    >
+                      {/* Scissors for a cut: the chip is the only place the mode is
+                          visible once the source folder is out of view. */}
+                      {clipboard.mode === "cut" ? (
+                        <Scissors aria-hidden className="h-3.5 w-3.5" />
+                      ) : (
+                        <ClipboardPaste aria-hidden className="h-3.5 w-3.5" />
+                      )}
+                      <span className="text-xs tabular-nums">{clipboard.count}</span>
+                      <span className="sr-only">{t("files.browser.pasteHere")}</span>
+                    </Button>
+                  )
                 )}
               </>
             )}
@@ -2006,6 +2181,17 @@ export function FileBrowser({
             </div>
           )}
 
+          {/* Background right-click target. Cards stop propagation for their own context
+              menus, and a link or button keeps the native one — that is where "open in new
+              tab" lives, and taking it away from a folder card would be a downgrade. */}
+          <div
+            onContextMenu={(e) => {
+              if (areaMenuItems.length === 0) return;
+              if ((e.target as HTMLElement).closest("a,button,input,textarea")) return;
+              e.preventDefault();
+              setAreaPoint({ x: e.clientX, y: e.clientY });
+            }}
+          >
           {/* ── Folders ── */}
           {!search && folders.length > 0 && (
             <section aria-labelledby="folders-heading" className="mb-5">
@@ -2025,10 +2211,19 @@ export function FileBrowser({
                     // capabilities get resolved the same way instead of falling back to /files.
                     href={isSharedContext ? `/shared-with-me/${folder.id}` : undefined}
                     canDrag={caps.canEdit}
+                    ghosted={ghostIds.has(folder.id)}
                     onRename={caps.canEdit ? (f) => folderAction("rename", f) : undefined}
                     onDelete={caps.canEdit ? (f) => folderAction("delete", f) : undefined}
                     onShare={trash || !caps.canManageMembers ? undefined : (f) => setInviteFolder(f)}
                     onDownload={trash ? undefined : (f) => void requestFolderArchive(f.id, f.name)}
+                    // Copy is offered even to a `view` member: reading the folder is what it
+                    // needs, and the paste itself is checked at the destination.
+                    onCopy={trash ? undefined : copyFolderToClipboard}
+                    onCut={trash || !caps.canEdit ? undefined : cutFolderToClipboard}
+                    // Only meaningful while something is actually on the clipboard.
+                    onPasteInto={
+                      trash || !caps.canEdit || !clipboard ? undefined : pasteIntoFolder
+                    }
                   />
                 ))}
               </div>
@@ -2046,6 +2241,7 @@ export function FileBrowser({
             view={view}
             trash={trash}
             selectedIds={selectedIds}
+            cutIds={ghostIds}
             sortBy={sortBy}
             sortOrder={sortOrder}
             onFileAction={handleFileAction}
@@ -2078,6 +2274,16 @@ export function FileBrowser({
               compact: !search && folders.length > 0,
             }}
           />
+
+            <FloatingActionMenu
+              open={areaPoint !== null}
+              onClose={() => setAreaPoint(null)}
+              anchorPoint={areaPoint}
+              items={areaMenuItems}
+              placement="context"
+              menuLabel={t("files.browser.areaMenu")}
+            />
+          </div>
         </div>
       </div>
 
@@ -2148,6 +2354,10 @@ export function FileBrowser({
           onConfirm={(dest) => executeMove(moveIds, dest.folderId, dest.folderName)}
         />
       )}
+
+      {/* Parked promise: the paste is suspended until this resolves, so it renders
+          outside the listing and survives a re-render of the grid underneath. */}
+      <PasteConflictDialog conflict={pasteConflict} destinationName={pasteTargetName} />
 
       {bulkRenameIds && (
         <BulkRenameDialog

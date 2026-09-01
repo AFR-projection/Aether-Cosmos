@@ -4,7 +4,7 @@ import { db } from "@/shared/infrastructure/db";
 import { shares, files, activityLogs, fileContents } from "@/shared/infrastructure/db/schema";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { getClientIpFromRequest, parseUserAgent, getIpLocation } from "@/shared/lib/access-tracking";
-import { publishToUser } from "@/shared/infrastructure/realtime/events";
+import { publishToAdmins, publishToUser } from "@/shared/infrastructure/realtime/events";
 import { tiptapToPlainText } from "@/shared/lib/search/tiptap-text";
 import { getOrCreateActivityScope } from "@/shared/lib/activity/activity-scope-server";
 import { checkRateLimit } from "@/shared/lib/security";
@@ -98,8 +98,9 @@ export async function GET(
     const deviceInfo = parseUserAgent(userAgent);
 
     // Fire-and-forget geolocation (non-blocking)
-    getIpLocation(ip).then((location) => {
-      getOrCreateActivityScope(share.sharedBy).then((scope) => db.insert(activityLogs).values({
+    getIpLocation(ip).then(async (location) => {
+      const scope = await getOrCreateActivityScope(share.sharedBy);
+      await db.insert(activityLogs).values({
         userId: share.sharedBy,
         activityScopeId: scope.id,
         action: "download",
@@ -117,8 +118,14 @@ export async function GET(
           location,
         },
         ip,
-      })).catch(() => {});
-    });
+      });
+      void publishToAdmins({
+        type: "activity_log_created",
+        userId: share.sharedBy,
+        action: "download",
+        at: Date.now(),
+      }).catch(() => {});
+    }).catch(() => {});
 
     void publishToUser(share.sharedBy, {
       type: "share_access",

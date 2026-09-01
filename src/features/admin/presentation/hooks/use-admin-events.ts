@@ -6,6 +6,14 @@ import type { AdminRealtimeEvent } from "@/shared/infrastructure/realtime/types"
 
 export type AdminLiveStatus = "connecting" | "live" | "reconnecting" | "offline";
 
+const DEFAULT_EVENT_TYPES: readonly AdminRealtimeEvent["type"][] = [
+  "user_registered",
+  "user_verified",
+  "user_updated",
+  "user_deleted",
+  "user_presence",
+];
+
 /**
  * Subscribes the admin panel to GET /api/admin/events (SSE) and invalidates the
  * given React Query key whenever a user lifecycle/presence event arrives, so the
@@ -17,7 +25,8 @@ export type AdminLiveStatus = "connecting" | "live" | "reconnecting" | "offline"
  */
 export function useAdminEvents(
   queryKey: readonly unknown[] = ["admin-users"],
-  enabled = true
+  enabled = true,
+  eventTypes: readonly AdminRealtimeEvent["type"][] = DEFAULT_EVENT_TYPES
 ): AdminLiveStatus {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<AdminLiveStatus>("connecting");
@@ -28,8 +37,10 @@ export function useAdminEvents(
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Keep the latest key in a ref so reconnects don't need to re-run the effect.
   const keyRef = useRef(queryKey);
+  const eventTypesRef = useRef(eventTypes);
   useEffect(() => {
     keyRef.current = queryKey;
+    eventTypesRef.current = eventTypes;
   });
 
   useEffect(() => {
@@ -73,6 +84,7 @@ export function useAdminEvents(
         try {
           const event = JSON.parse(msg.data) as AdminRealtimeEvent;
           if (event.type === "heartbeat") return;
+          if (!eventTypesRef.current.includes(event.type)) return;
           scheduleInvalidate();
         } catch {
           // ignore malformed payloads

@@ -456,6 +456,11 @@ export interface FileGridProps {
   onSelect: (id: string, shiftKey?: boolean) => void;
   onSelectAll: () => void;
   onSort: (key: string) => void;
+  /**
+   * Files sitting on the clipboard as a *cut*. Rendered faded, the way Explorer marks
+   * what is about to move — without it Ctrl+X looks like it did nothing.
+   */
+  cutIds?: ReadonlySet<string>;
   /** Viewer capabilities; omit for full rights (own files). */
   caps?: FileGridCaps;
   hasMore?: boolean;
@@ -465,10 +470,14 @@ export interface FileGridProps {
   empty?: FileGridEmpty;
 }
 
+/** Stable identity, so `cutIds` being absent does not re-render every row. */
+const NO_CUT_IDS: ReadonlySet<string> = new Set<string>();
+
 export function FileGrid({
   files, view, trash = false,
   selectedIds, sortBy, sortOrder,
   onFileAction, onFileClick, onSelect, onSelectAll, onSort,
+  cutIds = NO_CUT_IDS,
   caps = FULL_FILE_CAPS,
   hasMore, loadMore, loadingMore,
   empty,
@@ -576,6 +585,7 @@ export function FileGrid({
                       key={file.id}
                       file={file}
                       selected={selectedIds.has(file.id)}
+                      ghosted={cutIds.has(file.id)}
                       trash={trash}
                       onFileAction={onFileAction}
                       onFileClick={onFileClick}
@@ -688,6 +698,7 @@ export function FileGrid({
               key={file.id}
               file={file}
               selected={selected}
+              ghosted={cutIds.has(file.id)}
               trash={trash}
               style={{
                 position: "absolute",
@@ -752,9 +763,9 @@ function useRowDrag(file: FileRecord, caps: FileGridCaps, trash: boolean | undef
 // ─── Grid Card ──────────────────────────────────────────────────────────────
 
 const GridCard = memo(function GridCard({
-  file, selected, trash, onFileAction, onFileClick, onSelect, caps,
+  file, selected, ghosted = false, trash, onFileAction, onFileClick, onSelect, caps,
 }: {
-  file: FileRecord; selected: boolean;
+  file: FileRecord; selected: boolean; ghosted?: boolean;
   trash?: boolean; onFileAction: (a: string, f: FileRecord) => void;
   onFileClick: (f: FileRecord) => void; onSelect: (id: string, shiftKey?: boolean) => void;
   caps: FileGridCaps;
@@ -783,7 +794,11 @@ const GridCard = memo(function GridCard({
           : "ring-1 ring-border/50 hover:-translate-y-0.5 hover:shadow-lg hover:ring-border/80",
         // The card stays in place at reduced opacity while the overlay carries the
         // visual under the pointer, so the listing never reflows mid-drag.
-        drag.isDragging && "opacity-40"
+        drag.isDragging && "opacity-40",
+        // Cut and waiting for a paste. The dash carries the state — fading the whole
+        // card would take its size and date text to 2.4:1, under the AA floor, so only
+        // the thumbnail dims.
+        ghosted && !drag.isDragging && "outline-2 outline-dashed outline-accent/50 [&_img]:opacity-55"
       )}
       onClick={(e) => {
         if (e.button !== 0) return;
@@ -845,6 +860,8 @@ const GridCard = memo(function GridCard({
       </button>
 
       <ThumbnailCard file={file}>
+        {/* The dashed outline is a visual-only cue, so the state is spoken here too. */}
+        {ghosted && <span className="sr-only">{t("files.paste.cutPending")}</span>}
         {isVideo && <VideoOverlay file={file} hovered={hoverInfo} />}
         {isAudio && <AudioOverlay mimeType={file.mimeType} />}
         {/* Reachable by touch and by keyboard, not hover alone. */}
@@ -900,9 +917,9 @@ const GridCard = memo(function GridCard({
 // ─── List Row ───────────────────────────────────────────────────────────────
 
 const ListRow = memo(function ListRow({
-  file, selected, trash, style, onFileAction, onFileClick, onSelect, caps,
+  file, selected, ghosted = false, trash, style, onFileAction, onFileClick, onSelect, caps,
 }: {
-  file: FileRecord; selected: boolean; trash?: boolean;
+  file: FileRecord; selected: boolean; ghosted?: boolean; trash?: boolean;
   style: React.CSSProperties; onFileAction: (a: string, f: FileRecord) => void;
   onFileClick: (f: FileRecord) => void; onSelect: (id: string, shiftKey?: boolean) => void;
   caps: FileGridCaps;
@@ -923,7 +940,11 @@ const ListRow = memo(function ListRow({
         "grid grid-cols-[32px_1fr_72px] sm:grid-cols-[32px_2fr_100px_44px] md:grid-cols-[32px_2fr_100px_1fr_44px] lg:grid-cols-[32px_2fr_100px_1fr_120px_44px]",
         "items-center px-3 sm:px-4 border-b border-border/40 transition-colors cursor-pointer",
         selected ? "bg-accent/5" : "hover:bg-muted/40",
-        drag.isDragging && "opacity-40"
+        drag.isDragging && "opacity-40",
+        // Cut and waiting for a paste: an accent edge, because a row this short cannot
+        // carry a dashed outline without looking broken. Only the thumbnail dims — a
+        // faded row would drop its size and date text to 2.4:1, under the AA floor.
+        ghosted && !drag.isDragging && "border-l-2 border-l-accent/50 [&_img]:opacity-55"
       )}
       onClick={(e) => {
         if (e.button !== 0) return;
@@ -983,6 +1004,8 @@ const ListRow = memo(function ListRow({
           )}
         </div>
         <div className="min-w-0 flex-1">
+          {/* The accent edge is a visual-only cue, so the state is spoken here too. */}
+          {ghosted && <span className="sr-only">{t("files.paste.cutPending")}</span>}
           {/* Real button, same reasoning as the grid card: the row itself is a
               <div> and cannot be tabbed to. */}
           <button

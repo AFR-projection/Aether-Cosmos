@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { desc, eq, and, isNull, ilike } from "drizzle-orm";
+import { desc, eq, and, ilike, gte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/shared/infrastructure/db";
 import { activityLogs, users, activityActionEnum } from "@/shared/infrastructure/db/schema";
@@ -11,6 +11,7 @@ const logsSchema = z.object({
   userId: z.string().uuid().optional(),
   action: z.string().optional(),
   search: z.string().optional(),
+  since: z.string().datetime({ offset: true }).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -29,6 +30,22 @@ export async function POST(request: NextRequest) {
       conditions.push(
         eq(activityLogs.action, params.action as (typeof activityActionEnum.enumValues)[number])
       );
+    if (params.since) conditions.push(gte(activityLogs.createdAt, new Date(params.since)));
+
+    // Search belongs in SQL, before LIMIT/OFFSET. The old in-memory pass searched
+    // only the newest page, which silently hid valid older matches.
+    const search = params.search?.trim();
+    if (search) {
+      const pattern = `%${search}%`;
+      const searchCondition = or(
+        ilike(users.username, pattern),
+        ilike(users.email, pattern),
+        ilike(activityLogs.ip, pattern),
+        sql`${activityLogs.action}::text ilike ${pattern}`,
+        sql`coalesce(${activityLogs.metadata}::text, '') ilike ${pattern}`
+      );
+      if (searchCondition) conditions.push(searchCondition);
+    }
 
     const logs = await db
       .select({
@@ -51,22 +68,7 @@ export async function POST(request: NextRequest) {
       .limit(params.limit)
       .offset(params.offset);
 
-    // If search is provided, filter by username or metadata on the client side is not possible
-    // so we do a simple contains check on the username
-    let filteredLogs = logs;
-    if (params.search) {
-      const searchLower = params.search.toLowerCase();
-      filteredLogs = logs.filter(
-        (log) =>
-          log.username?.toLowerCase().includes(searchLower) ||
-          log.email?.toLowerCase().includes(searchLower) ||
-          log.action.toLowerCase().includes(searchLower) ||
-          log.ip?.toLowerCase().includes(searchLower) ||
-          JSON.stringify(log.metadata).toLowerCase().includes(searchLower)
-      );
-    }
-
-    return apiSuccess({ logs: filteredLogs });
+    return apiSuccess({ logs, serverTime: Date.now() });
   } catch (error) {
     return handleApiError(error);
   }

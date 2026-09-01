@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { Check, Cloud, LockKeyhole } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Cloud, LockKeyhole, Pause, Play } from "lucide-react";
 import { cn } from "@/shared/lib/utils";
 import { APP_NAME } from "@/shared/lib/app-version";
 import { useT, type TranslationKey } from "@/shared/lib/i18n";
@@ -22,6 +22,46 @@ const steps: Array<{ key: AuthStep; labelKey: TranslationKey }> = [
 const BRAND_NAME = "Aether Cosmos";
 const BRAND_SUFFIX = "ByAFR";
 const VERSION_STAMP = "AFR / 01";
+const AUTH_VISUAL_VIDEO = "/auth/login-ambient.mp4";
+
+type NetworkInformation = EventTarget & { saveData?: boolean };
+
+/**
+ * The cinematic layer is enhancement-only. It never downloads on compact
+ * screens, with reduced motion, or while the browser's data-saver is active.
+ * The constellation image underneath remains the stable first paint/fallback.
+ */
+function useAmbientVideoEnabled(): boolean {
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 960px)");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
+    let frame = 0;
+
+    const sync = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        setEnabled(desktop.matches && !reducedMotion.matches && !connection?.saveData);
+      });
+    };
+
+    desktop.addEventListener("change", sync);
+    reducedMotion.addEventListener("change", sync);
+    connection?.addEventListener("change", sync);
+    sync();
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      desktop.removeEventListener("change", sync);
+      reducedMotion.removeEventListener("change", sync);
+      connection?.removeEventListener("change", sync);
+    };
+  }, []);
+
+  return enabled;
+}
 
 interface AuthShellProps {
   step: AuthStep;
@@ -52,6 +92,19 @@ export function AuthShell({
 }: AuthShellProps) {
   const titleId = `auth-title-${step}`;
   const t = useT();
+  const videoEnabled = useAmbientVideoEnabled();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoPaused, setVideoPaused] = useState(false);
+
+  function toggleAmbientVideo() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }
 
   return (
     <div className="auth-page">
@@ -63,10 +116,41 @@ export function AuthShell({
 
       <div className="auth-frame">
         <aside className="auth-visual" aria-label={APP_NAME}>
-          <div className="auth-visual__canvas" aria-hidden="true" />
+          <div className="auth-visual__canvas" aria-hidden="true">
+            {videoEnabled && (
+              <video
+                ref={videoRef}
+                className="auth-visual__video"
+                autoPlay
+                loop
+                muted
+                playsInline
+                preload="metadata"
+                poster="/auth/auth-constellation.png"
+                onPlay={() => setVideoPaused(false)}
+                onPause={() => setVideoPaused(true)}
+              >
+                <source src={AUTH_VISUAL_VIDEO} type="video/mp4" />
+              </video>
+            )}
+          </div>
           <div className="auth-visual__shade" aria-hidden="true" />
           <div className="auth-visual__content">
-            <AuthBrand />
+            <div className="auth-visual__topbar">
+              <AuthBrand />
+              {videoEnabled && (
+                <button
+                  type="button"
+                  className="auth-video-toggle"
+                  onClick={toggleAmbientVideo}
+                  aria-pressed={videoPaused}
+                  aria-label={videoPaused ? t("auth.playVisual") : t("auth.pauseVisual")}
+                >
+                  {videoPaused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+                  <span>{videoPaused ? t("auth.playMotion") : t("auth.pauseMotion")}</span>
+                </button>
+              )}
+            </div>
 
             <div className="auth-visual__copy">
               <p className="auth-kicker">

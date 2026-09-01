@@ -1,6 +1,7 @@
 import { db } from "@/shared/infrastructure/db";
 import { activityLogs, activityActionEnum } from "@/shared/infrastructure/db/schema";
 import { getOrCreateActivityScope } from "@/shared/lib/activity/activity-scope-server";
+import { publishToAdmins } from "@/shared/infrastructure/realtime/events";
 import { desc, eq, and, gte, count } from "drizzle-orm";
 
 export interface SuspiciousActivityResult {
@@ -137,6 +138,12 @@ export async function logSuspiciousActivity(
       },
       ip,
     });
+    void publishToAdmins({
+      type: "activity_log_created",
+      userId,
+      action,
+      at: Date.now(),
+    }).catch(() => {});
   } catch {
     // Silent fail for security logging
   }

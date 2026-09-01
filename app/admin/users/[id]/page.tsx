@@ -4,7 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { apiFetch } from "@/shared/api/client";
-import { TwoFactorSection } from "@auth/presentation/components/account-security-sections";
+import {
+  StepCodeSection,
+  TwoFactorSection,
+} from "@auth/presentation/components/account-security-sections";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/primitives/card";
 import { Button } from "@/ui/primitives/button";
 import { Input } from "@/ui/primitives/input";
@@ -14,7 +17,7 @@ import { auditActionLabel } from "@admin/domain/services/audit-actions";
 import { useState, useEffect, use } from "react";
 import {
   ArrowLeft, FileText, Activity, Shield,
-  HardDrive, Star, Trash2, Edit, Save, X, KeyRound,
+  HardDrive, Star, Trash2, Edit, Save, X, KeyRound, Hash,
   Upload, Download, LogIn, Loader2, Eye, EyeOff, AlertCircle, LogOut, Laptop, Smartphone,
 } from "lucide-react";
 import { notify } from "@/shared/lib/system/notify-store";
@@ -707,6 +710,31 @@ export default function UserDetailPage({
             </CardHeader>
             <CardContent>
               <TwoFactorSection enabled={!!sessionUser?.totpEnabled} />
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* 2-Step Code, same self-service rule as 2FA above: the admin per-user endpoint
+          can only unlock/reset/require a change, never set a code, because a code an
+          admin chose is a code the owner did not. It has to live here rather than in
+          /settings — the sidebar hides that page from a master, so this is the only
+          account screen they can reach. */}
+      {isOwnAccount && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.55 }}
+        >
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Hash className="h-4 w-4 text-muted-foreground" />
+                {t("admin.userDetail.stepCodeTitle")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <StepCodeSection />
             </CardContent>
           </Card>
         </motion.div>
