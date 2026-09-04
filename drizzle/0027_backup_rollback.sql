@@ -1,0 +1,50 @@
+-- ROLLBACK for 0027_backup — PARTIAL, and deliberately so
+-- Date: 2026-09-02 (rewritten 2026-09-04)
+--
+-- Usage: npx tsx scripts/apply-migration.ts drizzle/0027_backup_rollback.sql
+--
+-- Despite the name this is also the *forward* cleanup step for a database that already
+-- has 0027 applied: it is safe to run on a live instance running per-account backup,
+-- and it is the only file you need to run. There is no separate 0029 doing the same two
+-- DROPs. A fresh install never sees this file at all — `npm run db:push` builds the
+-- schema from `schema.ts`, which no longer declares either table.
+--
+-- 0027 created three tables for a whole-instance backup feature that has since been
+-- removed from the app. Two of them are now dead weight and this file drops them.
+-- The third, `backup_keys`, is NOT dropped: the per-account backup feature (0028)
+-- reuses it, and dropping it would be the single most destructive thing this repo
+-- can do to a live instance.
+--
+-- WHAT IS DROPPED
+--
+--   * `backup_jobs` — the log of past whole-instance runs and their manifests. No
+--     code reads it any more. Objects already in R2 are not deleted by this file;
+--     they become unreferenced and nothing sweeps them, so remove them from the
+--     bucket by hand (prefix `backups/`) if that space matters.
+--   * `backup_settings` — schedules and retention for a scheduler that no longer
+--     exists. Nothing reads it.
+--
+-- WHAT IS KEPT, AND WHY IT MUST BE
+--
+--   * `backup_keys` — now holds one row per account at `afrbak:user:<uuid>`: the
+--     account's RWK sealed under BACKUP_MASTER_KEY (`wrapped_kek`) and the account's
+--     `phraseSalt` (`kdf_salt`). Nine recovery words derive a key against that salt,
+--     and the salt exists nowhere else. Dropping this table would not make one
+--     `.afrbak` unreadable today — keyslot 0 still opens every archive with
+--     BACKUP_MASTER_KEY — but it would destroy keyslot 1 for every archive already
+--     downloaded, which is the door that survives this server dying. That is the
+--     entire disaster-recovery promise of the feature.
+--
+--     Any legacy rows at `system` or `user:<uuid>` (the old feature's KEKs) are
+--     inert: no code reads those owner keys now. Delete them by hand if you want
+--     the table tidy — `DELETE FROM backup_keys WHERE owner_key NOT LIKE 'afrbak:%';`
+--     — after checking that no whole-instance artifact is still worth opening.
+--
+-- The six `activity_action` labels are deliberately NOT removed. PostgreSQL has no
+-- `ALTER TYPE ... DROP VALUE`, and rebuilding the enum would mean rewriting every
+-- `activity_logs` row that references it — a table-rewriting migration to undo six
+-- labels. Existing `backup_*` rows in `activity_logs` also remain readable and
+-- remain history worth keeping. Unused labels cost nothing.
+
+DROP TABLE IF EXISTS backup_jobs;--> statement-breakpoint
+DROP TABLE IF EXISTS backup_settings;

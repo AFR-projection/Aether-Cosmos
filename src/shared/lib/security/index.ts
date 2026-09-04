@@ -62,6 +62,19 @@ export async function resetRateLimit(key: string, windowMs: number): Promise<voi
 }
 
 /**
+ * Seconds until the current bucket rolls over.
+ *
+ * The buckets are fixed windows (`floor(now / windowMs)`), not sliding ones, so
+ * the reset moment is arithmetic rather than a guess — which is what lets a 429
+ * carry an honest `Retry-After` instead of "try again later", and lets the UI show
+ * a countdown. Always at least 1: a `Retry-After: 0` invites an immediate retry
+ * that is still inside the window.
+ */
+export function rateLimitRetryAfterSeconds(windowMs: number): number {
+  return Math.max(1, Math.ceil((windowMs - (Date.now() % windowMs)) / 1000));
+}
+
+/**
  * Per-user API rate limit from the admin "Rate Limit" setting.
  *
  * Bulk endpoints get a multiplier rather than a fixed floor: a batch upload

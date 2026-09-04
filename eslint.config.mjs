@@ -3,7 +3,7 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
 /** Aliases that resolve into src/features/<name>/. */
-const FEATURES = ["brain", "auth", "files", "admin", "shares"];
+const FEATURES = ["brain", "auth", "files", "admin", "shares", "backup"];
 const featureGlobs = (names) => names.map((n) => `@${n}/*`).concat(names.map((n) => `@${n}/*/**`));
 
 /**
@@ -38,7 +38,7 @@ const crossFeature = (feature) => ({
  */
 const noInfrastructure = {
   regex:
-    "^(?:@/shared/infrastructure/(?!db/schema$)|@(?:brain|auth|files|admin|shares)/infrastructure/)",
+    "^(?:@/shared/infrastructure/(?!db/schema$)|@(?:brain|auth|files|admin|shares|backup)/infrastructure/)",
   message:
     "A domain module must be testable without infrastructure. Take the dependency as a parameter, or move the module to application/.",
 };

@@ -1,12 +1,14 @@
 import {
   Activity,
   Copy,
+  DatabaseBackup,
   Download,
   Edit3,
   FolderMinus,
   FolderPlus,
   Globe,
   KeyRound,
+  KeySquare,
   Lock,
   LogIn,
   LogOut,
@@ -14,6 +16,8 @@ import {
   RotateCcw,
   Share2,
   Shield,
+  ShieldAlert,
+  Sliders,
   Star,
   Trash2,
   Upload,
@@ -56,7 +60,7 @@ export type AuditActionMeta = {
   icon: LucideIcon;
   tone: AuditTone;
   /** Which filter group the action belongs to in the logs toolbar. */
-  group: "session" | "files" | "folders" | "users" | "security";
+  group: "session" | "files" | "folders" | "users" | "security" | "backup";
 };
 
 export const AUDIT_ACTIONS: Record<string, AuditActionMeta> = {
@@ -87,6 +91,28 @@ export const AUDIT_ACTIONS: Record<string, AuditActionMeta> = {
   account_lock: { labelKey: "admin.audit.action.accountLock", descriptionKey: "admin.audit.description.accountLock", icon: Lock, tone: "danger", group: "security" },
   ip_rate_limit: { labelKey: "admin.audit.action.ipRateLimit", descriptionKey: "admin.audit.description.ipRateLimit", icon: Globe, tone: "warning", group: "security" },
   password_change: { labelKey: "admin.audit.action.passwordChange", descriptionKey: "admin.audit.description.passwordChange", icon: KeyRound, tone: "accent", group: "security" },
+
+  // Encrypted backups. A download hands over the whole dataset in one file, so it
+  // reads `warning` rather than `info` — it is the row an operator should notice.
+  backup_create: { labelKey: "admin.audit.action.backupCreate", descriptionKey: "admin.audit.description.backupCreate", icon: DatabaseBackup, tone: "accent", group: "backup" },
+  backup_download: { labelKey: "admin.audit.action.backupDownload", descriptionKey: "admin.audit.description.backupDownload", icon: Download, tone: "warning", group: "backup" },
+  backup_delete: { labelKey: "admin.audit.action.backupDelete", descriptionKey: "admin.audit.description.backupDelete", icon: Trash2, tone: "danger", group: "backup" },
+  backup_settings_change: { labelKey: "admin.audit.action.backupSettingsChange", descriptionKey: "admin.audit.description.backupSettingsChange", icon: Sliders, tone: "info", group: "backup" },
+  backup_key_rotate: { labelKey: "admin.audit.action.backupKeyRotate", descriptionKey: "admin.audit.description.backupKeyRotate", icon: KeySquare, tone: "warning", group: "backup" },
+  backup_purge_all: { labelKey: "admin.audit.action.backupPurgeAll", descriptionKey: "admin.audit.description.backupPurgeAll", icon: ShieldAlert, tone: "danger", group: "backup" },
+
+  // Per-account takeout & restore (§13). The same `backup` group as the operator's
+  // events — an operator filtering for "backup" wants both — but distinct labels,
+  // because these are one account moving its own data rather than the instance being
+  // dumped. `backup_restore_refused` reads `danger` even though nothing was written:
+  // a refusal is what a stolen archive aimed at the wrong account looks like.
+  backup_takeout: { labelKey: "admin.audit.action.backupTakeout", descriptionKey: "admin.audit.description.backupTakeout", icon: Download, tone: "warning", group: "backup" },
+  backup_restore_preview: { labelKey: "admin.audit.action.backupRestorePreview", descriptionKey: "admin.audit.description.backupRestorePreview", icon: Activity, tone: "muted", group: "backup" },
+  backup_restore_merge: { labelKey: "admin.audit.action.backupRestoreMerge", descriptionKey: "admin.audit.description.backupRestoreMerge", icon: RotateCcw, tone: "success", group: "backup" },
+  backup_restore_replace: { labelKey: "admin.audit.action.backupRestoreReplace", descriptionKey: "admin.audit.description.backupRestoreReplace", icon: RotateCcw, tone: "danger", group: "backup" },
+  backup_recovery_view: { labelKey: "admin.audit.action.backupRecoveryView", descriptionKey: "admin.audit.description.backupRecoveryView", icon: KeySquare, tone: "warning", group: "backup" },
+  backup_restore_refused: { labelKey: "admin.audit.action.backupRestoreRefused", descriptionKey: "admin.audit.description.backupRestoreRefused", icon: ShieldAlert, tone: "danger", group: "backup" },
+  backup_restore_adopted: { labelKey: "admin.audit.action.backupRestoreAdopted", descriptionKey: "admin.audit.description.backupRestoreAdopted", icon: KeyRound, tone: "warning", group: "backup" },
 };
 
 /** Unknown action keys still render — they just get neutral chrome and their raw key. */
@@ -122,6 +148,7 @@ export const AUDIT_GROUPS: {
   { id: "files", labelKey: "admin.audit.group.files", icon: Upload },
   { id: "folders", labelKey: "admin.audit.group.folders", icon: FolderPlus },
   { id: "users", labelKey: "admin.audit.group.users", icon: Users },
+  { id: "backup", labelKey: "admin.audit.group.backup", icon: DatabaseBackup },
 ];
 
 /** Action keys belonging to a group, in registry order. */

@@ -9,7 +9,13 @@ ENV NPM_CONFIG_FETCH_RETRIES=5 \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false
 
-RUN apk add --no-cache ffmpeg
+# ffmpeg for media derivatives; postgresql17-client for encrypted backups. The
+# client major must be >= the server major or `pg_dump` refuses outright — see
+# `assertPgToolsUsable` in src/features/backup/infrastructure/pg.ts. Alpine's
+# postgresql17-client ships pg_dump, pg_restore and psql, which is exactly the
+# three binaries the backup engine spawns, and links zlib, which `--compress=1`
+# needs.
+RUN apk add --no-cache ffmpeg postgresql17-client
 
 WORKDIR /app
 

@@ -27,6 +27,7 @@
       "@files/*": ["./src/features/files/*"],
       "@admin/*": ["./src/features/admin/*"],
       "@shares/*": ["./src/features/shares/*"],
+      "@backup/*": ["./src/features/backup/*"],
       "@/*": ["./*"]
     }
   },

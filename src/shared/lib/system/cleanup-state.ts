@@ -37,6 +37,17 @@ export interface CleanupResult {
   expiredArchives?: number;
   expiredSessions?: number;
   expiredOtpTokens?: number;
+  /**
+   * The per-account restore sweep, which rides this same hourly claim.
+   *
+   * Recorded rather than inferred: `restoresCollected` above zero is the only outward sign that
+   * a restore was killed mid-flight, so an operator reading the last cleanup can tell a quiet
+   * hour from an hour that quietly cleaned up after a crash.
+   */
+  restoresAbandoned?: number;
+  restoresCollected?: number;
+  restoreStagedFiles?: number;
+  restoreStagedFolders?: number;
 }
 
 export interface CleanupState {

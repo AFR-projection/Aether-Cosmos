@@ -21,6 +21,7 @@ import {
   deleteR2Object,
 } from "@files/infrastructure/storage/r2";
 import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
+import { checkEntityName, entityNameSchema } from "@/shared/lib/security/entity-name";
 import { tiptapToPlainText } from "@/shared/lib/search/tiptap-text";
 import { cacheGet, cacheSet, cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
@@ -78,7 +79,11 @@ export async function GET(request: NextRequest) {
       return apiSuccess(cached);
     }
 
-    const conditions = [eq(files.userId, userId)];
+    // Staged rows never appear in either arm. `?trash=true` is the second listing in the app
+    // that asks for soft-deleted rows on purpose (the Recycle Bin endpoint is the other), and
+    // a per-account restore stages its files as soft-deleted — so without this the trash view
+    // would fill up with an archive that is still being unpacked.
+    const conditions = [eq(files.userId, userId), isNull(files.restoreBatchId)];
 
     if (params.trash) {
       conditions.push(isNotNull(files.deletedAt));
@@ -121,7 +126,7 @@ export async function GET(request: NextRequest) {
 }
 
 const createNoteSchema = z.object({
-  name: z.string().min(1).max(255).default("Untitled Note"),
+  name: entityNameSchema.default("Untitled Note"),
   folderId: z.string().uuid().nullable().optional(),
   content: z.record(z.string(), z.unknown()).optional(),
 });
@@ -237,7 +242,13 @@ export async function PATCH(request: NextRequest) {
     switch (body.action) {
       case "rename": {
         if (!body.name) return apiError("Name required", 400);
-        await db.update(files).set({ name: body.name, updatedAt: new Date() }).where(eq(files.id, body.id));
+        // A file name is not concatenated into a path, but it is the entry name in
+        // a ZIP export and the label a share page shows, so the same rules apply:
+        // a `/` writes outside the folder it was exported into, and a bidi
+        // override lets `x<U+202E>gnp.exe` present itself as a .png.
+        const checked = checkEntityName(body.name);
+        if (!checked.ok) return apiError(checked.reason, 400, { code: "INVALID_NAME" });
+        await db.update(files).set({ name: checked.name, updatedAt: new Date() }).where(eq(files.id, body.id));
         await logActivity(sessionUser, "rename", { resourceType: "file", resourceId: body.id, ip });
         break;
       }

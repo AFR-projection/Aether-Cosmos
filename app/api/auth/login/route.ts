@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { createHash } from "crypto";
 import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/shared/infrastructure/db";
@@ -95,6 +96,31 @@ async function recordIpFailure(ip: string, policy: LoginLockoutPolicy, userId?: 
     }
   }
   return result;
+}
+
+/**
+ * Lockout counter for identifiers that match no account.
+ *
+ * A real account locks after `policy.accountMax` failures and answers 429
+ * `ACCOUNT_LOCKED` from then on; an unknown identifier answered 401
+ * `Invalid credentials` forever. Identical wording on the wrong-password reply
+ * therefore proved nothing — an attacker sent the cap plus one guess and read the
+ * *status* instead: 429 meant the account exists, 401 meant it does not. This
+ * mirrors the same arithmetic for identifiers with no row behind them, so both
+ * paths lock at the same attempt and reply the same way.
+ *
+ * The identifier is hashed rather than stored: rate-limit keys reach Redis in
+ * plaintext and end up in `KEYS`/`MONITOR` output, and a login form is fed
+ * passwords in the identifier box often enough that the raw value does not belong
+ * there. Lowercased first so casing cannot mint a fresh counter — the lookup
+ * already treats `A@b.com` and `a@b.com` as the same account.
+ */
+function ghostLockKey(identifier: string): string {
+  const digest = createHash("sha256")
+    .update(identifier.trim().toLowerCase())
+    .digest("hex")
+    .slice(0, 32);
+  return `login:ident:${digest}`;
 }
 
 /**
@@ -354,13 +380,29 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (!user) {
+      const ghostKey = ghostLockKey(identifier!);
+
+      // A locked real account returns here without hashing anything, so a locked
+      // unknown identifier has to as well — otherwise the ~0.5s argon2 gap
+      // rebuilds the oracle the matching status code just closed.
+      const ghostStatus = await peekRateLimit(ghostKey, policy.accountMax, policy.windowMs);
+      if (!ghostStatus.allowed) {
+        return apiError(msgAccountLocked(policy.windowMinutes), 429, { code: "ACCOUNT_LOCKED" });
+      }
+
       // Spend a real argon2 verification anyway: an instant "no such user" reply
       // next to a ~0.5 s "wrong password" reply is the same oracle, told by the
       // clock instead of the body.
       await verifyDecoyPassword(password!);
+      const ghost = await checkRateLimit(ghostKey, policy.accountMax, policy.windowMs);
       const ipResult = await recordIpFailure(ip, policy);
       if (!ipResult.allowed) {
         return apiError(msgIpThrottle(policy.windowMinutes), 429, { code: "IP_RATE_LIMIT" });
+      }
+      // `remaining === 0` is the attempt that trips a real account's lock, which
+      // answers 429 rather than 401 for that same request.
+      if (ghost.remaining === 0) {
+        return apiError(msgAccountLocked(policy.windowMinutes), 429, { code: "ACCOUNT_LOCKED" });
       }
       return apiError(MSG_INVALID, 401);
     }
@@ -376,15 +418,6 @@ export async function POST(request: NextRequest) {
 
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
       return apiError(msgAccountLocked(policy.windowMinutes), 429, { code: "ACCOUNT_LOCKED" });
-    }
-
-    if (user.status === "suspended") {
-      // Don't expose internal admin notes — just show generic message
-      return apiError(
-        "Your account has been suspended. Contact an administrator for details.",
-        403,
-        { code: "ACCOUNT_SUSPENDED" }
-      );
     }
 
     const valid = await verifyPassword(password!, user.passwordHash);
@@ -436,6 +469,39 @@ export async function POST(request: NextRequest) {
       .update(users)
       .set({ failedLoginAttempts: 0, lockedUntil: null, updatedAt: new Date() })
       .where(eq(users.id, user.id));
+
+    /**
+     * Status is judged only once the password is known to be correct.
+     *
+     * This ran *before* `verifyPassword`, which made it an account-existence
+     * oracle needing no credentials at all: every unverified registration is
+     * stored as `suspended`, so typing any address and any junk password told the
+     * caller whether that address was registered — 403 for a real one, 401 for a
+     * stranger. Behind a correct password the distinction leaks nothing the caller
+     * does not already own, and it is the only point where telling the truth is
+     * safe.
+     *
+     * The two suspensions are also different messages. A pending registration has
+     * no `suspendReason` (the admin routes always store one, defaulting to
+     * "Suspended by administrator", and the user list keys "unverified" off the
+     * same field) — telling that person to "contact an administrator" sent them
+     * looking for a human when the code was sitting in their inbox.
+     */
+    if (user.status === "suspended") {
+      if (!user.suspendReason) {
+        return apiError(
+          "Your email address has not been verified yet. Check your inbox for the verification code, or request a new one.",
+          403,
+          { code: "EMAIL_NOT_VERIFIED", email: user.email }
+        );
+      }
+      // Never the reason itself — that column holds internal admin notes.
+      return apiError(
+        "Your account has been suspended. Contact an administrator for details.",
+        403,
+        { code: "ACCOUNT_SUSPENDED" }
+      );
+    }
 
     const stepStep = await nextAfterPassword(user);
     if (stepStep) {

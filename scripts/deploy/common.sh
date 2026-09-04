@@ -243,6 +243,7 @@ env_is_placeholder() {
   case "${1:-}" in
     postgresql://user:pass@*|postgres://user:pass@*) return 0 ;;
     change-me-openssl-rand-hex-32) return 0 ;;
+    change-me-openssl-rand-base64-32) return 0 ;;
     change-this-strong-password-min-10-chars|change-this-admin-password-min-6-chars) return 0 ;;
     ReplaceMe-Strong-2026!) return 0 ;;
     your_account_id|your_access_key|your_secret_key|your_bucket_name|your-bucket-name) return 0 ;;
@@ -258,7 +259,7 @@ env_is_placeholder() {
 # domain, admin, certbot email — are left to the operator.
 autofill_env() {
   [[ -f "$ENV_FILE" ]] || return 0
-  local domain url secret k v
+  local domain url secret backup_key k v
 
   domain="$(env_get DEPLOY_DOMAIN)"
   url="$(env_get NEXT_PUBLIC_APP_URL)"
@@ -287,6 +288,21 @@ autofill_env() {
     fi
     env_put SESSION_SECRET "$(gen_secret)"
     ok "SESSION_SECRET generated automatically (64 hex)"
+  fi
+
+  # BACKUP_MASTER_KEY opens keyslot 0 of every per-account `.afrbak` archive. Same
+  # rule as above and for a sharper reason: an existing value is NEVER replaced,
+  # because archives written under the old key would then open only by typing the
+  # nine words that were shown when that particular file was downloaded — one
+  # phrase per archive, so a replaced key costs every archive at once.
+  # Written only when absent or still the placeholder —
+  # a value that is present but malformed is left exactly as it is, so /backup
+  # reports which variable is wrong instead of this script hiding it.
+  # 64 hex is what gen_secret produces and what parseMasterKeyRing expects.
+  backup_key="$(env_get BACKUP_MASTER_KEY)"
+  if [[ -z "$backup_key" ]] || env_is_placeholder "$backup_key"; then
+    env_put BACKUP_MASTER_KEY "$(gen_secret)"
+    ok "BACKUP_MASTER_KEY generated automatically (64 hex)"
   fi
 
   # One correct answer each for this stack, so a missing line is never worth an error.

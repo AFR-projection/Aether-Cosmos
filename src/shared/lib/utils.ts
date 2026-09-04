@@ -41,7 +41,15 @@ export function escapeRegex(str: string): string {
 
 /**
  * Escapes the LIKE/ILIKE wildcards (% and _) plus the escape character itself, so
- * user input is matched literally. Pair the query with an ESCAPE clause.
+ * user input is matched literally.
+ *
+ * No ESCAPE clause is needed: backslash is already LIKE's default escape
+ * character in PostgreSQL, and every caller passes the pattern as a bound
+ * parameter, so the value reaches the matcher exactly as built here.
+ *
+ * `escapeRegex` is NOT a substitute. It neutralises regex metacharacters and
+ * leaves `%` and `_` — the only two LIKE cares about — untouched, so a folder
+ * named `%` produced the pattern `/%/%` and matched every path in the account.
  */
 export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);

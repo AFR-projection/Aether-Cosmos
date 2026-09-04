@@ -3,8 +3,8 @@ import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/shared/infrastructure/db";
 import { otpTokens, users } from "@/shared/infrastructure/db/schema";
-import { validateCsrf, checkRateLimit } from "@/shared/lib/security";
-import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
+import { validateCsrf, checkRateLimit, rateLimitRetryAfterSeconds } from "@/shared/lib/security";
+import { apiSuccess, apiError, apiRateLimited, handleApiError } from "@/shared/api/response";
 import { readBoundedJson } from "@/shared/api/read-body";
 import { sendOTP, normalizeEmail } from "@/shared/infrastructure/email/email-service";
 import { getClientIp } from "@/shared/lib/auth/session";
@@ -16,6 +16,10 @@ const resendSchema = z.object({
 });
 
 const OTP_RATE_LIMIT_SECONDS = 60;
+const PER_IP_MAX = 10;
+const PER_IP_WINDOW_MS = 15 * 60 * 1000;
+const PER_EMAIL_MAX = 3;
+const PER_EMAIL_WINDOW_MS = 5 * 60 * 1000;
 
 /** Same wording whether or not a code was actually sent — see below. */
 const MSG_SENT = "Verification code emailed";
@@ -42,14 +46,22 @@ export async function POST(request: NextRequest) {
     const email = normalizeEmail(body.email);
     const ip = getClientIp(request);
 
-    const perIp = await checkRateLimit(`resend-otp:ip:${ip}`, 10, 15 * 60 * 1000);
+    const perIp = await checkRateLimit(`resend-otp:ip:${ip}`, PER_IP_MAX, PER_IP_WINDOW_MS);
     if (!perIp.allowed) {
-      return apiError("Too many resend attempts. Try again later.", 429);
+      return apiRateLimited(
+        "Too many resend attempts from this network. Please wait before trying again.",
+        rateLimitRetryAfterSeconds(PER_IP_WINDOW_MS),
+        { code: "OTP_RESEND_THROTTLED" }
+      );
     }
 
-    const limit = await checkRateLimit(`resend-otp:${email}`, 3, 5 * 60 * 1000);
+    const limit = await checkRateLimit(`resend-otp:${email}`, PER_EMAIL_MAX, PER_EMAIL_WINDOW_MS);
     if (!limit.allowed) {
-      return apiError("Too many resend attempts. Try again later.", 429);
+      return apiRateLimited(
+        "Too many resend attempts for this email. Please wait before trying again.",
+        rateLimitRetryAfterSeconds(PER_EMAIL_WINDOW_MS),
+        { code: "OTP_RESEND_THROTTLED" }
+      );
     }
 
     const [account] = await db
@@ -75,9 +87,15 @@ export async function POST(request: NextRequest) {
     if (recent) {
       const diffSeconds = (Date.now() - recent.createdAt.getTime()) / 1000;
       if (diffSeconds < OTP_RATE_LIMIT_SECONDS) {
-        return apiError(
+        // This branch is only reachable for a pending account, so it does tell a
+        // caller that the address has a registration awaiting verification. That
+        // is narrower than what signup itself must reveal (a duplicate email is a
+        // 409 there, unavoidably), and the person who just registered is owed a
+        // real number instead of "try again later".
+        return apiRateLimited(
           `Please wait ${Math.ceil(OTP_RATE_LIMIT_SECONDS - diffSeconds)}s before resending`,
-          429
+          Math.ceil(OTP_RATE_LIMIT_SECONDS - diffSeconds),
+          { code: "OTP_RESEND_COOLDOWN" }
         );
       }
     }

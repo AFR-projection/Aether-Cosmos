@@ -31,6 +31,7 @@ const PAGE_TITLE_KEYS: Record<string, TranslationKey> = {
   "/favorites": "nav.favorites",
   "/shares": "nav.shared",
   "/recycle-bin": "nav.recycleBin",
+  "/backup": "nav.backup",
 };
 
 /** null means the route has no title of its own and the product name stands in —

@@ -128,6 +128,7 @@ function activeUser(overrides: Record<string, unknown> = {}) {
     email: "victim@example.com",
     passwordHash: "$argon2id$irrelevant",
     status: "active",
+    suspendReason: null,
     failedLoginAttempts: 0,
     lockedUntil: null,
     stepCodeHash: null,
@@ -296,6 +297,113 @@ describe("authenticator layer has a per-account ceiling", () => {
     });
     expect(res.status).toBe(401);
     expect((await res.json()).code).toBe("2FA_EXPIRED");
+  });
+});
+
+/**
+ * The status code was the second half of the same oracle.
+ *
+ * Identical wording proved nothing while a real account switched to 429
+ * ACCOUNT_LOCKED at its ceiling and an unknown identifier answered 401 forever:
+ * an attacker sent `accountMax + 1` guesses and read the status instead of the
+ * body. Unknown identifiers now carry their own counter (keyed by a hash of the
+ * identifier) that trips on exactly the same attempt.
+ */
+describe("the lockout does not answer it either", () => {
+  const MAX = 5; // DEFAULT_ADMIN_SETTINGS.loginMaxAttempts
+
+  async function guess(identifier: string) {
+    const res = await post({ identifier, password: "hunter2" });
+    return { status: res.status, code: (await res.json()).code as string | undefined };
+  }
+
+  it("locks an identifier with no account on the same attempt a real one locks", async () => {
+    store.user = null;
+    for (let i = 1; i < MAX; i++) {
+      expect({ i, ...(await guess("ghost-parity")) }).toEqual({ i, status: 401, code: undefined });
+    }
+    // Attempt 5 for a real account is the one that sets `lockedUntil` and answers
+    // 429 — see "still locks the account on the configured failure ceiling".
+    expect(await guess("ghost-parity")).toEqual({ status: 429, code: "ACCOUNT_LOCKED" });
+  });
+
+  it("keeps refusing past the ceiling without spending an argon2 verification", async () => {
+    store.user = null;
+    for (let i = 0; i < MAX; i++) await guess("ghost-timing");
+    store.decoyCalls = 0;
+
+    expect(await guess("ghost-timing")).toEqual({ status: 429, code: "ACCOUNT_LOCKED" });
+    // A locked real account returns before `verifyPassword`, so a locked unknown
+    // identifier must return before the decoy — otherwise the ~0.5s gap rebuilds
+    // by clock what the status code just stopped saying.
+    expect(store.decoyCalls).toBe(0);
+  });
+
+  it("counts per identifier, so one locked guess does not lock the next", async () => {
+    store.user = null;
+    for (let i = 0; i <= MAX; i++) await guess("ghost-isolated-a");
+    expect(await guess("ghost-isolated-a")).toEqual({ status: 429, code: "ACCOUNT_LOCKED" });
+    expect(await guess("ghost-isolated-b")).toEqual({ status: 401, code: undefined });
+  });
+
+  it("does not hand out a fresh budget for a different casing of the same guess", async () => {
+    store.user = null;
+    for (let i = 1; i < MAX; i++) await guess("Ghost-Casing@Example.com");
+    // The account lookup lowercases the email, so the counter must too or the
+    // ceiling is one attempt per capitalisation.
+    expect(await guess("ghost-casing@example.com")).toEqual({
+      status: 429,
+      code: "ACCOUNT_LOCKED",
+    });
+  });
+});
+
+/**
+ * Account status is judged only behind a correct password.
+ *
+ * The check used to run before `verifyPassword`, and every unverified
+ * registration is stored as `suspended` — so any address plus any junk password
+ * answered 403 for a registered address and 401 for a stranger. No credentials
+ * required.
+ */
+describe("suspension does not answer 'is this address registered?'", () => {
+  it("answers a wrong password on a pending account exactly like an unknown one", async () => {
+    store.user = activeUser({ status: "suspended", suspendReason: null });
+    store.verifyResult = false;
+    const pending = await post({ identifier: "victim@example.com", password: "hunter2" });
+    const pendingBody = await pending.json();
+
+    store.user = null;
+    const unknown = await post({ identifier: "stranger@example.com", password: "hunter2" });
+
+    expect(pending.status).toBe(401);
+    expect(pendingBody).toEqual({ success: false, error: "Invalid credentials" });
+    expect(pending.status).toBe(unknown.status);
+    expect(pendingBody).toEqual(await unknown.json());
+  });
+
+  it("tells the owner of an unverified account where the code is", async () => {
+    store.user = activeUser({ status: "suspended", suspendReason: null });
+    store.verifyResult = true;
+    const res = await post({ identifier: "victim", password: "correct-horse" });
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.code).toBe("EMAIL_NOT_VERIFIED");
+    // The resend screen needs the address, and the caller just proved it is theirs.
+    expect(body.email).toBe("victim@example.com");
+  });
+
+  it("does not send an admin-suspended user looking for a verification code", async () => {
+    store.user = activeUser({ status: "suspended", suspendReason: "Abuse" });
+    store.verifyResult = true;
+    const res = await post({ identifier: "victim", password: "correct-horse" });
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.code).toBe("ACCOUNT_SUSPENDED");
+    // `suspend_reason` holds internal admin notes and never leaves the server.
+    expect(JSON.stringify(body)).not.toMatch(/abuse/i);
   });
 });
 

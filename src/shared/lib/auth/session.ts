@@ -54,30 +54,83 @@ export function isBindableIp(ip: string | null | undefined): boolean {
   return true;
 }
 
-function firstPublicForwardedIp(xff: string | null): string | null {
-  if (!xff) return null;
-  for (const part of xff.split(",")) {
-    const candidate = part.trim();
-    if (candidate && isBindableIp(candidate)) return candidate;
-    if (candidate && candidate !== "unknown") return candidate;
+/** Shape check only — enough to keep a non-address out of a rate-limit key. */
+function looksLikeIp(value: string): boolean {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
+    return value.split(".").every((octet) => Number(octet) <= 255);
   }
-  return xff.split(",")[0]?.trim() || null;
+  // IPv6, including the `::ffff:203.0.113.9` form a dual-stack listener hands over.
+  return value.includes(":") && /^[0-9a-f:]+(\.\d{1,3}){0,3}$/.test(value);
 }
 
-/** Resolve client IP: cf-connecting-ip → first public XFF hop → x-real-ip → unknown */
+/** One hop of a forwarding chain, with any port or brackets removed. */
+function normalizeHop(raw: string | null | undefined): string | null {
+  let value = raw?.trim().toLowerCase();
+  if (!value) return null;
+
+  const bracketed = value.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed) {
+    value = bracketed[1];
+  } else if ((value.match(/:/g)?.length ?? 0) === 1 && /^\d/.test(value)) {
+    // `203.0.113.9:54321` — a single colon after a digit is a v4 address with a
+    // port, never a v6 address.
+    value = value.split(":")[0];
+  }
+
+  return looksLikeIp(value) ? value : null;
+}
+
+/**
+ * The LAST hop in `X-Forwarded-For`, which is the only one a caller cannot write.
+ *
+ * nginx forwards `$proxy_add_x_forwarded_for` — whatever the client sent, with the
+ * real peer appended. So `X-Forwarded-For: 1.2.3.4` arrives as `1.2.3.4, <peer>`
+ * and everything left of the final entry is attacker-supplied text.
+ */
+function lastForwardedHop(xff: string | null): string | null {
+  if (!xff) return null;
+  const hops = xff.split(",");
+  for (let i = hops.length - 1; i >= 0; i -= 1) {
+    const hop = normalizeHop(hops[i]);
+    if (hop) return hop;
+  }
+  return null;
+}
+
+/**
+ * The caller's address, taken only from headers our own proxy writes.
+ *
+ * This is the key every IP rate limit in the app is built from — the login
+ * throttle, the registration cap, OTP verification, share views — and it is the
+ * `ip` column of every audit row. It used to read `cf-connecting-ip` first and
+ * then the *first* public entry of `X-Forwarded-For`, both of which the client
+ * controls: one `CF-Connecting-IP: 1.2.3.4` (or a fresh value per request) moved
+ * every one of those buckets to an address of the attacker's choosing, so no
+ * per-IP limit bound anything, session IP binding could be satisfied at will, and
+ * the audit log recorded whatever the caller typed.
+ *
+ * Now: `X-Real-IP` (nginx sets it from `$remote_addr`, overwriting any client
+ * value), else the final `X-Forwarded-For` hop, which nginx appended. Trusting
+ * headers at all is sound only because the app is reachable through nginx alone —
+ * port 3000 is not published. `CF-Connecting-IP` is read only when the operator
+ * states that Cloudflare is genuinely in front, because for everyone else it is
+ * just a string the caller sent.
+ */
 export function resolveClientIp(opts: {
   cfConnectingIp?: string | null;
   xForwardedFor?: string | null;
   xRealIp?: string | null;
 }): string {
-  const cf = opts.cfConnectingIp?.trim();
-  if (cf) return cf;
+  if (process.env.TRUST_CLOUDFLARE_HEADERS === "true") {
+    const cf = normalizeHop(opts.cfConnectingIp);
+    if (cf) return cf;
+  }
 
-  const forwarded = firstPublicForwardedIp(opts.xForwardedFor ?? null);
-  if (forwarded) return forwarded;
-
-  const real = opts.xRealIp?.trim();
+  const real = normalizeHop(opts.xRealIp);
   if (real) return real;
+
+  const forwarded = lastForwardedHop(opts.xForwardedFor ?? null);
+  if (forwarded) return forwarded;
 
   return "unknown";
 }

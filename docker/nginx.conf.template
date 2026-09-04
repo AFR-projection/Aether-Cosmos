@@ -54,6 +54,13 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto https;
+            # Cloudflare is not in front of this origin (certbot terminates TLS
+            # here), so an arriving CF-Connecting-IP was typed by the caller. The
+            # app reads it only when TRUST_CLOUDFLARE_HEADERS=true, and clearing it
+            # here means a misconfiguration cannot hand an attacker the rate-limit
+            # key: `resolveClientIp` in src/shared/lib/auth/session.ts. Delete this
+            # line only when Cloudflare genuinely proxies the domain.
+            proxy_set_header CF-Connecting-IP "";
             proxy_cache_bypass $http_upgrade;
         }
 

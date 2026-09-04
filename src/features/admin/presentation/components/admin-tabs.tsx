@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { LayoutDashboard, Users, ScrollText, Sliders, Share2, Mail } from "lucide-react";
+import {
+  LayoutDashboard,
+  Mail,
+  ScrollText,
+  Share2,
+  Sliders,
+  Users,
+} from "lucide-react";
 import { useT } from "@/shared/lib/i18n";
 import type { TranslationKey } from "@/shared/lib/i18n";
 

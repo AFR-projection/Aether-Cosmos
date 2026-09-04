@@ -9,7 +9,7 @@ import { logActivity } from "@/shared/lib/auth/audit";
 import { validateCsrf, checkUserApiRateLimit } from "@/shared/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
-import { escapeRegex } from "@/shared/lib/utils";
+import { escapeLike } from "@/shared/lib/utils";
 import { deleteR2Objects } from "@files/infrastructure/storage/r2";
 import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 
@@ -215,7 +215,10 @@ export async function PATCH(request: NextRequest) {
     const ownerIds = [...new Set(rows.map((r) => r.userId))];
 
     for (const folder of rows) {
-      const pattern = `${escapeRegex(folder.materializedPath)}%`;
+      // `LIKE`/`escapeLike`, matching app/api/folders/route.ts — a `%` or `_` in a
+      // folder name would otherwise turn a subtree pattern into a wildcard over
+      // the whole account, and `ILIKE` matched case-variant siblings too.
+      const pattern = `${escapeLike(folder.materializedPath)}%`;
       if (body.action === "delete") {
         await db.execute(
           sql`
@@ -224,7 +227,7 @@ export async function PATCH(request: NextRequest) {
             WHERE folder_id IN (
               SELECT id FROM ${folders}
               WHERE user_id = ${folder.userId}
-                AND materialized_path ILIKE ${pattern}
+                AND materialized_path LIKE ${pattern}
             )
           `
         );
@@ -233,7 +236,7 @@ export async function PATCH(request: NextRequest) {
             UPDATE ${folders}
             SET deleted_at = ${now}
             WHERE user_id = ${folder.userId}
-              AND materialized_path ILIKE ${pattern}
+              AND materialized_path LIKE ${pattern}
           `
         );
       } else {
@@ -242,7 +245,7 @@ export async function PATCH(request: NextRequest) {
             UPDATE ${folders}
             SET deleted_at = NULL
             WHERE user_id = ${folder.userId}
-              AND materialized_path ILIKE ${pattern}
+              AND materialized_path LIKE ${pattern}
           `
         );
         await db.execute(
@@ -252,7 +255,7 @@ export async function PATCH(request: NextRequest) {
             WHERE folder_id IN (
               SELECT id FROM ${folders}
               WHERE user_id = ${folder.userId}
-                AND materialized_path ILIKE ${pattern}
+                AND materialized_path LIKE ${pattern}
             )
           `
         );
@@ -299,7 +302,8 @@ export async function DELETE(request: NextRequest) {
     const keys: string[] = [];
 
     for (const folder of rows) {
-      const pattern = `${escapeRegex(folder.materializedPath)}%`;
+      // Exact, literal prefix — see the note on the same pattern above.
+      const pattern = `${escapeLike(folder.materializedPath)}%`;
       const subtreeFiles = await db
         .select({ r2Key: files.r2Key, thumbnailKey: files.thumbnailKey })
         .from(files)
@@ -307,7 +311,7 @@ export async function DELETE(request: NextRequest) {
           sql`${files.folderId} IN (
             SELECT id FROM ${folders}
             WHERE user_id = ${folder.userId}
-              AND materialized_path ILIKE ${pattern}
+              AND materialized_path LIKE ${pattern}
           )`
         );
 
@@ -322,7 +326,7 @@ export async function DELETE(request: NextRequest) {
           WHERE folder_id IN (
             SELECT id FROM ${folders}
             WHERE user_id = ${folder.userId}
-              AND materialized_path ILIKE ${pattern}
+              AND materialized_path LIKE ${pattern}
           )
         `
       );
@@ -330,7 +334,7 @@ export async function DELETE(request: NextRequest) {
         sql`
           DELETE FROM ${folders}
           WHERE user_id = ${folder.userId}
-            AND materialized_path ILIKE ${pattern}
+            AND materialized_path LIKE ${pattern}
         `
       );
     }

@@ -19,11 +19,18 @@ const store = vi.hoisted(() => ({
   recentToken: null as Record<string, unknown> | null,
   otpOk: true,
   rateAllowed: true,
+  /** Keys the test wants refused, so per-IP and per-email can be told apart. */
+  blocked: [] as string[],
   sessions: [] as string[],
   sent: [] as string[],
   updates: [] as Record<string, unknown>[],
+  /** Budgets actually SPENT (checkRateLimit). */
   rateKeys: [] as string[],
+  /** Budgets merely READ (peekRateLimit). */
+  peekKeys: [] as string[],
+  resetKeys: [] as string[],
 }));
+
 
 vi.mock("@/shared/infrastructure/db", () => {
   const select = () => {
@@ -60,14 +67,29 @@ vi.mock("@/shared/infrastructure/db", () => {
 });
 
 // Partial: `@/lib/security` also exports the header set every response uses.
-vi.mock("@/shared/lib/security", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/shared/lib/security")>()),
-  validateCsrf: async () => true,
-  checkRateLimit: async (key: string) => {
-    store.rateKeys.push(key);
-    return { allowed: store.rateAllowed, remaining: 0 };
-  },
-}));
+vi.mock("@/shared/lib/security", async (importOriginal) => {
+  const verdict = (key: string) => ({
+    allowed: store.rateAllowed && !store.blocked.includes(key),
+    remaining: 0,
+    count: 0,
+  });
+  return {
+    ...(await importOriginal<typeof import("@/shared/lib/security")>()),
+    validateCsrf: async () => true,
+    checkRateLimit: async (key: string) => {
+      store.rateKeys.push(key);
+      return verdict(key);
+    },
+    peekRateLimit: async (key: string) => {
+      store.peekKeys.push(key);
+      return verdict(key);
+    },
+    resetRateLimit: async (key: string) => {
+      store.resetKeys.push(key);
+    },
+  };
+});
+
 
 vi.mock("@/shared/infrastructure/email/email-service", () => ({
   verifyOTP: async () => store.otpOk,
@@ -134,10 +156,13 @@ beforeEach(() => {
   store.recentToken = null;
   store.otpOk = true;
   store.rateAllowed = true;
+  store.blocked = [];
   store.sessions = [];
   store.sent = [];
   store.updates = [];
   store.rateKeys = [];
+  store.peekKeys = [];
+  store.resetKeys = [];
 });
 
 describe("/api/auth/verify-otp only activates pending accounts", () => {
@@ -192,17 +217,76 @@ describe("/api/auth/verify-otp only activates pending accounts", () => {
 
   it("bounds guessing across several issued codes, per IP and per address", async () => {
     store.user = { ...PENDING };
-    store.rateAllowed = false;
+    store.blocked = ["verify-otp:203.0.113.7"];
     const res = await verifyOtpRoute(
       req("http://localhost/api/auth/verify-otp", { email: PENDING.email, code: "123456" })
     );
 
     expect(res.status).toBe(429);
+    expect((await res.json()).code).toBe("OTP_THROTTLED");
+    // A refusal a client can act on: the exact second the window rolls over,
+    // rather than "try again later".
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
     expect(store.sessions).toEqual([]);
+    // Refused on the network budget, so the address budget was never consulted.
+    expect(store.peekKeys).toEqual(["verify-otp:203.0.113.7"]);
+  });
+
+  it("bounds guessing for one address without waiting for the network budget", async () => {
+    store.user = { ...PENDING };
+    store.blocked = [`verify-otp:email:${PENDING.email}`];
+    const res = await verifyOtpRoute(
+      req("http://localhost/api/auth/verify-otp", { email: PENDING.email, code: "123456" })
+    );
+
+    expect(res.status).toBe(429);
+    expect(store.peekKeys).toEqual([
+      "verify-otp:203.0.113.7",
+      `verify-otp:email:${PENDING.email}`,
+    ]);
+  });
+
+  /**
+   * The lockout the audit reported as a denial of service: ten wrong codes aimed
+   * at someone else's address used to block that person's own verification,
+   * because the counter was incremented before the code was even looked at. It is
+   * spent only on a genuinely wrong code now, and a correct one clears the
+   * address's own bucket.
+   */
+  it("charges the guessing budget only when the code is actually wrong", async () => {
+    store.user = { ...PENDING };
+    store.otpOk = false;
+    await verifyOtpRoute(
+      req("http://localhost/api/auth/verify-otp", { email: PENDING.email, code: "000000" })
+    );
+
     expect(store.rateKeys).toEqual([
       "verify-otp:203.0.113.7",
       `verify-otp:email:${PENDING.email}`,
     ]);
+  });
+
+  it("charges nothing for the code that works", async () => {
+    store.user = { ...PENDING };
+    const res = await verifyOtpRoute(
+      req("http://localhost/api/auth/verify-otp", { email: PENDING.email, code: "123456" })
+    );
+
+    expect(res.status).toBe(200);
+    // A user who mistyped once and then pasted the right code used to walk away
+    // one attempt poorer for the trouble.
+    expect(store.rateKeys).toEqual([]);
+  });
+
+  it("clears the address budget on success but leaves the shared network budget alone", async () => {
+    store.user = { ...PENDING };
+    await verifyOtpRoute(
+      req("http://localhost/api/auth/verify-otp", { email: PENDING.email, code: "123456" })
+    );
+
+    // Everyone behind the same NAT shares the IP bucket, so one verifiable
+    // address must not be able to wipe it for the rest of them.
+    expect(store.resetKeys).toEqual([`verify-otp:email:${PENDING.email}`]);
   });
 });
 
@@ -257,9 +341,11 @@ describe("/api/auth/resend-otp only mails accounts awaiting verification", () =>
   it("caps the sweep by IP as well as by address", async () => {
     store.user = { ...PENDING };
     store.rateAllowed = false;
-    const { status } = await resend(PENDING.email);
+    const res = await resendOtpRoute(req("http://localhost/api/auth/resend-otp", { email: PENDING.email }));
 
-    expect(status).toBe(429);
+    expect(res.status).toBe(429);
+    expect((await res.json()).code).toBe("OTP_RESEND_THROTTLED");
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
     expect(store.sent).toEqual([]);
     expect(store.rateKeys[0]).toBe("resend-otp:ip:203.0.113.7");
   });

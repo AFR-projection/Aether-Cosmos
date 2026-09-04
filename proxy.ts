@@ -132,6 +132,26 @@ function applySecurityHeaders(response: NextResponse, request: NextRequest) {
   response.headers.set("Cross-Origin-Resource-Policy", "cross-origin");
 }
 
+/**
+ * Everything except static assets — and the one route whose body must not be cloned.
+ *
+ * Next buffers the request body of every path this matcher covers, because a proxy and the
+ * route handler both have to be able to read it (`getCloneableBody` in
+ * `next/dist/server/body-streams`). The buffer is capped — `experimental.proxyClientMaxBodySize`,
+ * 10 MB by default — and going over it does **not** fail the request: it pushes EOF into the
+ * copy the route receives and logs a warning. So `POST /api/backup/restore` saw a `.afrbak`
+ * that ended at exactly 10 MB, failed its trailer check, and told the user their recovery
+ * phrase was wrong. Raising the cap would only move the failure: that buffer is an in-memory
+ * `Readable` with no backpressure, so a 40 GB archive would be 40 GB of RAM on a 2 GB VPS.
+ *
+ * The exclusion is safe because that route never depended on this function: it calls
+ * `validateCsrf` and `requireBackupRequester` itself (so it owns its own 403/401), it is not in
+ * `SENSITIVE_API_PREFIXES`, and the headers in `next.config.ts` still apply to it. `$` keeps the
+ * exclusion to that exact path — `restore/inspect` reads a bounded 80 KiB prefix and stays here.
+ *
+ * Uploads of user files are unaffected either way: they are presigned straight to R2, so
+ * `/api/backup/restore` is the only route in the app that streams a large body through Next.
+ */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/backup/restore/?$).*)"],
 };

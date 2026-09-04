@@ -115,6 +115,13 @@ run_wizard() {
     SESSION_SECRET="$(head -c 48 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 64)"
   fi
 
+  # Keyslot 0 of every per-account `.afrbak`. Deliberately a second, unrelated
+  # secret: §4.1 of the backup design requires rotating SESSION_SECRET to stay
+  # harmless to existing archives. gen_secret gives exactly 64 hex characters,
+  # which is what parseMasterKeyRing accepts — the alphanumeric fallback above
+  # would decode to 48 bytes and be refused.
+  BACKUP_MASTER_KEY="$(gen_secret)"
+
   NEXT_PUBLIC_APP_URL="https://${DEPLOY_DOMAIN}"
   COOKIE_SECURE=true
   HSTS_ENABLED=true
@@ -137,6 +144,7 @@ run_wizard() {
   box_kv "Admin" "$MASTER_USERNAME"
   box_kv "Password" "$(secret_hint "$MASTER_PASSWORD")"
   box_kv "Secret" "generated automatically (64 hex)" "$DIM"
+  box_kv "Backup key" "generated automatically (64 hex)" "$DIM"
   box_bot
   echo
 
@@ -163,6 +171,7 @@ ENVEOF
   env_set_line R2_BUCKET_NAME "$R2_BUCKET_NAME"
   env_set_line R2_PUBLIC_URL "$R2_PUBLIC_URL"
   env_set_line SESSION_SECRET "$SESSION_SECRET"
+  env_set_line BACKUP_MASTER_KEY "$BACKUP_MASTER_KEY"
   env_set_line MASTER_USERNAME "$MASTER_USERNAME"
   env_set_line MASTER_PASSWORD "$MASTER_PASSWORD"
   env_set_line NEXT_PUBLIC_APP_URL "$NEXT_PUBLIC_APP_URL"

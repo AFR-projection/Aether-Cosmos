@@ -10,6 +10,7 @@ import {
   Star,
   Share2,
   Trash2,
+  Archive,
   Shield,
   Cloud,
   LogOut,
@@ -60,6 +61,7 @@ const navItems = [
   { href: "/shared-with-me", labelKey: "nav.sharedWithMe", icon: Users },
   { href: "/shares", labelKey: "nav.shared", icon: Share2 },
   { href: "/recycle-bin", labelKey: "nav.recycleBin", icon: Trash2 },
+  { href: "/backup", labelKey: "nav.backup", icon: Archive },
 ] as const satisfies readonly {
   href: string;
   labelKey: TranslationKey;

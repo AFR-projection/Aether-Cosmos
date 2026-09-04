@@ -67,6 +67,7 @@ export const id: LocaleMessages = {
     sharedWithMe: "Dibagikan ke saya",
     shared: "Dibagikan",
     recycleBin: "Tempat Sampah",
+    backup: "Backup & Pemulihan",
     settings: "Pengaturan",
     admin: "Admin",
     logout: "Keluar",
@@ -589,6 +590,184 @@ export const id: LocaleMessages = {
       other: "{count} item akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.",
     },
     confirmEmptyAction: "Kosongkan Selamanya",
+  },
+
+  backup: {
+    title: "Backup & Pemulihan",
+    subtitle: "Unduh salinan terenkripsi dari data Anda sendiri, dan pasang kembali ke akun ini.",
+    assurance: {
+      encrypted: "AES-256-GCM dari ujung ke ujung",
+      encryptedHint:
+        "Nama, struktur, dan isinya semua tersegel. Tidak ada bagian file yang terbaca sebagai teks.",
+      twoHalves: "Kunci terbagi dua",
+      twoHalvesHint:
+        "Satu bagian tinggal di server ini. Satunya lagi frasa yang hanya Anda yang pegang.",
+      afrOnly: "Hanya AFR yang bisa membukanya",
+      afrOnlyHint: "File .afrbak bukan arsip yang bisa dibaca alat lain. Itu memang disengaja.",
+    },
+    identity: {
+      heading: "Identitas backup",
+      idLabel: "ID Arsip",
+      idHint:
+        "Setiap arsip yang ditulis akun ini membawa ID tersebut, dan pemulihan memeriksanya sebelum menulis apa pun.",
+      copyId: "Salin ID arsip",
+      perFilePhrase: "Frasa pemulihan: Per-file",
+      perFilePhraseHint:
+        "Setiap file backup mendapat frasa pemulihan unik 9 kata yang ditampilkan saat Anda mengunduhnya. Catat — itu satu-satunya cara membuka file spesifik itu kalau server ini hilang.",
+      adopted: { other: "{count} ID diadopsi" },
+      adoptedHint: "ID dari pemasangan lama yang Anda pulihkan ke akun ini.",
+    },
+    card: {
+      filesTitle: "File",
+      filesSubtitle: "Folder dan file Anda, apa adanya saat ini.",
+      brainTitle: "Second Brain",
+      brainSubtitle: "Brain, memori, dan tautan di antaranya.",
+      folders: "Folder",
+      files: "File",
+      brains: "Brain",
+      memories: "Memori",
+      size: "Ukuran",
+      memoriesHint: "{active} aktif · {archived} diarsipkan",
+      filesNote: "Apa pun yang ada di Tempat Sampah Anda tidak termasuk dalam backup.",
+      brainNote:
+        "Memori yang diarsipkan ikut terbawa. Yang sudah Anda hapus tidak, begitu juga tautan graf otomatis — yang itu dihitung ulang setelah pemulihan.",
+      empty: "Belum ada apa pun di sini untuk di-backup.",
+      download: "Unduh backup",
+      restore: "Pulihkan backup",
+      encryptedBlocked: {
+        other:
+          "{count} file dienkripsi di browser Anda, dan itu tidak bisa masuk ke backup. Dekripsi atau hapus dulu.",
+      },
+    },
+    download: {
+      preparing: "Menyiapkan…",
+      started: "Unduhan Anda sudah dimulai",
+      startedHint:
+        "Akun besar butuh waktu untuk dipaketkan. Biarkan tab ini terbuka sampai file selesai.",
+      failed: "Backup tidak bisa dimulai.",
+    },
+    rotate: {
+      button: "Buat frasa baru",
+      rotating: "Merotasi…",
+      success: "Frasa pemulihan baru dibuat",
+      successHint:
+        "Arsip yang sudah diunduh tetap terbuka dengan frasa LAMA. Frasa baru hanya berlaku untuk arsip yang dibuat mulai sekarang.",
+      failed: "Tidak bisa membuat frasa baru.",
+    },
+    phrase: {
+      title: "Catat frasa pemulihan Anda",
+      lead: "Unduhan Anda sudah dimulai. {count} kata ini adalah satu-satunya cara membuka arsip Anda kalau server ini dan basis datanya hilang.",
+      warnTitle: "Ditampilkan sekali, dan tidak akan diulang",
+      warnBody:
+        "Tidak ada salinan yang bisa Anda baca disimpan di mana pun. Selama server ini sehat, frasa itu tidak ada gunanya bagi Anda; kalau server hilang, frasa itulah pembeda antara sebuah arsip dan file mati.",
+      copy: "Salin frasa",
+      ack: "Saya sudah mencatat frasa ini di tempat yang aman.",
+      done: "Selesai",
+    },
+    ask: {
+      title: "Butuh frasa pemulihan",
+      body: "Arsip ini tidak ditulis oleh akun ini, jadi frasa pemulihan Anda satu-satunya yang bisa membukanya.",
+      label: "Frasa pemulihan",
+      placeholder: "kata huruf kecil dipisah satu spasi",
+      show: "Tampilkan frasa",
+      hide: "Sembunyikan frasa",
+      submit: "Buka arsip",
+    },
+    inspect: {
+      reading: "Membaca file…",
+      failed: "File ini tidak bisa dibaca.",
+      wrongExtension: "Itu sepertinya bukan file backup .afrbak.",
+    },
+    preview: {
+      title: "Pulihkan dari backup",
+      written: "Dibuat",
+      version: "Versi format",
+      archiveId: "ID Arsip",
+      sourceInstance: "Pemasangan sumber",
+      email: "Email saat itu",
+      emailHint: "Hanya metadata. Tidak menentukan apa pun.",
+      contents: "Isi",
+      rows: "Baris",
+      payload: "Muatan",
+      openedByPhrase: "Dibuka dengan frasa pemulihan Anda.",
+      openedByServer: "Dibuka dengan kunci milik server ini.",
+      staleKey: "Ditulis dengan kunci server yang sudah dipensiunkan. Masih bisa dibuka.",
+      bound: "Arsip ini milik akun ini.",
+      willAdopt: "ID arsip ini akan ditambahkan ke akun ini kalau pemulihannya berhasil.",
+      notRestorable: "Arsip ini tidak bisa dipulihkan ke akun ini.",
+      overCap: "Isinya {rows} baris, sedangkan batasnya {cap}.",
+    },
+    mode: {
+      heading: "Bagaimana cara memasangnya?",
+      mergeTitle: "Gabungkan",
+      mergeBody:
+        "Semua yang Anda punya dipertahankan. File yang identik dilewati, dan nama yang sudah dipakai diberi tambahan “ (restored)”.",
+      replaceTitle: "Ganti",
+      replaceBodyFiles:
+        "Pulihkan dulu, baru kirim semua yang ada di bagian ini sekarang ke Tempat Sampah.",
+      replaceBodyBrain:
+        "Pulihkan dulu, baru hapus semua yang ada di bagian ini sekarang. Yang ini tidak masuk Tempat Sampah.",
+    },
+    split: {
+      heading: "Yang akan terjadi",
+      restored: "Ditulis",
+      skipped: "Dilewati",
+      renamed: "Diganti nama",
+      newFolders: "Folder baru",
+      bytes: "Dibebankan ke penyimpanan Anda",
+      exact: "Tepat untuk keadaan sekarang. Apa pun yang Anda ubah sebelum mulai menggeser angka ini.",
+      inexact: "Angka pasti tidak tersedia untuk arsip ini.",
+      reasonBrain:
+        "Pemulihan Second Brain memasukkan setiap baris sebagai baris baru, jadi tidak ada yang dilewati atau diganti nama.",
+      reasonIndexTooLarge: "Indeksnya terlalu besar untuk dibaca dari pratinjau.",
+      reasonNeedMoreBytes: "Pratinjau berhenti sebelum mencapai indeks.",
+      reasonOverRowCap: "Jumlah barisnya melewati batas.",
+    },
+    start: {
+      merge: "Gabungkan ke akun ini",
+      replace: "Ganti bagian ini…",
+    },
+    confirm: {
+      title: "Ganti semua isi bagian ini?",
+      bodyFiles:
+        "Semua folder dan file yang Anda punya sekarang masuk ke Tempat Sampah, dan itu hanya terjadi setelah pemulihannya berhasil. Tidak ada yang dihapus sebelum itu.",
+      bodyBrain:
+        "Semua brain dan memori yang Anda punya sekarang dihapus, dan itu hanya terjadi setelah pemulihannya berhasil. Yang ini tidak masuk Tempat Sampah.",
+      proceed: "Saya mengerti, lanjutkan",
+    },
+    stepCode: {
+      title: "Konfirmasi dengan Kode 2 Langkah",
+      body: "Mengganti sebuah bagian adalah satu-satunya tindakan di sini yang bisa menghapus data, jadi kami minta faktor kedua Anda.",
+      label: "Kode 2 Langkah",
+      placeholder: "Kode Anda",
+      show: "Tampilkan kode",
+      hide: "Sembunyikan kode",
+      submit: "Ganti bagian ini",
+      remaining: { other: "Sisa {count} percobaan." },
+    },
+    run: {
+      title: "Memulihkan backup",
+      uploading: "Mengunggah… {percent}%",
+      working: "Memulihkan. Backup besar bisa butuh waktu.",
+      warnClose: "Biarkan tab ini terbuka sampai selesai.",
+    },
+    result: {
+      title: "Pemulihan selesai",
+      rows: "Baris ditulis",
+      bytes: "Bita ditulis",
+      skipped: "Dilewati",
+      renamed: "Diganti nama",
+      removedFiles: "Dikirim ke Tempat Sampah: {folders} folder, {files} file",
+      removedBrain: "Dihapus: {rows} baris di {tables} tabel",
+      adopted: "ID arsip ini sekarang milik akun ini.",
+      graphQueued:
+        "Memori Anda sudah masuk. Tautan otomatis di antaranya sedang dihitung ulang di latar belakang, jadi grafnya terisi dalam beberapa menit ke depan.",
+      graphPending:
+        "Memori Anda sudah masuk, tapi tautan otomatis di antaranya belum bisa dijadwalkan — pekerja latar belakang tidak terjangkau. Semuanya akan dihitung ulang begitu pekerjanya jalan lagi. Tidak ada yang hilang.",
+      expected: "Arsip menyatakan {rows} baris dan {bytes}.",
+      close: "Tutup",
+    },
+    failed: "Pemulihan tidak selesai, dan tidak ada yang berubah.",
   },
 
   files: {
@@ -2357,6 +2536,19 @@ export const id: LocaleMessages = {
         accountLock: "Akun terkunci",
         ipRateLimit: "Batas laju IP",
         passwordChange: "Ganti kata sandi",
+        backupCreate: "Backup dimulai",
+        backupDownload: "Backup diunduh",
+        backupDelete: "Backup dihapus",
+        backupSettingsChange: "Pengaturan backup",
+        backupKeyRotate: "Frasa sandi ditulis",
+        backupPurgeAll: "Semua backup dihapus",
+        backupTakeout: "Backup akun diunduh",
+        backupRestorePreview: "Berkas backup diperiksa",
+        backupRestoreMerge: "Backup digabungkan kembali",
+        backupRestoreReplace: "Backup menggantikan semuanya",
+        backupRecoveryView: "Frasa pemulihan ditampilkan",
+        backupRestoreRefused: "Pemulihan ditolak",
+        backupRestoreAdopted: "Identitas arsip diadopsi",
         unknown: "Aktivitas",
       },
       description: {
@@ -2383,6 +2575,19 @@ export const id: LocaleMessages = {
         accountLock: "Akun terkunci setelah gagal masuk",
         ipRateLimit: "Sebuah IP mencapai batas laju masuk",
         passwordChange: "Kata sandi diubah",
+        backupCreate: "Backup terenkripsi dimulai",
+        backupDownload: "Backup terenkripsi diunduh",
+        backupDelete: "Satu set backup dihapus",
+        backupSettingsChange: "Jadwal atau retensi backup berubah",
+        backupKeyRotate: "Frasa sandi backup dibuat atau dirotasi",
+        backupPurgeAll: "Frasa sandi dan semua set backup dihapus",
+        backupTakeout: "Sebuah akun mengekspor datanya sendiri menjadi satu berkas terenkripsi",
+        backupRestorePreview: "Ringkasan berkas backup dibaca sebelum dipulihkan",
+        backupRestoreMerge: "Backup dipulihkan berdampingan dengan data yang sudah ada",
+        backupRestoreReplace: "Backup menggantikan data yang sudah ada di akun ini",
+        backupRecoveryView: "Frasa pemulihan akun ditampilkan atau dirotasi",
+        backupRestoreRefused: "Pemulihan ditolak sebelum ada satu baris pun ditulis",
+        backupRestoreAdopted: "Frasa pemulihan membuktikan kepemilikan arsip lama",
         unknown: "Aktivitas tercatat",
       },
       group: {
@@ -2391,6 +2596,7 @@ export const id: LocaleMessages = {
         files: "Berkas",
         folders: "Folder",
         users: "Pengguna",
+        backup: "Backup",
       },
     },
     security: {
@@ -3006,6 +3212,32 @@ export const id: LocaleMessages = {
       "2FA_EXPIRED": "Sesi berakhir. Silakan masuk kembali.",
       "2FA_INVALID": "Kode autentikasi salah",
       ACTIVITY_SCOPE_NOT_FOUND: "Lingkup aktivitas tidak ditemukan",
+      AFRBAK_ACCOUNT_TOO_BIG:
+        "Isi akun ini melebihi kapasitas satu arsip — hubungi dukungan sebelum mencoba lagi",
+      AFRBAK_BAD_REQUEST: "Permintaan restore itu kurang lengkap. Muat ulang lalu coba lagi.",
+      AFRBAK_BUSY: "Sebuah restore sedang berjalan untuk akun ini. Tunggu sampai selesai.",
+      AFRBAK_CHANGED: "Data Anda berubah saat backup sedang ditulis. Silakan coba lagi.",
+      AFRBAK_CORRUPT: "File backup ini rusak.",
+      AFRBAK_DOMAIN_MISMATCH: "Backup ini milik bagian yang lain. Gunakan kartu yang sesuai.",
+      AFRBAK_ENCRYPTED_FILES:
+        "Akun ini punya file yang dienkripsi di browser, dan itu tidak bisa dimasukkan ke backup. Dekripsi atau hapus dulu.",
+      AFRBAK_INSPECT_RATE_LIMITED: "Terlalu banyak pratinjau. Coba lagi beberapa menit lagi.",
+      AFRBAK_NOT_AFR: "File ini bukan backup AFR.",
+      AFRBAK_NOT_CONFIGURED: "Backup per akun belum disiapkan di server ini.",
+      AFRBAK_PREPARE_RATE_LIMITED:
+        "Backup untuk bagian ini baru saja dimulai. Coba lagi beberapa menit lagi.",
+      AFRBAK_QUOTA: "Ruang penyimpanan tidak cukup untuk me-restore backup ini.",
+      AFRBAK_RECOVERY_KEY_UNREADABLE:
+        "Recovery phrase Anda perlu disiapkan ulang sebelum backup baru bisa dibuat. Backup yang sudah diunduh tidak terpengaruh.",
+      AFRBAK_STEP_CODE_REQUIRED: "Masukkan 2-Step Code Anda untuk mengganti bagian ini.",
+      AFRBAK_TICKET: "Tautan unduhan ini sudah tidak berlaku.",
+      AFRBAK_TOO_LARGE: "Backup ini terlalu besar untuk diproses.",
+      AFRBAK_UNREADABLE:
+        "Backup ini tidak dapat dibuka. Recovery phrase salah, atau filenya rusak.",
+      AFRBAK_UPLOAD_TRUNCATED:
+        "Unggahan berhenti sebelum seluruh file backup sampai, jadi tidak ada yang utuh untuk " +
+        "dipulihkan. Tidak ada data yang diubah — silakan coba lagi.",
+      AFRBAK_VERSION_TOO_NEW: "Backup ini dibuat oleh versi aplikasi yang lebih baru.",
       ALREADY_VERIFIED: "Akun ini sudah terverifikasi. Silakan masuk dengan kata sandi Anda.",
       ARCHIVE_BUILD_FAILED: "Arsip tidak bisa dibuat",
       ARCHIVE_DOWNLOAD_FAILED: "Unduhan arsip gagal",
@@ -3017,6 +3249,11 @@ export const id: LocaleMessages = {
       ARCHIVE_TOO_LARGE:
         "Arsip ini terlalu besar untuk dibuka di server — unduh lalu buka di komputer Anda",
       ARCHIVE_URL_NOT_READY: "URL arsip belum siap",
+      BACKUP_KEY_MISSING: "Frasa sandi backup belum ada — buat dulu sebelum menjalankan backup",
+      BACKUP_KEY_UNREADABLE:
+        "Kunci backup yang tersimpan tidak bisa dibuka — rotasi frasa sandi untuk memperbaikinya",
+      BACKUP_NOT_FOUND: "Set backup tidak ditemukan",
+      BACKUP_OBJECT_MISSING: "File terenkripsi backup ini sudah tidak ada di penyimpanan",
       BRAIN_ACCESS_NOT_FOUND: "Agen ini tidak punya akses ke brain tersebut",
       BRAIN_ENTITY_NOT_FOUND: "Entitas tidak ditemukan",
       BRAIN_PROJECT_NOT_FOUND: "Proyek tidak ditemukan",
@@ -3033,6 +3270,8 @@ export const id: LocaleMessages = {
       EDIT_TEXT_TOO_LARGE: "Berkas ini terlalu besar untuk diedit di peramban",
       EDIT_VERSION_CONFLICT:
         "Berkas ini berubah sejak Anda membukanya. Muat ulang sebelum menyimpan.",
+      EMAIL_NOT_VERIFIED:
+        "Alamat email Anda belum diverifikasi. Cek kotak masuk untuk kode verifikasi, atau minta kode baru.",
       EXTRACT_AUDIO_ENCRYPTED_REFUSED: "Berkas terenkripsi tidak bisa diproses di server",
       EXTRACT_AUDIO_MIME_REFUSED: "Hanya berkas video yang punya trek audio untuk diambil",
       EXTRACT_AUDIO_QUEUE_UNAVAILABLE:
@@ -3043,6 +3282,14 @@ export const id: LocaleMessages = {
       MEMORY_NOT_FOUND: "Memori tidak ditemukan",
       MOVE_BLOCKED_TRASH:
         "Pulihkan dulu — item di tempat sampah tidak bisa dipindahkan.",
+      OTP_INVALID: "Kode itu salah atau sudah kedaluwarsa.",
+      OTP_RESEND_THROTTLED:
+        "Terlalu banyak permintaan kode baru. Tunggu sebentar sebelum mencoba lagi.",
+      OTP_THROTTLED: "Terlalu banyak percobaan verifikasi. Tunggu sebentar sebelum mencoba lagi.",
+      REGISTER_PAUSED:
+        "Pendaftaran dihentikan sementara karena lonjakan pendaftaran yang tidak wajar. Coba lagi nanti.",
+      REGISTER_THROTTLED:
+        "Terlalu banyak percobaan pendaftaran. Tunggu sebentar sebelum mencoba lagi.",
       RESUME_REQUIRES_FILE: "Pilih file ini lagi untuk melanjutkan dari tempat terhenti.",
       SHARE_EDIT_RATE_LIMITED: "Terlalu banyak perubahan berturut-turut. Coba lagi sebentar lagi.",
       SHARE_EXPIRED: "Tautan berbagi ini sudah kedaluwarsa.",
@@ -3055,6 +3302,8 @@ export const id: LocaleMessages = {
       SHARE_VIEW_ONLY: "Tautan berbagi ini hanya bisa dilihat.",
       STEP_CODE_ALREADY_SET: "2-Step Code sudah diatur untuk akun ini",
       STEP_CODE_EXPIRED: "Sesi berakhir. Silakan masuk kembali.",
+      STEP_CODE_INVALID: "2-Step Code itu tidak cocok.",
+      STEP_CODE_LOCKED: "Terlalu banyak kode salah. Coba lagi nanti.",
       STEP_CODE_MISMATCH: "Kode tidak sama",
       STEP_CODE_NOT_SET: "Belum ada 2-Step Code untuk akun ini",
       STEP_CODE_REQUIRED:

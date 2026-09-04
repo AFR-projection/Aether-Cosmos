@@ -13,8 +13,9 @@ import {
 } from "@/shared/lib/auth/permissions";
 import { logActivity } from "@/shared/lib/auth/audit";
 import { validateCsrf, SECURITY_HEADERS, checkUserApiRateLimit } from "@/shared/lib/security";
+import { checkEntityName, entityNameSchema } from "@/shared/lib/security/entity-name";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
-import { escapeRegex } from "@/shared/lib/utils";
+import { escapeLike } from "@/shared/lib/utils";
 import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
 import { deleteR2Objects } from "@files/infrastructure/storage/r2";
@@ -22,7 +23,14 @@ import { createFolderDeletionJob } from "@files/infrastructure/storage/deletion-
 
 const LARGE_FOLDER_DELETE_THRESHOLD = 500;
 
-/** Materialized path + depth for a new/moved folder under `parent` (null = tree root). */
+/**
+ * Materialized path + depth for a new/moved folder under `parent` (null = tree root).
+ *
+ * The path is only a faithful description of the tree while no name contains a
+ * `/` — otherwise `a/b` at the root and `b` inside `a` produce the same string and
+ * the prefix queries below cannot tell them apart. `entityNameSchema` is what
+ * holds that invariant up; see src/shared/lib/security/entity-name.ts.
+ */
 function pathUnder(parent: Folder | null, name: string): { materializedPath: string; depth: number } {
   if (!parent) return { materializedPath: `/${name}/`, depth: 0 };
   return {
@@ -59,7 +67,7 @@ export async function GET(request: NextRequest) {
 }
 
 const createSchema = z.object({
-  name: z.string().min(1).max(255),
+  name: entityNameSchema,
   parentId: z.string().uuid().nullable().optional(),
 });
 
@@ -151,11 +159,16 @@ export async function PATCH(request: NextRequest) {
           return apiError(shareRefusal(access, "rename"), 403);
         }
         if (!body.name) return apiError("Name required", 400);
+        // Checked here rather than in `patchSchema`: `name` is optional there
+        // because only this action uses it.
+        const checked = checkEntityName(body.name);
+        if (!checked.ok) return apiError(checked.reason, 400, { code: "INVALID_NAME" });
+        const newName = checked.name;
         const parentPrefix = folder.materializedPath.slice(0, -(folder.name.length + 1));
-        const newPath = `${parentPrefix}${body.name}/`;
+        const newPath = `${parentPrefix}${newName}/`;
         await db
           .update(folders)
-          .set({ name: body.name, materializedPath: newPath, updatedAt: new Date() })
+          .set({ name: newName, materializedPath: newPath, updatedAt: new Date() })
           .where(eq(folders.id, body.id));
         // Bulk update all children — single SQL query
         const oldLen = oldPath.length;
@@ -165,7 +178,7 @@ export async function PATCH(request: NextRequest) {
             SET materialized_path = CONCAT(${newPath}, SUBSTRING(materialized_path, ${oldLen + 1})),
                 updated_at = NOW()
             WHERE user_id = ${ownerId}
-              AND materialized_path ILIKE ${escapeRegex(oldPath) + '%'}
+              AND materialized_path LIKE ${escapeLike(oldPath) + '%'}
               AND id != ${body.id}
           `
         );
@@ -213,7 +226,7 @@ export async function PATCH(request: NextRequest) {
                 depth = depth + ${depthDiff},
                 updated_at = NOW()
             WHERE user_id = ${ownerId}
-              AND materialized_path ILIKE ${escapeRegex(oldPath) + '%'}
+              AND materialized_path LIKE ${escapeLike(oldPath) + '%'}
               AND id != ${body.id}
           `
         );
@@ -228,7 +241,7 @@ export async function PATCH(request: NextRequest) {
             UPDATE ${folders}
             SET deleted_at = NOW()
             WHERE user_id = ${ownerId}
-              AND materialized_path ILIKE ${escapeRegex(folder.materializedPath) + '%'}
+              AND materialized_path LIKE ${escapeLike(folder.materializedPath) + '%'}
           `
         );
         await db.execute(
@@ -238,7 +251,7 @@ export async function PATCH(request: NextRequest) {
             WHERE folder_id IN (
               SELECT id FROM ${folders}
               WHERE user_id = ${ownerId}
-                AND materialized_path ILIKE ${escapeRegex(folder.materializedPath) + '%'}
+                AND materialized_path LIKE ${escapeLike(folder.materializedPath) + '%'}
             )
           `
         );
@@ -260,7 +273,7 @@ export async function PATCH(request: NextRequest) {
             UPDATE ${folders}
             SET deleted_at = NULL
             WHERE user_id = ${ownerId}
-              AND materialized_path ILIKE ${escapeRegex(folder.materializedPath) + '%'}
+              AND materialized_path LIKE ${escapeLike(folder.materializedPath) + '%'}
           `
         );
         await db.execute(
@@ -270,7 +283,7 @@ export async function PATCH(request: NextRequest) {
             WHERE folder_id IN (
               SELECT id FROM ${folders}
               WHERE user_id = ${ownerId}
-                AND materialized_path ILIKE ${escapeRegex(folder.materializedPath) + '%'}
+                AND materialized_path LIKE ${escapeLike(folder.materializedPath) + '%'}
             )
           `
         );
@@ -307,7 +320,19 @@ export async function DELETE(request: NextRequest) {
       return apiError(shareRefusal(access, "delete"), 403);
     }
 
-    const subPathPattern = `${escapeRegex(folder.materializedPath)}%`;
+    /**
+     * `LIKE` with `escapeLike`, not `ILIKE` with `escapeRegex`.
+     *
+     * Two mistakes lived in that one line. `escapeRegex` neutralises regex
+     * metacharacters, which leaves the two characters LIKE actually cares about
+     * untouched: a folder named `%` produced the pattern `/%/%`, and trashing it
+     * matched every path in the account. And `ILIKE` made the prefix
+     * case-insensitive, so an owner with both `Docs` and `docs` at the root had one
+     * folder's subtree rewritten by the other's rename. Paths are built by
+     * concatenating a parent's path with a child's name, so the prefix is exact by
+     * construction and case-folding it only ever adds false matches.
+     */
+    const subPathPattern = `${escapeLike(folder.materializedPath)}%`;
 
     if (permanent) {
       const subtreeFiles = await db
@@ -317,7 +342,7 @@ export async function DELETE(request: NextRequest) {
           sql`${files.folderId} IN (
             SELECT id FROM ${folders}
             WHERE user_id = ${folder.userId}
-              AND materialized_path ILIKE ${subPathPattern}
+              AND materialized_path LIKE ${subPathPattern}
           )`
         );
 
@@ -351,7 +376,7 @@ export async function DELETE(request: NextRequest) {
           WHERE folder_id IN (
             SELECT id FROM ${folders}
             WHERE user_id = ${folder.userId}
-              AND materialized_path ILIKE ${subPathPattern}
+              AND materialized_path LIKE ${subPathPattern}
           )
         `
       );
@@ -359,7 +384,7 @@ export async function DELETE(request: NextRequest) {
         sql`
           DELETE FROM ${folders}
           WHERE user_id = ${folder.userId}
-            AND materialized_path ILIKE ${subPathPattern}
+            AND materialized_path LIKE ${subPathPattern}
         `
       );
       await recalculateUsedBytes(folder.userId);
@@ -372,7 +397,7 @@ export async function DELETE(request: NextRequest) {
           WHERE folder_id IN (
             SELECT id FROM ${folders}
             WHERE user_id = ${folder.userId}
-              AND materialized_path ILIKE ${subPathPattern}
+              AND materialized_path LIKE ${subPathPattern}
           )
         `
       );
@@ -381,7 +406,7 @@ export async function DELETE(request: NextRequest) {
           UPDATE ${folders}
           SET deleted_at = NOW()
           WHERE user_id = ${folder.userId}
-            AND materialized_path ILIKE ${subPathPattern}
+            AND materialized_path LIKE ${subPathPattern}
         `
       );
       await recalculateUsedBytes(folder.userId);

@@ -159,6 +159,26 @@ export const activityActionEnum = pgEnum("activity_action", [
   "step_code_change",
   "step_code_lock",
   "step_code_reset",
+  // Backup & restore. Every one of these is a whole-database event, which is why
+  // they are audited separately from `download` rather than folded into it.
+  "backup_create",
+  "backup_download",
+  "backup_delete",
+  "backup_settings_change",
+  "backup_key_rotate",
+  "backup_purge_all",
+  // Per-account takeout & restore (0028). Separate labels from the six above because
+  // they describe a different act by a different actor: a user moving their OWN data,
+  // not an operator dumping the instance. `backup_restore_refused` is deliberately its
+  // own label rather than a `result` field on the others — a refused restore is the row
+  // an operator wants to be able to filter for on its own.
+  "backup_takeout",
+  "backup_restore_preview",
+  "backup_restore_merge",
+  "backup_restore_replace",
+  "backup_recovery_view",
+  "backup_restore_refused",
+  "backup_restore_adopted",
 ]);
 
 export const users = pgTable(
@@ -257,6 +277,22 @@ export const folders = pgTable(
     materializedPath: text("materialized_path").notNull(),
     depth: integer("depth").notNull().default(0),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    /**
+     * Set while a per-account restore is STAGING this row, NULL everywhere else
+     * (see {@link restoreBatches}). Staged rows also carry `deletedAt`, so every
+     * existing `deleted_at IS NULL` read hides them for free; only the Recycle Bin,
+     * which looks for deleted rows on purpose, adds `AND restore_batch_id IS NULL`.
+     *
+     * Deliberately NOT a foreign key, for the same reason `parentId` above is not
+     * one: `restore_batches` is in the never-restored class, so `pg_dump
+     * --exclude-table` strips its definition, and a `REFERENCES restore_batches(id)`
+     * here would make `CREATE TABLE folders` fail on a fresh-database restore of the
+     * operator's own system backup. The cost is that nothing nulls this column
+     * automatically, so the sweeper must purge a batch's staged rows BEFORE deleting
+     * the batch row — the other order leaves soft-deleted rows that the Recycle Bin
+     * filter hides and therefore nobody can purge.
+     */
+    restoreBatchId: uuid("restore_batch_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -265,6 +301,9 @@ export const folders = pgTable(
     index("folders_parent_id_idx").on(table.parentId),
     index("folders_path_idx").on(table.userId, table.materializedPath),
     index("folders_user_active_idx").on(table.userId, table.deletedAt),
+    index("folders_restore_batch_idx")
+      .on(table.restoreBatchId)
+      .where(sql`restore_batch_id is not null`),
   ]
 );
 
@@ -303,6 +342,8 @@ export const files = pgTable(
     version: integer("version").notNull().default(1),
     encrypted: boolean("encrypted").notNull().default(false),
     encryptionMeta: jsonb("encryption_meta"),
+    /** Staging marker for a per-account restore — see {@link folders.restoreBatchId}. */
+    restoreBatchId: uuid("restore_batch_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -316,6 +357,9 @@ export const files = pgTable(
     index("files_favorite_idx").on(table.userId, table.isFavorite),
     // GIN index makes tsvector @@ tsquery lookups fast.
     index("files_search_vector_idx").using("gin", table.searchVector),
+    index("files_restore_batch_idx")
+      .on(table.restoreBatchId)
+      .where(sql`restore_batch_id is not null`),
   ]
 );
 
@@ -1834,3 +1878,164 @@ export type BrainRetrievalEvent = typeof brainRetrievalEvents.$inferSelect;
 export type NewBrainRetrievalEvent = typeof brainRetrievalEvents.$inferInsert;
 export type BrainReviewItem = typeof brainReviewItems.$inferSelect;
 export type NewBrainReviewItem = typeof brainReviewItems.$inferInsert;
+
+/* ── Per-account backup & restore ──────────────────────────────────────────────
+   Four tables, but only three of them are live. `account_backup_identities`,
+   `restore_batches` and `restore_reservations` come from
+   drizzle/0028_account_backup.sql and serve one account exporting its OWN /files
+   or /brain as a single downloadable `.afrbak` file and restoring it back — there
+   is no whole-instance backup in this app, and no table here belongs to an
+   operator rather than to an account.
+
+   `backup_keys` predates them (drizzle/0027_backup.sql) and is now **inert**: see
+   its own note below. No migration drops it.
+
+   All four are in the NEVER-RESTORED class. `account_backup_identities` most of
+   all: a restored identity row would let an archive be adopted with no recovery
+   phrase typed, and that phrase is the only gate the disaster path has.
+
+   Design: docs/superpowers/specs/2026-09-03-per-user-backup-restore-design.md §15. */
+
+/**
+ * Sealed recovery keys from a scheme this app no longer uses. **Nothing reads or writes it.**
+ *
+ * It held one row per account — `wrapped_kek` an RWK sealed under `BACKUP_MASTER_KEY`, `kdf_salt`
+ * the account's single `phraseSalt` — back when one phrase had to open every archive an account
+ * would ever write, and therefore had to survive between downloads. Per-file phrases removed the
+ * reason to store anything: each archive's nine words are derived from `BACKUP_MASTER_KEY` and
+ * that download's ticket, so there is no row to rotate and none that can go unopenable when the
+ * master key changes (`account/domain/per-file-phrase.ts`).
+ *
+ * It is left in place rather than dropped because dropping it is destructive and buys nothing:
+ * archives written under the old scheme still restore with **no server state at all**, since their
+ * `phraseSalt` travels in their own header. Whatever rows remain are stale wrapped key material,
+ * which is why the table stays in `NEVER_TABLES` — a copy adopted from an archive would let a
+ * stolen `.afrbak` be claimed with no phrase typed at all.
+ */
+export const backupKeys = pgTable(
+  "backup_keys",
+  {
+    ownerKey: text("owner_key").primaryKey(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /** An RWK sealed under BACKUP_MASTER_KEY by the removed scheme. `afr1:` prefixed. */
+    wrappedKek: text("wrapped_kek").notNull(),
+    /** That scheme's per-account `phraseSalt`, base64. */
+    kdfSalt: text("kdf_salt").notNull(),
+    keyEpoch: integer("key_epoch").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+  },
+  (table) => [index("backup_keys_user_id_idx").on(table.userId)]
+);
+
+export type BackupKeyRow = typeof backupKeys.$inferSelect;
+
+/**
+ * Which `accountBackupId` values an account answers to.
+ *
+ * The id is random, not derived, and it — not `users.id` — is the root identity of
+ * an account's archives. That is the whole point: a disaster restore rebuilds the
+ * database and the account comes back with a NEW uuid, which would orphan every
+ * archive made before the disaster. Email is no better, being editable.
+ *
+ * `generated` is the id this instance minted, at most one per account (partial
+ * unique index). `adopted` is an id proven by a TYPED recovery phrase — the server
+ * must never satisfy that gate with its own sealed copy — and an account may adopt
+ * several, one per dead instance it is reclaiming archives from.
+ */
+export const accountBackupIdentities = pgTable(
+  "account_backup_identities",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountBackupId: text("account_backup_id").notNull(),
+    /** generated | adopted */
+    source: text("source").notNull(),
+    boundAt: timestamp("bound_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.accountBackupId] }),
+    uniqueIndex("account_backup_identities_one_generated")
+      .on(table.userId)
+      .where(sql`source = 'generated'`),
+    // Restore looks an id up before it knows whose it is.
+    index("account_backup_identities_id_idx").on(table.accountBackupId),
+    check(
+      "account_backup_identities_source_chk",
+      sql`"source" IN ('generated', 'adopted')`
+    ),
+  ]
+);
+
+/**
+ * One restore attempt.
+ *
+ * `expectedRows`/`expectedBytes` are what the archive summary CLAIMS;
+ * `writtenRows`/`writtenBytes` are what actually landed. The importer compares them
+ * on every batch, so an archive that announces 100 MB and starts delivering 50 GB
+ * is aborted mid-stream instead of filling the disk.
+ */
+export const restoreBatches = pgTable(
+  "restore_batches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** brain | files */
+    domain: text("domain").notNull(),
+    /** merge | replace */
+    mode: text("mode").notNull(),
+    /** staging | committed | aborted */
+    state: text("state").notNull().default("staging"),
+    backupId: uuid("backup_id").notNull(),
+    formatVersion: integer("format_version").notNull(),
+    /** Which `BACKUP_MASTER_KEY` generation opened the archive, for rotation audits. */
+    keyId: text("key_id"),
+    expectedRows: bigint("expected_rows", { mode: "number" }).notNull().default(0),
+    expectedBytes: bigint("expected_bytes", { mode: "number" }).notNull().default(0),
+    writtenRows: bigint("written_rows", { mode: "number" }).notNull().default(0),
+    writtenBytes: bigint("written_bytes", { mode: "number" }).notNull().default(0),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("restore_batches_user_state_idx").on(table.userId, table.state),
+    // The sweeper's only query: staging batches older than the abandonment window.
+    index("restore_batches_stale_idx").on(table.createdAt).where(sql`state = 'staging'`),
+    check("restore_batches_domain_chk", sql`"domain" IN ('brain', 'files')`),
+    check("restore_batches_mode_chk", sql`"mode" IN ('merge', 'replace')`),
+    check("restore_batches_state_chk", sql`"state" IN ('staging', 'committed', 'aborted')`),
+  ]
+);
+
+/**
+ * Quota a staging restore has claimed but not yet committed.
+ *
+ * The batch id IS the primary key: a second reservation for one restore would
+ * double-count the same bytes. Without this table two concurrent restores both read
+ * the same `usedBytes`, both pass the quota check, and jointly break it.
+ */
+export const restoreReservations = pgTable(
+  "restore_reservations",
+  {
+    restoreBatchId: uuid("restore_batch_id")
+      .primaryKey()
+      .references(() => restoreBatches.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bytes: bigint("bytes", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("restore_reservations_user_idx").on(table.userId)]
+);
+
+export type AccountBackupIdentity = typeof accountBackupIdentities.$inferSelect;
+export type NewAccountBackupIdentity = typeof accountBackupIdentities.$inferInsert;
+export type RestoreBatch = typeof restoreBatches.$inferSelect;
+export type NewRestoreBatch = typeof restoreBatches.$inferInsert;
+export type RestoreReservation = typeof restoreReservations.$inferSelect;
+export type NewRestoreReservation = typeof restoreReservations.$inferInsert;

@@ -5,6 +5,8 @@ import * as schema from "@/shared/infrastructure/db/schema";
 import { activityLogs, archiveJobs, fileVersions, files, folders, otpTokens, sessions, uploadSessions, users } from "@/shared/infrastructure/db/schema";
 import { headObject, listMultipartUploads, listR2Objects, abortMultipartUpload } from "@files/infrastructure/storage/r2";
 import { assertFileUploadTransition, assertUploadSessionTransition } from "@files/infrastructure/storage/upload-state";
+import { sweepAbandonedRestores } from "@backup/account/application/sweep-restores";
+import { drizzleRestoreSweepStore } from "@backup/account/infrastructure/restore-sweep-store";
 import {
   claimCleanupRun,
   recordCleanupResult,
@@ -281,6 +283,37 @@ async function reconcileUploads(db: Db) {
   return { expiredUploads, verifiedLegacyFiles, inconsistentReadyFiles, abortedMultipartUploads, orphanObjectsReported };
 }
 
+/**
+ * Run the per-account restore sweep, and never let it take the cleanup down with it.
+ *
+ * It rides this hourly claim rather than owning a repeatable job because the claim is already
+ * exactly-once across both schedulers. The try/catch is not habit: on an instance where migration
+ * 0028 has not been applied yet, `restore_batches` does not exist, and an unguarded sweep would
+ * turn every hourly cleanup into a thrown error — no trash purge, no log retention, no session
+ * expiry, for a feature nobody on that instance has used yet.
+ *
+ * `sweepAbandonedRestores` already wraps each of its own steps, so what reaches here is a store
+ * that could not be built at all.
+ *
+ * Design: docs/superpowers/specs/2026-09-03-per-user-backup-restore-design.md §7.6.
+ */
+async function sweepRestores(): Promise<Partial<CleanupResult>> {
+  try {
+    const report = await sweepAbandonedRestores(drizzleRestoreSweepStore());
+    return {
+      restoresAbandoned: report.abandoned,
+      restoresCollected: report.collected,
+      restoreStagedFiles: report.stagedFiles,
+      restoreStagedFolders: report.stagedFolders,
+    };
+  } catch (error) {
+    console.warn(
+      `[cleanup] restore sweep skipped: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return {};
+  }
+}
+
 export async function runScheduledCleanups(
   db: Db,
   source: CleanupSource = "worker"
@@ -292,6 +325,13 @@ export async function runScheduledCleanups(
   try {
     const settings = await loadSettings(db);
     const reconciliation = await reconcileUploads(db);
+
+    // Ahead of the trash purge, deliberately. A restore killed mid-flight leaves staged rows
+    // whose R2 objects are reachable only through them, and this is the only pass that can free
+    // both; letting it go first means an abandoned batch is cleaned up on the same tick the age
+    // gate notices it, rather than an hour later.
+    const restores = await sweepRestores();
+
     const trash = await cleanupTrash(db, settings.autoDeleteTrashDays);
     const lifetime = await cleanupFileLifetime(db, settings.maxFileLifetimeDays);
     const logs = await cleanupLogs(db, settings.logRetentionDays);
@@ -308,11 +348,15 @@ export async function runScheduledCleanups(
       expiredSessions: expiredSessions.deleted,
       expiredOtpTokens: expiredOtpTokens.deleted,
       ...reconciliation,
+      ...restores,
     };
 
     await recordCleanupResult(db, { result });
     console.log(
-      `[cleanup:${source}] trash files=${result.trashFiles} folders=${result.trashFolders} lifetime=${result.lifetimeSoftDeleted} logs=${result.logsDeleted} sessions=${result.expiredSessions} otp=${result.expiredOtpTokens}`
+      `[cleanup:${source}] trash files=${result.trashFiles} folders=${result.trashFolders}` +
+        ` lifetime=${result.lifetimeSoftDeleted} logs=${result.logsDeleted}` +
+        ` sessions=${result.expiredSessions} otp=${result.expiredOtpTokens}` +
+        ` restores=${result.restoresAbandoned ?? 0}/${result.restoresCollected ?? 0}`
     );
     return result;
   } catch (error) {

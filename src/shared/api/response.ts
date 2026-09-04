@@ -4,6 +4,7 @@ import { AuthError } from "@/shared/lib/auth/session";
 import { SECURITY_HEADERS } from "@/shared/lib/security";
 import { UploadServiceError } from "@files/infrastructure/storage/upload-service";
 import { BrainError } from "@brain/domain/errors";
+import { BackupError } from "@backup/domain/errors";
 import { BodyInvalidJsonError, BodyTooLargeError } from "@/shared/api/read-body";
 
 export function apiSuccess<T>(data: T, status = 200, extraHeaders?: HeadersInit) {
@@ -13,11 +14,35 @@ export function apiSuccess<T>(data: T, status = 200, extraHeaders?: HeadersInit)
 export function apiError(
   message: string,
   status = 400,
-  extra?: { code?: string; [key: string]: unknown }
+  extra?: { code?: string; [key: string]: unknown },
+  extraHeaders?: HeadersInit
 ) {
   return NextResponse.json(
     { success: false, error: message, ...(extra ?? {}) },
-    { status, headers: SECURITY_HEADERS }
+    { status, headers: { ...SECURITY_HEADERS, ...extraHeaders } }
+  );
+}
+
+/**
+ * A 429 that says when to come back.
+ *
+ * "Try again later" is the wording an unauthenticated caller reads on a throttled
+ * endpoint, and it is indistinguishable from a permanent refusal — the OTP screen
+ * in particular left a user who had fumbled a code with no idea whether the wait
+ * was a minute or a day. The window is a fixed bucket, so the answer is known:
+ * it goes in the body for the countdown and in `Retry-After` for everything that
+ * is not a browser.
+ */
+export function apiRateLimited(
+  message: string,
+  retryAfterSeconds: number,
+  extra?: { code?: string; [key: string]: unknown }
+) {
+  return apiError(
+    message,
+    429,
+    { retryAfterSeconds, ...(extra ?? {}) },
+    { "Retry-After": String(retryAfterSeconds) }
   );
 }
 
@@ -41,6 +66,12 @@ export function handleApiError(error: unknown) {
     return apiError(error.message, error.status, { code: error.code });
   }
   if (error instanceof BrainError) {
+    return apiError(error.message, error.status, { code: error.code });
+  }
+  // Every backup denial already carries the status and the machine code its own gate
+  // decided on — including the 2-Step Code re-check, whose 401/429 distinction tells
+  // the dialog whether to keep the input open.
+  if (error instanceof BackupError) {
     return apiError(error.message, error.status, { code: error.code });
   }
   if (error instanceof AuthError) {

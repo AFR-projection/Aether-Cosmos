@@ -25,6 +25,7 @@ export default defineConfig({
       { find: /^@files\//, replacement: `${r("src/features/files")}/` },
       { find: /^@admin\//, replacement: `${r("src/features/admin")}/` },
       { find: /^@shares\//, replacement: `${r("src/features/shares")}/` },
+      { find: /^@backup\//, replacement: `${r("src/features/backup")}/` },
       { find: /^@\//, replacement: `${r(".")}/` },
     ],
   },

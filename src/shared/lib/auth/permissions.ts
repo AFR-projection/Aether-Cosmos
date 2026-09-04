@@ -17,6 +17,14 @@ import type { SessionUser } from "./session";
  * therefore grants access to any folder whose materialized path starts with the shared
  * folder's path, and the DEEPEST matching share wins so a nested `edit` share can widen a
  * broader `view` share.
+ *
+ * Both resolvers below refuse a row whose `restore_batch_id` is set, unconditionally. Such a
+ * row is not the account's data yet — a per-account restore is still writing it, and it is
+ * carried as soft-deleted precisely so that no ordinary read sees it. Every by-id route goes
+ * through these two functions, so one predicate here is what stops `PATCH … action:"restore"`
+ * from clearing `deleted_at` on a half-imported file (which would publish it mid-restore and
+ * then let the sweeper delete it back out from under the user). The filter cannot narrow
+ * access to anything real: outside a running restore the column is NULL on every row.
  */
 
 export type FolderMemberRole = "view" | "edit";
@@ -334,7 +342,7 @@ export async function resolveFolderAccess(
   folderId: string,
   opts: { includeDeleted?: boolean } = {}
 ): Promise<FolderAccess | null> {
-  const conditions = [eq(folders.id, folderId)];
+  const conditions = [eq(folders.id, folderId), isNull(folders.restoreBatchId)];
   if (!opts.includeDeleted) conditions.push(isNull(folders.deletedAt));
 
   const [folder] = await db
@@ -385,7 +393,7 @@ export async function resolveFileAccess(
   fileId: string,
   opts: { includeDeleted?: boolean; anyStatus?: boolean } = {}
 ): Promise<FileAccess | null> {
-  const conditions = [eq(files.id, fileId)];
+  const conditions = [eq(files.id, fileId), isNull(files.restoreBatchId)];
   if (!opts.includeDeleted) conditions.push(isNull(files.deletedAt));
   if (!opts.anyStatus) conditions.push(inArray(files.status, ["ready", "legacy_unverified"]));
 
@@ -494,8 +502,14 @@ export async function listAccessibleFolders(
 
   if (trash) {
     // The recycle bin is per-owner: a collaborator never sees the owner's trash, and
-    // nothing they trashed inside a shared folder shows up in their own bin.
-    const conditions = [eq(folders.userId, userId), isNotNull(folders.deletedAt)];
+    // nothing they trashed inside a shared folder shows up in their own bin. A folder a
+    // per-account restore is staging is not in the bin either — it is soft-deleted only so
+    // that the rest of the app cannot see it yet.
+    const conditions = [
+      eq(folders.userId, userId),
+      isNotNull(folders.deletedAt),
+      isNull(folders.restoreBatchId),
+    ];
     if (parentId) {
       conditions.push(eq(folders.parentId, parentId));
     } else {

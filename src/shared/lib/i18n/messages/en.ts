@@ -90,6 +90,7 @@ export const en = {
     sharedWithMe: "Shared with me",
     shared: "Shared",
     recycleBin: "Recycle Bin",
+    backup: "Backup & Restore",
     settings: "Settings",
     admin: "Admin",
     logout: "Sign out",
@@ -685,6 +686,223 @@ export const en = {
       other: "{count} items will be permanently deleted. This action cannot be undone.",
     },
     confirmEmptyAction: "Empty Forever",
+  },
+
+  /**
+   * Per-account backup and restore — the `/backup` page (§14 of the design).
+   *
+   * The only backup namespace there is. It addresses the person who owns the data
+   * ("your files"), never an operator looking at somebody else's account, because
+   * there is no screen where one account's archive is another person's business.
+   */
+  backup: {
+    title: "Backup & Restore",
+    subtitle: "Download an encrypted copy of your own data, and put it back into this account.",
+    /**
+     * The three promises the page leads with, in the order they matter.
+     *
+     * Every one of them is a property the format tests hold in place, not a claim: the payload is
+     * AES-256-GCM throughout, keyslot 0 opens with this server's key and keyslot 1 with the
+     * owner's phrase, and the container is not a ZIP any other tool can walk into.
+     */
+    assurance: {
+      encrypted: "AES-256-GCM end to end",
+      encryptedHint: "Names, structure and bytes are all sealed. Nothing in the file reads as text.",
+      twoHalves: "Key in two halves",
+      twoHalvesHint: "One half lives on this server. The other is the phrase only you hold.",
+      afrOnly: "Only AFR can open it",
+      afrOnlyHint: "An .afrbak is not an archive any other tool can read. That is deliberate.",
+    },
+    /** The identity strip: what an archive from this account is stamped with. */
+    identity: {
+      heading: "Backup identity",
+      idLabel: "Archive ID",
+      idHint:
+        "Every archive this account writes carries this ID, and a restore checks it before it writes anything.",
+      copyId: "Copy archive ID",
+      perFilePhrase: "Recovery phrase: Per-file",
+      perFilePhraseHint:
+        "Each backup file gets its own unique 9-word recovery phrase shown when you download it. Write it down — it's the only way to open that specific file if this server is lost.",
+      adopted: { one: "{count} adopted ID", other: "{count} adopted IDs" },
+      adoptedHint: "IDs from an older install that you restored into this account.",
+    },
+    /** The two cards. Files and Second Brain are separate archives, never one file. */
+    card: {
+      filesTitle: "Files",
+      filesSubtitle: "Your folders and files, as they are right now.",
+      brainTitle: "Second Brain",
+      brainSubtitle: "Your brains, memories and the links between them.",
+      folders: "Folders",
+      files: "Files",
+      brains: "Brains",
+      memories: "Memories",
+      size: "Size",
+      /** Reconciles this card's total with the two tiles on `/brain`, which count separately. */
+      memoriesHint: "{active} active · {archived} archived",
+      filesNote: "Whatever sits in your Recycle Bin is not part of a backup.",
+      brainNote:
+        "Archived memories travel with the backup. Anything you have deleted does not, and neither do the automatic graph links — those are recalculated after a restore.",
+      empty: "There is nothing here to back up yet.",
+      download: "Download backup",
+      restore: "Restore backup",
+      encryptedBlocked: {
+        one: "{count} file was encrypted in your browser, and that cannot go into a backup. Decrypt or remove it first.",
+        other:
+          "{count} files were encrypted in your browser, and that cannot go into a backup. Decrypt or remove them first.",
+      },
+    },
+    download: {
+      preparing: "Preparing…",
+      started: "Your download has started",
+      startedHint:
+        "A large account takes a while to pack. Keep this tab open until the file finishes.",
+      failed: "The backup could not be started.",
+    },
+    rotate: {
+      button: "Generate new phrase",
+      rotating: "Rotating…",
+      success: "New recovery phrase generated",
+      successHint:
+        "Archives you already downloaded still open with the OLD phrase. The new phrase only applies to archives created from now on.",
+      failed: "Could not generate a new phrase.",
+    },
+    /**
+     * The phrase is shown *after* the download has already been triggered, on purpose:
+     * the ticket that authorises it lives 90 seconds and a new one cannot be asked for
+     * for ten minutes, so a dialog in front of it would cost the download as well.
+     */
+    phrase: {
+      title: "Write down your recovery phrase",
+      lead: "Your download has started. These {count} words are the only way to open your archives if this server and its database are ever lost.",
+      warnTitle: "Shown once, and never again",
+      warnBody:
+        "No copy you can read is kept anywhere. While this server is healthy the phrase costs you nothing; if it is ever lost, the phrase is the whole difference between an archive and a dead file.",
+      copy: "Copy phrase",
+      ack: "I have written the phrase down somewhere safe.",
+      done: "Done",
+    },
+    /** Asking for a phrase, which is a different dialog from showing one. */
+    ask: {
+      title: "Recovery phrase needed",
+      body: "This archive was not written by this account, so your recovery phrase is the only thing that can open it.",
+      label: "Recovery phrase",
+      placeholder: "lowercase words separated by single spaces",
+      show: "Show phrase",
+      hide: "Hide phrase",
+      submit: "Open archive",
+    },
+    inspect: {
+      reading: "Reading the file…",
+      failed: "This file could not be read.",
+      wrongExtension: "That does not look like an .afrbak backup file.",
+    },
+    preview: {
+      title: "Restore from backup",
+      written: "Written",
+      version: "Format version",
+      archiveId: "Archive ID",
+      sourceInstance: "Source install",
+      email: "Email at the time",
+      emailHint: "Metadata only. It decides nothing.",
+      contents: "Contents",
+      rows: "Rows",
+      payload: "Payload",
+      openedByPhrase: "Opened with your recovery phrase.",
+      openedByServer: "Opened with this server's own key.",
+      staleKey: "Written under a retired server key. It still opens.",
+      bound: "This archive belongs to this account.",
+      willAdopt: "This archive's ID will be added to this account when the restore succeeds.",
+      notRestorable: "This archive cannot be restored into this account.",
+      overCap: "It holds {rows} rows, and the limit is {cap}.",
+    },
+    mode: {
+      heading: "How should it land?",
+      mergeTitle: "Merge",
+      mergeBody:
+        "Keep everything you have. An identical file is skipped, and a name already taken gets “ (restored)” added.",
+      replaceTitle: "Replace",
+      replaceBodyFiles:
+        "Restore first, then send everything this section holds right now to the Recycle Bin.",
+      replaceBodyBrain:
+        "Restore first, then delete everything this section holds right now. This one does not go to the Recycle Bin.",
+    },
+    /**
+     * §7.2: these four numbers may be stated as fact only when they were computed from
+     * the archive's own index. When they were not, the reason is named instead — an
+     * estimate nobody can reconcile with the report afterwards is worse than no number.
+     */
+    split: {
+      heading: "What this would do",
+      restored: "Written",
+      skipped: "Skipped",
+      renamed: "Renamed",
+      newFolders: "New folders",
+      bytes: "Charged to your storage",
+      exact: "Exact as of now. Anything you change before starting moves these numbers.",
+      inexact: "Exact numbers are not available for this archive.",
+      reasonBrain:
+        "A Second Brain restore inserts every row fresh, so nothing is ever skipped or renamed.",
+      reasonIndexTooLarge: "Its index is too large to read from a preview.",
+      reasonNeedMoreBytes: "The preview stopped short of the index.",
+      reasonOverRowCap: "It is over the row limit.",
+    },
+    start: {
+      merge: "Merge into this account",
+      replace: "Replace this section…",
+    },
+    confirm: {
+      title: "Replace everything in this section?",
+      bodyFiles:
+        "Every folder and file you have now goes to the Recycle Bin, and only once the restore has succeeded. Nothing is removed before then.",
+      bodyBrain:
+        "Every brain and memory you have now is deleted, and only once the restore has succeeded. This one does not go to the Recycle Bin.",
+      proceed: "I understand, continue",
+    },
+    /** A second factor, because `replace` is the one action here that can remove data. */
+    stepCode: {
+      title: "Confirm with your 2-Step Code",
+      body: "Replacing a section is the only action here that can remove data, so it asks for your second factor.",
+      label: "2-Step Code",
+      placeholder: "Your code",
+      show: "Show code",
+      hide: "Hide code",
+      submit: "Replace section",
+      remaining: { one: "{count} attempt left.", other: "{count} attempts left." },
+    },
+    /**
+     * The upload, which is the only part of a restore the browser can measure. Everything
+     * after the last byte happens on the server, so the progress bar stops at 100% and the
+     * "working" line takes over.
+     */
+    run: {
+      /** Stable dialog name for both phases: a title that counted up would be read out on every tick. */
+      title: "Restoring backup",
+      uploading: "Uploading… {percent}%",
+      working: "Restoring. This can take a while for a large backup.",
+      warnClose: "Keep this tab open until it finishes.",
+    },
+    result: {
+      title: "Restore finished",
+      rows: "Rows written",
+      bytes: "Bytes written",
+      skipped: "Skipped",
+      renamed: "Renamed",
+      removedFiles: "Sent to the Recycle Bin: {folders} folders, {files} files",
+      removedBrain: "Deleted: {rows} rows across {tables} tables",
+      adopted: "This archive's ID now belongs to this account.",
+      /**
+       * The derived graph, which a Brain archive never carries and a restore therefore asks the
+       * worker to recompute. Two sentences because a stopped worker is a real state on a small
+       * server, and "your graph is empty" with no explanation is the support question this avoids.
+       */
+      graphQueued:
+        "Your memories are in. The automatic links between them are being recalculated in the background, so the graph fills in over the next few minutes.",
+      graphPending:
+        "Your memories are in, but the automatic links between them could not be queued — the background worker is not reachable. They will be recalculated once it is running again. Nothing was lost.",
+      expected: "The archive declared {rows} rows and {bytes}.",
+      close: "Close",
+    },
+    failed: "The restore did not finish, and nothing was changed.",
   },
 
   files: {
@@ -2864,6 +3082,19 @@ export const en = {
         accountLock: "Account lock",
         ipRateLimit: "IP rate limit",
         passwordChange: "Password change",
+        backupCreate: "Backup started",
+        backupDownload: "Backup downloaded",
+        backupDelete: "Backup deleted",
+        backupSettingsChange: "Backup settings",
+        backupKeyRotate: "Passphrase written",
+        backupPurgeAll: "All backups purged",
+        backupTakeout: "Account backup downloaded",
+        backupRestorePreview: "Backup file inspected",
+        backupRestoreMerge: "Backup merged back in",
+        backupRestoreReplace: "Backup replaced everything",
+        backupRecoveryView: "Recovery phrase shown",
+        backupRestoreRefused: "Restore refused",
+        backupRestoreAdopted: "Archive identity adopted",
         /** Never rendered: `auditActionLabel` humanises the raw key instead. */
         unknown: "Activity",
       },
@@ -2891,6 +3122,19 @@ export const en = {
         accountLock: "Account locked after failed logins",
         ipRateLimit: "An IP hit the login rate limit",
         passwordChange: "Password was changed",
+        backupCreate: "An encrypted backup was started",
+        backupDownload: "An encrypted backup was downloaded",
+        backupDelete: "A backup set was deleted",
+        backupSettingsChange: "Backup schedule or retention changed",
+        backupKeyRotate: "The backup passphrase was created or rotated",
+        backupPurgeAll: "The passphrase and every backup set were destroyed",
+        backupTakeout: "An account exported its own data as one encrypted file",
+        backupRestorePreview: "A backup file's summary was read before restoring",
+        backupRestoreMerge: "A backup was restored beside the existing data",
+        backupRestoreReplace: "A backup replaced the account's existing data",
+        backupRecoveryView: "The account's recovery phrase was shown or rotated",
+        backupRestoreRefused: "A restore was refused before anything was written",
+        backupRestoreAdopted: "A recovery phrase proved ownership of an older archive",
         /** An action this build no longer knows about, replayed from history. */
         unknown: "Recorded activity",
       },
@@ -2900,6 +3144,7 @@ export const en = {
         files: "Files",
         folders: "Folders",
         users: "Users",
+        backup: "Backups",
       },
     },
     /** One user's login layers, as a master sees them: read plus recover only. */
@@ -3616,6 +3861,42 @@ export const en = {
       "2FA_EXPIRED": "Session expired. Please sign in again.",
       "2FA_INVALID": "Invalid authentication code",
       ACTIVITY_SCOPE_NOT_FOUND: "Activity scope not found",
+      /**
+       * Per-account backup and restore (`.afrbak`). Two codes are deliberately absent:
+       * `AFRBAK_BAD_NAME` and `AFRBAK_FILE_UNREADABLE` name the exact file standing in the
+       * way, and a static entry here would replace that with advice nobody can act on — so
+       * they fall through to the route's own sentence, which is what the registry's fallback
+       * is for. The nine refusals are §9 of the design; §12 is why so many of them say the
+       * same vague thing.
+       */
+      AFRBAK_ACCOUNT_TOO_BIG:
+        "This account holds more than one archive can carry — contact support before trying again",
+      AFRBAK_BAD_REQUEST: "That restore request was missing something. Reload and try again.",
+      AFRBAK_BUSY: "A restore is already running for this account. Wait for it to finish.",
+      AFRBAK_CHANGED: "Your data changed while the backup was being written. Please try again.",
+      AFRBAK_CORRUPT: "This backup file is damaged.",
+      AFRBAK_DOMAIN_MISMATCH: "This backup belongs to the other section. Use the matching card.",
+      AFRBAK_ENCRYPTED_FILES:
+        "This account holds files that were encrypted in your browser, which cannot go into a backup. Decrypt or remove them first.",
+      AFRBAK_INSPECT_RATE_LIMITED: "Too many previews. Try again in a few minutes.",
+      AFRBAK_NOT_AFR: "This file is not an AFR backup.",
+      AFRBAK_NOT_CONFIGURED: "Per-account backup is not configured on this server.",
+      AFRBAK_PREPARE_RATE_LIMITED:
+        "A backup was started for this section recently. Try again in a few minutes.",
+      AFRBAK_QUOTA: "Not enough storage space to restore this backup.",
+      AFRBAK_RECOVERY_KEY_UNREADABLE:
+        "Your recovery phrase needs to be set up again before a new backup can be made. Backups you already downloaded are unaffected.",
+      AFRBAK_STEP_CODE_REQUIRED: "Enter your 2-Step Code to replace this section.",
+      AFRBAK_TICKET: "This download link is no longer valid.",
+      AFRBAK_TOO_LARGE: "This backup is too large to process.",
+      /** #3, #4 and #6 share one sentence on purpose: telling them apart is a hint (§12). */
+      AFRBAK_UNREADABLE:
+        "This backup cannot be opened. The recovery phrase is wrong, or the file is damaged.",
+      /** Not folded in with the above: the caller set the length it fell short of (§12). */
+      AFRBAK_UPLOAD_TRUNCATED:
+        "The upload stopped before the whole backup arrived, so there was nothing complete to " +
+        "restore. Nothing was changed — please try again.",
+      AFRBAK_VERSION_TOO_NEW: "This backup was written by a newer version of the app.",
       ALREADY_VERIFIED: "This account is already verified. Please sign in with your password.",
       ARCHIVE_BUILD_FAILED: "The archive couldn't be built",
       ARCHIVE_DOWNLOAD_FAILED: "Archive download failed",
@@ -3626,6 +3907,11 @@ export const en = {
       ARCHIVE_TOO_LARGE:
         "This archive is too large to open on the server — download it and open it on your computer",
       ARCHIVE_URL_NOT_READY: "The archive URL isn't ready yet",
+      BACKUP_KEY_MISSING: "No backup passphrase exists yet — create one before running a backup",
+      BACKUP_KEY_UNREADABLE:
+        "The stored backup key can't be opened — rotate the passphrase to fix it",
+      BACKUP_NOT_FOUND: "Backup set not found",
+      BACKUP_OBJECT_MISSING: "This backup's encrypted file is no longer in storage",
       BRAIN_ACCESS_NOT_FOUND: "This agent has no access to this brain",
       BRAIN_ENTITY_NOT_FOUND: "Entity not found",
       BRAIN_PROJECT_NOT_FOUND: "Project not found",
@@ -3642,6 +3928,13 @@ export const en = {
       EDIT_SOURCE_TOO_LARGE: "This file is too large to edit on the server",
       EDIT_TEXT_TOO_LARGE: "This file is too large to edit in the browser",
       EDIT_VERSION_CONFLICT: "This file changed since you opened it. Reload it before saving.",
+      /**
+       * The sign-in reply for an account that registered but never entered its
+       * code. Returned only once the password has been checked, so it tells the
+       * person in front of the form something they already knew.
+       */
+      EMAIL_NOT_VERIFIED:
+        "Your email address has not been verified yet. Check your inbox for the verification code, or request a new one.",
       EXTRACT_AUDIO_ENCRYPTED_REFUSED: "Encrypted files can't be processed on the server",
       EXTRACT_AUDIO_MIME_REFUSED: "Only video files have an audio track to pull out",
       EXTRACT_AUDIO_QUEUE_UNAVAILABLE:
@@ -3652,6 +3945,18 @@ export const en = {
       MEMORY_NOT_FOUND: "Memory not found",
       /** Raised by the drag planner, which reports a code for the same reason. */
       MOVE_BLOCKED_TRASH: "Restore this first — items in the recycle bin can't be moved.",
+      /**
+       * Registration codes. The throttled ones carry `retryAfterSeconds` in the
+       * body as well, which is what the screen counts down from; the cooldown on a
+       * resend deliberately has no key here, because its own message already names
+       * the exact number of seconds left.
+       */
+      OTP_INVALID: "That code is incorrect or has expired.",
+      OTP_RESEND_THROTTLED: "Too many resend attempts. Please wait before trying again.",
+      OTP_THROTTLED: "Too many verification attempts. Please wait before trying again.",
+      REGISTER_PAUSED:
+        "Registration is temporarily paused because of unusual signup volume. Please try again later.",
+      REGISTER_THROTTLED: "Too many registration attempts. Please wait before trying again.",
       /** Raised by the upload queue, not by a route, but the registry is the same. */
       RESUME_REQUIRES_FILE: "Pick this file again to carry on where it stopped.",
       /**
@@ -3670,6 +3975,8 @@ export const en = {
       SHARE_VIEW_ONLY: "This share is view-only.",
       STEP_CODE_ALREADY_SET: "A 2-Step Code is already set for this account",
       STEP_CODE_EXPIRED: "Session expired. Please sign in again.",
+      STEP_CODE_INVALID: "That 2-Step Code is not right.",
+      STEP_CODE_LOCKED: "Too many wrong codes. Try again later.",
       STEP_CODE_MISMATCH: "Codes do not match",
       STEP_CODE_NOT_SET: "No 2-Step Code is set for this account",
       STEP_CODE_REQUIRED:
