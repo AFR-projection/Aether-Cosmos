@@ -17,10 +17,12 @@ import { useGraphInteraction } from "@brain/presentation/hooks/use-graph-interac
 import { useGraphSettings } from "@brain/presentation/hooks/use-graph-settings";
 import { BrainErrorState, BrainLoading } from "@brain/presentation/components/brain-states";
 import { resolveGroups } from "@brain/presentation/canvas/groups";
+import { buildSky, hashSeed } from "@brain/presentation/canvas/cosmos";
 import { memoryHref, nodeShareUrl, openGraphPopup } from "@brain/presentation/canvas/links";
 import { buildGraphModel, emptyGraphModel } from "@brain/presentation/canvas/model";
 import { parseGraphQuery } from "@brain/presentation/canvas/query";
-import { FALLBACK_THEME, panCamera } from "@brain/presentation/canvas/renderer";
+import { panCamera } from "@brain/presentation/canvas/renderer";
+import { FALLBACK_THEME } from "@brain/presentation/canvas/theme";
 import { DEFAULT_DISPLAY_SETTINGS, type GraphModel } from "@brain/presentation/canvas/types";
 import { buildGraphView, buildLocalView, type GraphView as GraphViewShape } from "@brain/presentation/canvas/view";
 import { notify } from "@/shared/lib/system/notify-store";
@@ -166,6 +168,25 @@ export function GraphView({
 
   const engine = useGraphEngine({ model, view, settings: force });
 
+  /**
+   * The sky is a property of the brain, not of the viewport: seeded from the brain
+   * id, so the same brain opens onto the same stars in the panel, in fullscreen and
+   * in the popped-out window. Built once — a starfield rebuilt per frame would be
+   * both wasteful and a different sky every frame.
+   */
+  const sky = useMemo(() => buildSky(hashSeed(brainId ?? "aether")), [brainId]);
+
+  /**
+   * Orbits belong to the local graph only: the global graph has no centre, and rings
+   * imposed on it would hide the cluster structure that is the whole point of looking
+   * at it. The renderer draws exactly the rings the physics pulls towards.
+   */
+  const orbit = useMemo(
+    () =>
+      localActive && force.orbitGap > 0 ? { gap: force.orbitGap, depth: localDepth } : null,
+    [force.orbitGap, localActive, localDepth]
+  );
+
   const hitTest = useCallback(
     (x: number, y: number) => handleRef.current?.hitTest(x, y) ?? -1,
     []
@@ -211,6 +232,8 @@ export function GraphView({
     focal: localActive ? focalIndex : -1,
     highlightNodes: interaction.highlightNodes,
     highlightEdges: interaction.highlightEdges,
+    sky,
+    orbit,
   });
 
   // The backend flag is external state (the worker may fail to load at any time),

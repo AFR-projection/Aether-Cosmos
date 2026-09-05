@@ -43,6 +43,7 @@ aether-cosmos/
 │   ├── api/                #   every endpoint (app/api/**/route.ts)
 │   ├── files/              #   file browser
 │   ├── brain/              #   Second Brain workspace
+│   ├── backup/             #   per-account backup & restore
 │   ├── graph-workspace/    #   popped-out graph window
 │   ├── admin/              #   admin panel
 │   ├── settings/           #   account settings
@@ -65,6 +66,7 @@ aether-cosmos/
 │   └── features/           # One folder per bounded context, layered inside
 │       ├── brain/          #   Second Brain (see second-brain-architecture.md)
 │       ├── files/          #   files, folders, notes, previews, uploads
+│       ├── backup/         #   per-account .afrbak export/restore (see backup.md)
 │       ├── auth/           #   login, account and session UI
 │       ├── admin/          #   admin console
 │       └── shares/         #   public share links

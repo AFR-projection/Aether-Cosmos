@@ -187,7 +187,16 @@ export default function PublicSharedPage() {
             {category === "pdf" && <PdfViewer fileId={data.file.id} previewUrl={previewUrl} />}
             {category === "image" && !isSvg && <ImageViewer src={previewUrl} fileName={data.file.name} mimeType={data.file.mimeType} />}
             {isSvg && <SvgViewer src={previewUrl} fileName={data.file.name} />}
-            {category === "video" && <VideoViewer src={previewUrl} fileName={data.file.name} />}
+            {category === "video" && (
+              <VideoViewer
+                src={previewUrl}
+                fileName={data.file.name}
+                /* The token IS the capability, exactly as it is for a shared note — and it grants
+                   reading the tracks, nothing more. A `share` source has no fileId to generate,
+                   edit or delete against, so the menu physically cannot offer any of those. */
+                subtitleSource={{ kind: "share", token }}
+              />
+            )}
             {category === "audio" && <AudioViewer src={previewUrl} fileName={data.file.name} />}
             {isText && <TextViewer src={previewUrl} fileName={data.file.name} mimeType={data.file.mimeType} />}
           </div>

@@ -296,10 +296,17 @@ access key ID into both fields is the usual mistake.
 **4. Admin account** — a 3–50 character username and a password containing 6–128
 characters. This becomes the master account.
 
-Everything else in `.env.example` is already correct. `SESSION_SECRET` is generated
-for you when it is still the placeholder, and `NEXT_PUBLIC_APP_URL` /
-`DEPLOY_DOMAIN` are derived from each other when only one is set. Nothing leaves the
-machine.
+Everything else in `.env.example` is already correct. `SESSION_SECRET` and
+`BACKUP_MASTER_KEY` are generated for you when they are still the placeholder, and
+`NEXT_PUBLIC_APP_URL` / `DEPLOY_DOMAIN` are derived from each other when only one is
+set. Nothing leaves the machine.
+
+Two values must survive a migration to another VPS untouched: `R2_BUCKET_NAME`, because
+the bucket name is part of every stored object's address, and `BACKUP_MASTER_KEY`, because
+it is one of the two keys that open an existing `.afrbak` archive. Copy the old `.env`
+rather than letting the installer generate fresh ones. If the key does get replaced, list
+the old value in `BACKUP_MASTER_KEY_PREVIOUS` — see [Backup &
+Restore](backup.md#backup_master_key).
 
 The bootstrap opens the file for you, but the sequence by hand is the same:
 
@@ -453,14 +460,21 @@ and embedding credentials in the admin UI.
 
 ### Backups
 
-Automatic, on every `aether update`: `.env` and the generated Nginx config, under
-`.deploy/backups/`. On demand: `aether backup`.
+Two different things share the word:
+
+**Server backups** — automatic, on every `aether update`: `.env` and the generated Nginx
+config, under `.deploy/backups/`. On demand: `aether backup`.
 
 Worth doing yourself:
 
 - keep an offline copy of `.env` — it holds every secret, and nothing else does;
 - use your PostgreSQL provider's built-in backups for the database;
 - R2 objects are already durable on Cloudflare's side.
+
+**Account backups** — a different feature, for users rather than operators: each account
+exports its own files and its own Second Brain from `/backup` as an encrypted `.afrbak`
+archive and restores it on any install. It does not back up the deployment, and the
+master's archive holds only the master's own data. See [Backup & Restore](backup.md).
 
 ### Why schema updates need no manual step
 

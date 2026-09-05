@@ -9,6 +9,13 @@ import { DEFAULT_FORCE_SETTINGS, type ForceSettings } from "./types";
  * inside force.worker.ts, which is what lets the physics move off the UI thread
  * without a second implementation. State is flat typed arrays so a frame costs no
  * allocation and positions can be transferred to another thread for free.
+ *
+ * The local graph adds a fourth force: given a hop depth per node it pulls each one
+ * towards a ring at `depth * orbitGap` instead of towards the origin. It is a *bias*,
+ * not a layout — the angle a node settles at still comes from repel and link, so
+ * clusters keep forming, they just form along a ring. The centre is held at the
+ * origin like a sun, which is what makes the arrangement read as a system rather
+ * than as a target pattern.
  */
 
 export const ALPHA_MIN = 0.001;
@@ -19,6 +26,17 @@ const VELOCITY_DECAY = 0.6;
 /** Golden angle — deterministic phyllotaxis seeding, so a reload lays out the same. */
 const PHI = Math.PI * (3 - Math.sqrt(5));
 const INITIAL_RADIUS = 26;
+
+/**
+ * Pull towards a node's own orbit. Firm enough that the rings the renderer draws are
+ * the rings the nodes actually sit on — a ring the layout only loosely obeys looks
+ * like a mistake — and once the radius is settled the repulsion it no longer fights
+ * goes tangential, which is what spreads a hop around its circle instead of bunching
+ * it at one bearing. Tuned by eye against a 32-node local graph.
+ */
+const ORBIT_PULL = 0.42;
+/** The centre is a sun: it holds the origin far harder than an ordinary node. */
+const SUN_GRIP = 4;
 
 /**
  * How a link's 0..1 strength maps to physics. A weight of 0 keeps 35% of the pull
@@ -63,6 +81,8 @@ export class ForceSimulation {
    */
   private linkStretch: Float32Array | null = null;
   private pinned = new Uint8Array(0);
+  /** Hops from the centre per local index, or null in the global graph. */
+  private depths: Int32Array | null = null;
   private grid = new FarFieldGrid();
 
   /**
@@ -71,19 +91,23 @@ export class ForceSimulation {
    * nudges the layout instead of throwing it away and re-exploding it.
    *
    * `weights` is one 0..1 strength per link, parallel to `links`. It is optional so
-   * an unweighted caller (and the tests) still get d3's plain behaviour.
+   * an unweighted caller (and the tests) still get d3's plain behaviour. `depths` is
+   * hops from the local centre per index — omit it (or pass null) and the layout
+   * centres on the origin the way it always has.
    */
   setGraph(
     count: number,
     links: Int32Array,
     seed?: Float32Array | null,
-    weights?: Float32Array | null
+    weights?: Float32Array | null,
+    depths?: Int32Array | null
   ): void {
     this.count = count;
     this.positions = new Float32Array(count * 2);
     this.velocities = new Float32Array(count * 2);
     this.pinned = new Uint8Array(count);
     this.links = links;
+    this.depths = depths && depths.length >= count ? depths : null;
 
     for (let i = 0; i < count; i += 1) {
       const seedX = seed ? seed[i * 2] : NaN;
@@ -166,11 +190,36 @@ export class ForceSimulation {
     const centerK = centerStrength(this.settings.center);
 
     this.grid.build(positions, count);
+    const { depths } = this;
+    const gap = this.settings.orbitGap;
+    const orbiting = depths !== null && gap > 0;
     for (let i = 0; i < count; i += 1) {
       if (pinned[i]) continue;
       this.grid.apply(i, positions, velocities, charge, alpha);
-      velocities[i * 2] += (0 - positions[i * 2]) * centerK * alpha;
-      velocities[i * 2 + 1] += (0 - positions[i * 2 + 1]) * centerK * alpha;
+      const depth = orbiting ? depths[i] : -1;
+      if (depth > 0) {
+        let x = positions[i * 2];
+        let y = positions[i * 2 + 1];
+        let length = Math.sqrt(x * x + y * y);
+        if (length < 1e-6) {
+          // Sitting exactly on the sun: nudge it onto a deterministic bearing so the
+          // radial pull has a direction to work along at all.
+          x = Math.cos(i * PHI);
+          y = Math.sin(i * PHI);
+          positions[i * 2] = x;
+          positions[i * 2 + 1] = y;
+          length = 1;
+        }
+        // Towards this node's own ring rather than towards the middle. Same shape as
+        // d3's forceRadial: a spring along the radius, leaving the bearing free.
+        const pull = ((depth * gap - length) / length) * ORBIT_PULL * alpha;
+        velocities[i * 2] += x * pull;
+        velocities[i * 2 + 1] += y * pull;
+      } else {
+        const grip = depth === 0 ? centerK * SUN_GRIP : centerK;
+        velocities[i * 2] += (0 - positions[i * 2]) * grip * alpha;
+        velocities[i * 2 + 1] += (0 - positions[i * 2 + 1]) * grip * alpha;
+      }
     }
 
     const { links, linkBias, linkBase, linkStretch } = this;

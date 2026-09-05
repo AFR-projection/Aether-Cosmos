@@ -134,6 +134,14 @@ export type ForceSettings = {
   repel: number;
   link: number;
   linkDistance: number;
+  /**
+   * Distance between orbits, in world units. The local graph lays its neighbours out
+   * on concentric rings — one per hop from the centre — so the depth slider becomes
+   * something you can see rather than a number you have to trust. 0 switches it off
+   * and returns the plain force layout. Ignored by the global graph, which has no
+   * centre to orbit.
+   */
+  orbitGap: number;
 };
 
 export const DEFAULT_FORCE_SETTINGS: ForceSettings = {
@@ -141,6 +149,7 @@ export const DEFAULT_FORCE_SETTINGS: ForceSettings = {
   repel: 0.62,
   link: 0.38,
   linkDistance: 140,
+  orbitGap: 170,
 };
 
 export type DisplaySettings = {
@@ -162,6 +171,19 @@ export type DisplaySettings = {
   /** Multipliers, 0.3..3. */
   nodeScale: number;
   linkScale: number;
+  /**
+   * How far an edge bows away from the straight line between its two nodes, 0..1.
+   * At 0 the graph is the flat diagram it used to be — which is the point of having
+   * the dial rather than a fixed curve. Above 0 two relationships between the same
+   * pair stop collapsing into one stroke.
+   */
+  edgeCurve: number;
+  /**
+   * The deep-field layer: starfield, nebula, planet shading, edge glow and the
+   * travelling light on a highlighted edge. One switch, because they are one idea —
+   * and switching it off returns the cheapest possible canvas for a slow machine.
+   */
+  cosmos: boolean;
   /** 0..1: zoom level below which labels fade out. 0 = always show, 1 = never show. */
   textFadeThreshold: number;
   /** Timelapse animation: reveal nodes in updatedAt order. */
@@ -179,6 +201,8 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   showContextEdges: true,
   nodeScale: 1,
   linkScale: 1,
+  edgeCurve: 0.35,
+  cosmos: true,
   textFadeThreshold: 0.6,
   animate: false,
 };

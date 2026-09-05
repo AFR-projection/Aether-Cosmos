@@ -33,6 +33,12 @@ export type GraphView = {
   visibleDegree: Int32Array;
   /** Summed visible edge weight per model node. Drives hub sizing. */
   visibleStrength: Float32Array;
+  /**
+   * Hops from the local graph's centre, by model node index: 0 is the centre itself.
+   * **Length 0 means there is no centre** — the global view has no hop structure, and
+   * that is what switches the orbital layout off rather than a separate flag.
+   */
+  depthOf: Int32Array;
   hiddenCount: number;
 };
 
@@ -46,6 +52,7 @@ export const EMPTY_VIEW: GraphView = {
   linkWeights: new Float32Array(0),
   visibleDegree: new Int32Array(0),
   visibleStrength: new Float32Array(0),
+  depthOf: new Int32Array(0),
   hiddenCount: 0,
 };
 
@@ -191,6 +198,9 @@ export function buildGraphView(model: GraphModel, options: ViewOptions): GraphVi
     linkWeights: slot === edgeCount ? linkWeights : linkWeights.subarray(0, slot),
     visibleDegree,
     visibleStrength,
+    // No centre, so no orbits: the global graph is organised by its clusters, and a
+    // ring imposed on it would hide exactly the structure it is there to show.
+    depthOf: new Int32Array(0),
     hiddenCount: total - count,
   };
 }
@@ -218,7 +228,11 @@ export function buildLocalView(
   const tierMask = edgeTierMask(model, display);
 
   const visited = new Uint8Array(model.nodes.length);
+  // Hops from the centre. Recorded during the walk that already computes them, so
+  // the orbital layout and the depth slider cannot disagree about what "2 hops" is.
+  const depthOf = new Int32Array(model.nodes.length).fill(-1);
   visited[focalModelIndex] = 1;
+  depthOf[focalModelIndex] = 0;
   let frontier = [focalModelIndex];
   for (let d = 0; d < depth && frontier.length > 0; d += 1) {
     const next: number[] = [];
@@ -233,6 +247,7 @@ export function buildLocalView(
         const nb = model.neighbours[k];
         if (visited[nb]) continue;
         visited[nb] = 1;
+        depthOf[nb] = d + 1;
         // A hidden node is a wall, not a stepping stone: hops are not counted
         // through something the user removed from the graph.
         if (anyHidden && hidden.has(model.nodes[nb].id)) continue;
@@ -331,6 +346,7 @@ export function buildLocalView(
     linkWeights: slot === edgeCount ? linkWeights : linkWeights.subarray(0, slot),
     visibleDegree,
     visibleStrength,
+    depthOf,
     // Counted against the BFS scope, not the whole brain: in local mode the
     // thousands of nodes outside the depth were never candidates, so calling them
     // "hidden by filters" would turn a useful number into noise.

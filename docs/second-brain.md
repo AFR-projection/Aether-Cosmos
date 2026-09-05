@@ -40,8 +40,9 @@ Second Brain is a knowledge management system designed for AI agents. Unlike eph
 - Filter memories by project
 
 ### AI Agent Integration
-- **MCP Server** — 23 tools for reading, writing, searching memories, and using the
-  2.0 intelligence layer (retrieval, context, health, consolidation)
+- **MCP Server** — 29 tools for reading, writing, searching memories, using the
+  2.0 intelligence layer (retrieval, context, health, consolidation), and batching
+  or inspecting the brain (analytics, semantic status, export)
 - **Scoped Access** — Per-brain API keys with 8 granular scopes: `brain.read`,
   `brain.search`, `brain.write`, `brain.link`, `brain.delete`, `brain.export`,
   `brain.import`, `brain.consolidate`

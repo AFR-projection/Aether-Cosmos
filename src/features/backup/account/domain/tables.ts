@@ -655,6 +655,21 @@ export const EXCLUDED_ACCOUNT_TABLES: readonly ExcludedAccountTable[] = [
     why: "A log. Its rows describe events on the source server — the actor, the address they came from, and the ids of rows this restore reissues — so every one of them would arrive pointing at nothing.",
   },
   {
+    name: "subtitle_settings",
+    domain: "files",
+    why: "A single instance-wide row holding two provider API keys sealed with this server's own secret. It is not the account's data, and the sealed values would be unreadable in another installation even if it were.",
+  },
+  {
+    name: "subtitle_tracks",
+    domain: "files",
+    why: "A file entry in an archive carries one payload — the file's own bytes — and a video may have several subtitle tracks, so there is nowhere in the current format to put them. This is a real loss and worth knowing before a restore rather than after: a regenerated track costs transcription time again, and any corrections made in the subtitle editor are not recoverable. Use the per-track \"Download .vtt\" button to keep a copy, which can be attached again after a restore.",
+  },
+  {
+    name: "subtitle_cues",
+    domain: "files",
+    why: "The lines of a subtitle track. They travel with their track or not at all, and their track does not travel — see `subtitle_tracks`.",
+  },
+  {
     name: "brain_embedding_settings",
     domain: "brain",
     why: "A single instance-wide row holding a provider API key sealed with this server's own secret. It is not the account's data, and the sealed value would be unreadable in another installation even if it were.",

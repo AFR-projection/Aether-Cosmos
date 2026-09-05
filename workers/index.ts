@@ -45,6 +45,10 @@ import { enrichBrain, enrichMemory, ENRICH_SWEEP_LIMIT } from "@brain/applicatio
 import { relateJobId, runRelateBrainJob, runRelateMemoryJob } from "@brain/application/commands/relate-jobs";
 import { runEmbedBrainJob, runEmbedMemoryJob } from "@brain/infrastructure/providers/embed-jobs";
 import { getEmbeddingProvider } from "@brain/infrastructure/providers/resolve";
+import {
+  runTranscribeMedia,
+  runTranslateSubtitles,
+} from "@files/application/subtitles/subtitle-jobs";
 import { Queue } from "bullmq";
 import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
@@ -976,9 +980,29 @@ async function runEmbedBrain(brainId: string, limit?: number): Promise<void> {
   }
 }
 
+/**
+ * What the subtitle jobs need from this process.
+ *
+ * Passed in rather than imported by `subtitle-jobs.ts` so that module stays free of
+ * `child_process` and of this file's R2 client — it is also reachable from the Next.js module
+ * graph through the routes, and a stray `execFile` import there is the kind of thing that only
+ * breaks at build time on the server.
+ *
+ * `runFfmpeg` must reject with the error `execFile` produces, `stderr` and all: the job reads it
+ * to tell "this video has no audio track" (a fact about the file, so stop) from a real failure
+ * (worth another encoder, then a retry).
+ */
+const subtitleDeps = {
+  downloadToFile: downloadR2ToFile,
+  runFfmpeg: async (args: string[]) => {
+    await execFileAsync("ffmpeg", args);
+  },
+  tmpPath,
+  log: (message: string) => console.log(message),
+};
+
 const worker = new Worker(
-  QUEUE_NAME,
-  async (job) => {
+  QUEUE_NAME,  async (job) => {
     const data = job.data as {
       type: string;
       fileId?: string;
@@ -998,6 +1022,8 @@ const worker = new Worker(
       brainId?: string;
       memoryId?: string;
       limit?: number;
+      trackId?: string;
+      targets?: string[];
     };
 
     switch (data.type) {
@@ -1075,6 +1101,24 @@ const worker = new Worker(
       case "embed_brain":
         if (data.brainId) {
           await runEmbedBrain(data.brainId, data.limit);
+        }
+        break;
+      case "transcribe_media":
+        // A missing trackId means a stale payload: without it there is no row to claim, and
+        // claiming is what stops a duplicate delivery spending money twice.
+        if (data.trackId) {
+          await runTranscribeMedia(
+            {
+              trackId: data.trackId,
+              targets: Array.isArray(data.targets) ? data.targets : [],
+            },
+            subtitleDeps
+          );
+        }
+        break;
+      case "translate_subtitles":
+        if (data.trackId) {
+          await runTranslateSubtitles({ trackId: data.trackId }, subtitleDeps);
         }
         break;
     }

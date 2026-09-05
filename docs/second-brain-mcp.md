@@ -102,10 +102,22 @@ credential's grants is a 404 — an agent cannot name a brain it was not given.
 | `brain_explain` | `brain.read` | why a memory was retrieved or scored the way it was |
 | `brain_health` | `brain.read` | brain health snapshot: completeness, quality, connections, recency |
 | `brain_consolidate` | `brain.consolidate` | non-destructive consolidation preview or apply (merge duplicate entities, reconcile naming conflicts) |
+| `brain_batch_search` | `brain.search` | up to 10 queries in one call, run in parallel and aggregated; deduplicates across result sets by default |
+| `brain_batch_context` | `brain.read` | up to 5 independent tasks, one context package each with its own token budget |
+| `brain_analytics` | `brain.read` | memory distribution by type, tag frequency, recency, confidence, retrieval effectiveness over `7d`/`30d`/`90d`/`all` |
+| `brain_suggest_queries` | `brain.read` | query suggestions drawn from recent activity and gaps in coverage |
+| `brain_semantic_status` | `brain.read` | whether embeddings are enabled, the active provider/model, how many memories are embedded, backfill progress |
+| `brain_export_memories` | `brain.read` | portable JSON or Markdown snapshot of selected memories; never includes embeddings |
 
-**23 tools.** The first 14 are the 1.0 surface; the rest are 2.0 intelligence-layer
-additions. See [Intelligence Layer (2.0)](second-brain-2.0.md) for what the 2.0
-tools do and their current limits.
+**29 tools.** The first 14 are the 1.0 surface, the next 9 are 2.0 intelligence-layer
+additions, and the last 6 are the batch/observability tools registered separately by
+`infrastructure/mcp/tools-advanced.ts`. See [Intelligence
+Layer (2.0)](second-brain-2.0.md) for what the 2.0 tools do and their current limits.
+
+Batching is a round-trip saving, not a different query: `brain_batch_search` is
+`brain_search` run concurrently, and each `brain_batch_context` task gets the same
+context engine a single `brain_context` call would. Both refuse the same way a single
+call would if the scope is missing.
 
 ### Recommended usage
 
@@ -117,6 +129,27 @@ contradicts the first, and `brain_update` with `archived: true` over
 
 The server sends these instructions to the client during `initialize`, so a
 compliant agent sees them without extra prompting.
+
+## Result caching
+
+`infrastructure/mcp/cache.ts` is an in-process read-through cache with a TTL. It
+exists because an agent typically calls the same context query many times in one
+session, and rebuilding a context package is the most expensive read in the brain.
+
+- **What is cached today:** `brain_context` only, for 60 seconds. Every other tool
+  reads the database on every call. `CACHE_TTL` also defines windows for search,
+  analytics and semantic status; those paths are not wired to the cache yet.
+- **Keys** are `operation:brainId:sha256(sorted params)`, so two brains never collide
+  and parameter order does not produce a second entry.
+- **Invalidation** is explicit: `brain_remember`, `brain_update`, `brain_delete` and
+  `brain_link_memory` drop every entry for that brain, so a write is visible to the
+  next read.
+- **Bounds:** 100 entries, 5 MB total, and 50 KB per entry — a result larger than that
+  is simply not cached. Eviction is by soonest expiry.
+- **Per process, not shared.** Behind several app workers each holds its own copy, so
+  a write handled by one worker does not clear another's. The 60-second TTL is the
+  upper bound on how long a stale context package can survive. Nothing in the cache is
+  persisted, and it holds no key material.
 
 ## Security
 

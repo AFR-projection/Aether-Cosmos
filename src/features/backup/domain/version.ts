@@ -15,7 +15,7 @@
  * preview does not refuse on a mismatch: the importer writes through the current
  * schema's columns either way, and a stale marker is information, not a verdict.
  */
-export const SCHEMA_VERSION = "0028";
+export const SCHEMA_VERSION = "0029";
 
 /**
  * The oldest app that can read this format.

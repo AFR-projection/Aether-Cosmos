@@ -116,7 +116,13 @@ export function useGraphEngine(input: {
       switch (message.type) {
         case "graph":
           simulation.setSettings(message.settings);
-          simulation.setGraph(message.count, message.links, message.seed, message.weights);
+          simulation.setGraph(
+            message.count,
+            message.links,
+            message.seed,
+            message.weights,
+            message.depths
+          );
           positions.current = simulation.positions;
           alpha.current = simulation.alpha;
           break;
@@ -169,12 +175,17 @@ export function useGraphEngine(input: {
       boundView.current = next;
       const cache = cacheRef.current;
       const seed = new Float32Array(next.count * 2);
+      // Hops are model-indexed in the view and local-indexed in the physics, so the
+      // translation happens here rather than in the simulation, which knows nothing
+      // about model indexes.
+      const hops = next.depthOf.length > 0 ? new Int32Array(next.count) : null;
       for (let i = 0; i < next.count; i += 1) {
         const modelIndex = next.nodesOf[i];
         const cached = modelIndex >= 0 && modelIndex * 2 + 1 < cache.length;
         // NaN means "no previous position"; the simulation seeds those on a spiral.
         seed[i * 2] = cached ? cache[modelIndex * 2] : NaN;
         seed[i * 2 + 1] = cached ? cache[modelIndex * 2 + 1] : NaN;
+        if (hops) hops[i] = next.depthOf[modelIndex] ?? -1;
       }
       generation.current += 1;
       positions.current = seed;
@@ -188,6 +199,7 @@ export function useGraphEngine(input: {
         // Strengths ride along with the links so weak relationships pull less and
         // rest farther out — the physics reads the same weights the renderer draws.
         weights: next.linkWeights.slice(),
+        depths: hops,
         seed,
         settings: settingsRef.current,
       });

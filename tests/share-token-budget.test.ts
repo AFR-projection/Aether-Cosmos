@@ -405,13 +405,41 @@ describe("GET /api/shared/[token]/preview — public egress is metered", () => {
     expect(billedBytes()).toEqual([4096]);
   });
 
-  it("bills only the bytes a range carries", async () => {
+  /**
+   * Billing is once per ACCESS, not once per chunk — changed deliberately, and this test is the
+   * record of why.
+   *
+   * `recordBandwidth` is a read-modify-write on a single `users` row. Charging it for every range
+   * request meant the concurrent chunks a video player opens all queued behind each other's row
+   * lock; the authenticated preview route was measured serving 206 responses in 21 seconds because
+   * of it. So a paid access now pays for the whole object up front, and the range requests that
+   * follow it are free.
+   *
+   * The direction of the inaccuracy matters: this bills MORE for a viewer who watches ten seconds
+   * and leaves, never less. A share link cannot become a cheaper channel than a download.
+   */
+  it("bills the whole object once for an access, not per range", async () => {
     store.share = shareRow({ maxAccessCount: null });
     store.file = fileRow({ sizeBytes: 4096 });
     const res = await previewRoute.GET(get({ range: "bytes=0-99" }), { params });
 
     expect(res.status).toBe(206);
-    expect(billedBytes()).toEqual([100]);
+    expect(billedBytes()).toEqual([4096]);
+  });
+
+  it("bills nothing for a continuation that resumes an access already paid for", async () => {
+    // Same exemption `claimShareAccess` uses: a recent paid access is being resumed, so neither the
+    // access budget nor the meter is charged again.
+    store.share = shareRow({
+      maxAccessCount: null,
+      accessCount: 1,
+      lastAccessedAt: new Date(),
+    });
+    store.file = fileRow({ sizeBytes: 4096 });
+    const res = await previewRoute.GET(get({ range: "bytes=100-199" }), { params });
+
+    expect(res.status).toBe(206);
+    expect(billedBytes()).toEqual([]);
   });
 
   it("stops the download when the owner is over quota, before opening the stream", async () => {

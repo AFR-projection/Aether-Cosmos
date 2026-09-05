@@ -76,7 +76,13 @@ self.onmessage = (event: MessageEvent<ForceRequest>) => {
     case "graph": {
       generation = message.generation;
       simulation.setSettings(message.settings);
-      simulation.setGraph(message.count, message.links, message.seed, message.weights);
+      simulation.setGraph(
+        message.count,
+        message.links,
+        message.seed,
+        message.weights,
+        message.depths
+      );
       // Fresh pool: buffers sized for the previous graph are useless now.
       spare.length = 0;
       const size = bytesNeeded();

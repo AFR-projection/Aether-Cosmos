@@ -10,6 +10,12 @@
 | **Findings** | 29 (1 Critical, 10 High, 14 Medium, 2 Low, 2 Informational) — **all remediated in-tree, each with regression tests** |
 | **Verification** | `tsc --noEmit` clean · `eslint` 0 errors · `vitest` 2056 passed / 35 skipped (DB-dependent) / 0 failed |
 
+> **A point-in-time record.** Every number here — findings, test counts, line
+> references — describes the tree as it stood on the assessment date. It is kept
+> unedited on purpose: it is the evidence that those 29 findings were found and closed,
+> not a description of the code today. Current counts live in
+> [the documentation index](README.md#project-status).
+
 ---
 
 ## Executive summary

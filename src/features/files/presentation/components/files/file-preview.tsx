@@ -41,6 +41,7 @@ const SvgViewer = dynamic(() => import("@files/presentation/components/media-vie
 const ArchiveViewer = dynamic(() => import("@files/presentation/components/media-viewers/archive-viewer").then((m) => m.ArchiveViewer), { ssr: false, loading: () => <PreviewSkeleton labelKey="files.preview.loading.archive" /> });
 const ImageEditPanel = dynamic(() => import("@files/presentation/components/editors/image-edit-panel"), { ssr: false, loading: () => <PreviewSkeleton labelKey="files.preview.loading.editor" /> });
 const MediaTrimPanel = dynamic(() => import("@files/presentation/components/editors/media-trim-panel"), { ssr: false, loading: () => <PreviewSkeleton labelKey="files.preview.loading.trimmer" /> });
+const SubtitleEditorPanel = dynamic(() => import("@files/presentation/components/editors/subtitle-editor-panel"), { ssr: false, loading: () => <PreviewSkeleton labelKey="files.preview.loading.editor" /> });
 
 interface FilePreviewProps {
   file: FileRecord;
@@ -109,6 +110,15 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
   const [unsavedPrompt, setUnsavedPrompt] = useState<"close" | "editor" | null>(null);
   /** The media editor is showing instead of the plain viewer. */
   const [editing, setEditing] = useState(false);
+  /**
+   * The subtitle track being corrected, or `null`.
+   *
+   * Separate state rather than a third `MediaEditorKind`, and the reason is structural: a video can
+   * legitimately want the trim editor AND the subtitle editor, so one variable cannot hold both.
+   * It joins the same `editorDirty` machinery, so closing the preview with unsaved cue edits asks
+   * the same question closing with an unsaved trim does.
+   */
+  const [subtitleTrackId, setSubtitleTrackId] = useState<string | null>(null);
   /**
    * Bumped after an edit that rewrote the object.
    *
@@ -212,7 +222,23 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
     setUnsavedPrompt(null);
     setEditorDirty(false);
     setEditing(false);
+    setSubtitleTrackId(null);
   }, []);
+
+  /**
+   * Where this video's subtitles come from, or `null`.
+   *
+   * `null` for everything that cannot carry a track — the CC button then does not exist rather than
+   * existing and refusing. The eligibility rules themselves live in `eligibility.ts` and are
+   * re-checked by the route; this is only about whether to hand the player a source at all.
+   */
+  const subtitleSource = useMemo(
+    () =>
+      previewKind === "video" && !isEncrypted && !file.isNote
+        ? ({ kind: "file", fileId: file.id, canEdit } as const)
+        : null,
+    [previewKind, isEncrypted, file.isNote, file.id, canEdit]
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -397,8 +423,28 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
       );
     }
 
-    if (inEditor && streamUrl && editKind === "trim") {
+    // The subtitle editor takes the whole stage for the same reason the others do, and is checked
+    // before them: a video can have both available, and this is the one the user just asked for.
+    if (subtitleTrackId && streamUrl) {
       return (
+        <SubtitleEditorPanel
+          key={`${file.id}-${subtitleTrackId}`}
+          src={streamUrl}
+          fileId={file.id}
+          trackId={subtitleTrackId}
+          vttUrl={`/api/files/${file.id}/subtitles/${subtitleTrackId}`}
+          onDirtyChange={setEditorDirty}
+          onSaved={() => {
+            // The track's bytes changed behind a URL the `<track>` element has already parsed, so
+            // the viewer has to be rebuilt for the correction to show. `reloadToken` keys it.
+            setReloadToken((token) => token + 1);
+            onSaved?.();
+          }}
+        />
+      );
+    }
+
+    if (inEditor && streamUrl && editKind === "trim") {      return (
         <MediaTrimPanel
           key={file.id}
           src={streamUrl}
@@ -421,7 +467,17 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
       case "svg":
         return streamUrl ? <SvgViewer src={streamUrl} fileName={file.name} /> : null;
       case "video":
-        return streamUrl ? <VideoViewer src={streamUrl} fileName={file.name} /> : null;
+        return streamUrl ? (
+          <VideoViewer
+            /* Keyed so a saved cue edit rebuilds the `<track>` elements rather than replaying the
+               text the browser already parsed. */
+            key={`${file.id}-${reloadToken}`}
+            src={streamUrl}
+            fileName={file.name}
+            subtitleSource={subtitleSource}
+            onEditSubtitles={canEdit ? setSubtitleTrackId : undefined}
+          />
+        ) : null;
       case "audio":
         return streamUrl ? <AudioViewer src={streamUrl} fileName={file.name} /> : null;
       case "text":

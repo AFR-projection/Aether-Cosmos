@@ -480,6 +480,70 @@ body {
 .media-range:focus-visible {
   outline: none;
 }
+/* ── Video scrub bar ────────────────────────────────────────────────────────
+   A thin line at rest that thickens under the pointer, which is what every video
+   player people already know does: the bar should not compete with the picture
+   until somebody reaches for it. The thumb is hidden at rest for the same reason
+   and appears with the thickening, so the resting state is a single hairline.
+
+   Keyboard users never get the "at rest" version: :focus-visible opts into the
+   same expanded geometry as hover, or the thumb they are moving would be invisible. */
+.media-scrub {
+  height: 1.5rem;
+  --track-h: 0.1875rem;
+  --thumb: 0rem;
+}
+.media-scrub:hover,
+.media-scrub:focus-visible,
+.media-scrub:active {
+  --track-h: 0.3125rem;
+  --thumb: 0.8125rem;
+}
+.media-scrub::-webkit-slider-runnable-track {
+  height: var(--track-h);
+  transition: height 120ms ease;
+}
+.media-scrub::-moz-range-track {
+  height: var(--track-h);
+  transition: height 120ms ease;
+}
+.media-scrub::-webkit-slider-thumb {
+  height: var(--thumb);
+  width: var(--thumb);
+  border: none;
+  background: #ffffff;
+  /* Centre the thumb on the track whatever height either one currently is. */
+  margin-top: calc((var(--track-h) - var(--thumb)) / 2);
+  transition: height 120ms ease, width 120ms ease, margin-top 120ms ease;
+}
+.media-scrub::-moz-range-thumb {
+  height: var(--thumb);
+  width: var(--thumb);
+  border: none;
+  background: #ffffff;
+  transition: height 120ms ease, width 120ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-scrub::-webkit-slider-runnable-track,
+  .media-scrub::-webkit-slider-thumb,
+  .media-scrub::-moz-range-track,
+  .media-scrub::-moz-range-thumb {
+    transition: none;
+  }
+}
+/* A pointer that cannot hover (touch) never gets the thin state: there is no way
+   to reveal the thumb, so it is always there. */
+@media (hover: none) {
+  .media-scrub {
+    --track-h: 0.3125rem;
+    --thumb: 0.875rem;
+  }
+}
+/* The cursor is hidden with the controls during playback, so the picture is the
+   only thing on screen. Any pointer movement puts both back. */
+.video-stage[data-idle="true"] {
+  cursor: none;
+}
 .media-range:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 45%, transparent);
 }

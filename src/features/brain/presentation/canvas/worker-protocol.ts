@@ -17,6 +17,12 @@ export type ForceRequest =
       links: Int32Array;
       /** One 0..1 strength per link, parallel to `links`. Null when unweighted. */
       weights: Float32Array | null;
+      /**
+       * Hops from the local graph's centre per node index, or null in the global
+       * graph. Travels with the graph rather than with the settings because it is a
+       * property of *this* subgraph; the ring spacing that uses it is a setting.
+       */
+      depths: Int32Array | null;
       seed: Float32Array | null;
       settings: ForceSettings;
     }

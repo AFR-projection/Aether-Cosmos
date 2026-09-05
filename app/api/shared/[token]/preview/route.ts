@@ -83,14 +83,21 @@ export async function GET(
     // Public egress is still the owner's egress. Every other byte-serving route
     // meters it; this one did not, so a share link was an unmetered channel around
     // the owner's bandwidth quota.
-    const bytesToBill = parsedRange ? rangeLength(parsedRange) : totalSize;
-    try {
-      await recordBandwidth(file.userId, bytesToBill);
-    } catch (error) {
-      if (error instanceof BandwidthQuotaError) {
-        return apiError("BANDWIDTH_QUOTA_EXCEEDED", 429);
+    //
+    // Billed once per *access* rather than once per chunk, matching the authenticated
+    // preview route. `recordBandwidth` is a read-modify-write on one `users` row, so
+    // charging it per range request made concurrent chunks of the same video queue up
+    // behind each other's row lock — measured at seconds per response. A free
+    // continuation is free here too: it resumes an access that already paid.
+    if (!freeContinuation) {
+      try {
+        await recordBandwidth(file.userId, totalSize);
+      } catch (error) {
+        if (error instanceof BandwidthQuotaError) {
+          return apiError("BANDWIDTH_QUOTA_EXCEEDED", 429);
+        }
+        throw error;
       }
-      throw error;
     }
 
     // Stream straight from R2 to the browser — never buffered here.

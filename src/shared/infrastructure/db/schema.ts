@@ -223,6 +223,18 @@ export const users = pgTable(
     bandwidthQuotaBytes: bigint("bandwidth_quota_bytes", { mode: "number" }).notNull().default(0),
     bandwidthUsedBytes: bigint("bandwidth_used_bytes", { mode: "number" }).notNull().default(0),
     bandwidthPeriodStart: timestamp("bandwidth_period_start", { withTimezone: true }),
+    /**
+     * Transcription allowance, on the same rolling 30-day window as the bandwidth columns
+     * above and read by the same shape of code (`@/shared/lib/billing/subtitle-minutes.ts`).
+     *
+     * Seconds rather than bytes because that is what a transcription provider bills, and
+     * `0` means unlimited — matching `bandwidth_quota_bytes`, so an operator reading the
+     * users table does not have to remember two conventions. This is the one quota in the
+     * app that guards somebody else's invoice rather than this server's disk.
+     */
+    subtitleQuotaSeconds: integer("subtitle_quota_seconds").notNull().default(36000),
+    subtitleUsedSeconds: integer("subtitle_used_seconds").notNull().default(0),
+    subtitlePeriodStart: timestamp("subtitle_period_start", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -757,6 +769,152 @@ export const fileVersions = pgTable(
   (table) => [
     index("file_versions_file_idx").on(table.fileId),
     uniqueIndex("file_versions_unique").on(table.fileId, table.version),
+  ]
+);
+
+/* ─────────────────────────────  Subtitles  ───────────────────────────── */
+
+/** How a track came to exist. Also decides what may be done to it. */
+export const subtitleOriginEnum = pgEnum("subtitle_origin", [
+  /** Speech recognition over the video's own audio. The only kind that detects a language. */
+  "asr",
+  /** A machine translation of another track in this same file. */
+  "translated",
+  /** A `.srt`/`.vtt` the user attached. Ready the moment it is parsed. */
+  "uploaded",
+]);
+
+export const subtitleStatusEnum = pgEnum("subtitle_status", [
+  "queued",
+  "processing",
+  "ready",
+  "failed",
+]);
+
+/**
+ * Global (single-row) configuration for the subtitle providers.
+ *
+ * One row, `id = "default"`, mirroring {@link brainEmbeddingSettings} — and mirroring it
+ * deliberately, because the security story is the same one: two API keys with real cost
+ * attached, stored ENCRYPTED at rest (AES-256-GCM via @/shared/infrastructure/email/crypto.ts)
+ * and NEVER returned to any client. The GET surface exposes only whether a key exists. Writes
+ * are gated behind master auth.
+ *
+ * Two providers rather than one because the two jobs are different services: transcription is
+ * an OpenAI-compatible `/audio/transcriptions` endpoint (Groq, OpenAI), and translation is a
+ * chat-completions endpoint (OpenRouter, or the same vendor). They are kept as separate base
+ * URL / model / key triples so an operator can point them at different vendors — which is the
+ * normal case, since the cheapest transcription and the best translation are rarely the same
+ * company.
+ *
+ * Deliberately NOT reusing the brain's OpenRouter key even where it would work: turning off
+ * semantic search should not silently disable subtitle translation.
+ */
+export const subtitleSettings = pgTable("subtitle_settings", {
+  id: text("id").primaryKey().default("default"),
+  /** Label only, for the admin card. The base URL is what actually decides the vendor. */
+  provider: text("provider").notNull().default("groq"),
+  baseUrl: text("base_url").notNull().default("https://api.groq.com/openai/v1"),
+  model: text("model").notNull().default("whisper-large-v3-turbo"),
+  /** AES-256-GCM ciphertext. NULL when unset. Never leaves the server. */
+  apiKeyEncrypted: text("api_key_encrypted"),
+  translateBaseUrl: text("translate_base_url").notNull().default("https://openrouter.ai/api/v1"),
+  translateModel: text("translate_model").notNull().default("google/gemini-2.5-flash"),
+  /** AES-256-GCM ciphertext. May hold the same key as above when one vendor serves both. */
+  translateApiKeyEncrypted: text("translate_api_key_encrypted"),
+  /** Master switch. When false, nothing is offered and nothing is queued, key or no key. */
+  enabled: boolean("enabled").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One subtitle track of one file.
+ *
+ * There is no `label` column, and that is a decision rather than an omission: a label would
+ * freeze one language's wording into the database, and this app translates at render
+ * (`previewKindKey` and friends). A track carries its BCP-47 `language` and its `origin`, and
+ * the UI composes "Indonesia (terjemahan)" in whatever language the reader chose.
+ *
+ * `progress` exists so a two-hour film reports something better than a spinner: the worker
+ * advances it per audio chunk and per translation batch, and the CC menu reads it.
+ */
+export const subtitleTracks = pgTable(
+  "subtitle_tracks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    /** BCP-47, exactly as `languages.ts` spells it. Written into `<track srclang>`. */
+    language: text("language").notNull(),
+    origin: subtitleOriginEnum("origin").notNull(),
+    status: subtitleStatusEnum("status").notNull().default("queued"),
+    /** The `asr` track this was translated from. NULL for every other origin. */
+    translatedFromId: uuid("translated_from_id").references(
+      (): AnyPgColumn => subtitleTracks.id,
+      { onDelete: "set null" }
+    ),
+    /** 0–100. Only meaningful while `status` is `queued` or `processing`. */
+    progress: integer("progress").notNull().default(0),
+    cueCount: integer("cue_count").notNull().default(0),
+    /** Audio length this track was billed for, so a retry does not bill twice. */
+    durationSeconds: integer("duration_seconds").notNull().default(0),
+    /** What produced it, kept for audit and for "this was made by the old model". */
+    provider: text("provider"),
+    model: text("model"),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    /**
+     * One track per language per origin. This is what makes regeneration idempotent: asking
+     * again for Indonesian replaces the cues of the row that already exists instead of leaving
+     * two "Indonesia" entries in the menu, one of them stale.
+     *
+     * `origin` is part of the key on purpose — a Japanese film may legitimately have both an
+     * `asr` Japanese track and an `uploaded` Japanese one somebody attached.
+     */
+    uniqueIndex("subtitle_tracks_unique").on(table.fileId, table.language, table.origin),
+    /**
+     * No separate index on `file_id` alone: it is the leading column of the unique above, which
+     * Postgres already uses for "every track of this file" — the read this table exists for. A
+     * prefix index would be dead weight the audit script flags.
+     */
+    index("subtitle_tracks_status_idx").on(table.status),
+    index("subtitle_tracks_created_by_idx").on(table.createdBy),
+    index("subtitle_tracks_translated_from_idx").on(table.translatedFromId),
+  ]
+);
+
+/**
+ * One line of one track.
+ *
+ * A table rather than a JSONB array on the track, for the editor's sake: correcting one line
+ * must not rewrite a 300 KB document, and a track's cues are read in order with a bounded query
+ * when the VTT is served. It also leaves room to re-translate a range of lines later without
+ * touching the rest.
+ */
+export const subtitleCues = pgTable(
+  "subtitle_cues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    trackId: uuid("track_id")
+      .notNull()
+      .references(() => subtitleTracks.id, { onDelete: "cascade" }),
+    /** Position in the track, zero-based and contiguous. Never the source file's own numbering. */
+    idx: integer("idx").notNull(),
+    startMs: integer("start_ms").notNull(),
+    endMs: integer("end_ms").notNull(),
+    text: text("text").notNull(),
+  },
+  (table) => [
+    uniqueIndex("subtitle_cues_unique").on(table.trackId, table.idx),
+    index("subtitle_cues_track_time_idx").on(table.trackId, table.startMs),
   ]
 );
 

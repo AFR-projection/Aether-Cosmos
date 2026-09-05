@@ -22,6 +22,9 @@ and Redis + BullMQ.
 - **Second Brain** — Persistent, user-owned memory for AI agents: versioned
   memories, an interactive knowledge graph, hybrid retrieval, and an MCP server
   agents connect to over HTTP.
+- **Backup** — Each account exports its own files and its own Second Brain as a
+  single encrypted `.afrbak` archive, and restores it into any Aether Cosmos
+  install with the nine-word recovery phrase shown at download.
 - **Platform APIs** — API keys with scopes, webhooks, OAuth clients, an OpenAPI
   spec served from the app itself.
 
@@ -63,7 +66,7 @@ Started](docs/getting-started.md).
 npm run dev        # dev server
 npm run build      # production build
 npm run lint       # eslint
-npm test           # vitest (2502 tests)
+npm test           # vitest (3422 tests)
 npm run worker     # background worker (requires Redis)
 npm run db:studio  # Drizzle Studio
 ```
@@ -94,8 +97,8 @@ inspect-before-running form of that one-liner, and recovery.
 ## Documentation
 
 All documentation lives in [`docs/`](docs/README.md) — that directory's README is
-the only index. `CLAUDE.md` and `AGENTS.md` in this directory are instructions for
-AI coding assistants, not user documentation.
+the only index. `AGENTS.md` in this directory is instructions for AI coding
+assistants, not user documentation.
 
 ## License
 

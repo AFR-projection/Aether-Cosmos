@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { Readable } from "node:stream";
 import {
   isContinuationRange,
   parseRangeHeader,
   rangeLength,
+  toReadableStream,
 } from "@files/infrastructure/storage/http-range";
 
 /**
@@ -99,5 +101,64 @@ describe("isContinuationRange", () => {
   it("is false when there is no usable range at all", () => {
     expect(isContinuationRange(null)).toBe(false);
     expect(isContinuationRange(parseRangeHeader("bytes=99999-", SIZE))).toBe(false);
+  });
+});
+
+/**
+ * Streaming a range without pulling it into memory.
+ *
+ * The first version of {@link toReadableStream} attached a `data` listener and enqueued every chunk
+ * the moment it arrived, with nothing consulting the consumer. That is not a stream, it is a copy:
+ * a `bytes=0-` request for a 123 MB video pulled all 123 MB into the controller's queue before the
+ * browser had read the second chunk. On a 2 GB box running the app, the worker, nginx and Redis,
+ * that is enough GC pressure to stall the event loop — and a stalled event loop delays every OTHER
+ * request too, which is how one large video made the whole app feel broken.
+ *
+ * So the test that matters is not "does it deliver the bytes" but "does it stop when nobody is
+ * reading". A stream honouring backpressure leaves the source paused until the consumer pulls.
+ */
+describe("toReadableStream backpressure", () => {
+  /** A Node stream that records whether it was allowed to keep pushing. */
+  function countingSource(chunks: number) {
+    let produced = 0;
+    const stream = new Readable({
+      // 1 byte, so the Node-side buffer cannot mask a missing pull.
+      highWaterMark: 1,
+      read() {
+        if (produced >= chunks) {
+          this.push(null);
+          return;
+        }
+        produced += 1;
+        this.push(new Uint8Array(16));
+      },
+    });
+    return { stream, produced: () => produced };
+  }
+
+  it("does not drain the source before the consumer reads", async () => {
+    const { stream, produced } = countingSource(500);
+    const web = toReadableStream(stream);
+    // Give the event loop room to run any eager listeners the implementation might have attached.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(produced()).toBeLessThan(50);
+    await web.cancel();
+  });
+
+  it("still delivers every byte when the consumer does read", async () => {
+    const { stream } = countingSource(10);
+    const reader = toReadableStream(stream).getReader();
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+    }
+    expect(total).toBe(10 * 16);
+  });
+
+  it("passes a web stream through untouched", () => {
+    const web = new ReadableStream();
+    expect(toReadableStream(web)).toBe(web);
   });
 });

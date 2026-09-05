@@ -17,6 +17,7 @@ import {
 import { Button } from "@/ui/primitives/button";
 import { Input } from "@/ui/primitives/input";
 import { MAX_GROUPS, createGroupRule, type ResolvedGroups } from "@brain/presentation/canvas/groups";
+import { FALLBACK_THEME } from "@brain/presentation/canvas/theme";
 import {
   DEFAULT_DISPLAY_SETTINGS,
   DEFAULT_FORCE_SETTINGS,
@@ -45,6 +46,18 @@ import { GraphSlider } from "./graph-slider";
 const FILTER_PLACEHOLDER = "type:person -tag:draft";
 const GROUP_PLACEHOLDER = "type:person";
 
+/**
+ * The legend, kept in step with what the canvas actually strokes: colours and dashes
+ * come from the renderer's own theme and edge-style tables rather than being typed
+ * out again here. Explicit links follow `--accent` in both panel and canvas, which is
+ * why that one swatch is a variable and not a value.
+ */
+const TIER_SWATCH: Record<"explicit" | "semantic" | "context", Swatch> = {
+  explicit: { color: "var(--accent)", style: "solid" },
+  semantic: { color: FALLBACK_THEME.edgeTiers.semantic, style: "dashed" },
+  context: { color: FALLBACK_THEME.edgeTiers.context, style: "dotted" },
+};
+
 function Section({
   title,
   icon: Icon,
@@ -70,14 +83,23 @@ function Section({
   );
 }
 
+/**
+ * A tier's swatch: the colour *and* the dash the canvas draws it with, so the panel
+ * is a legend and not just a filter. Shape as well as colour, because three indigo
+ * cousins would be three identical dots to anyone who cannot separate the hues.
+ */
+type Swatch = { color: string; style: "solid" | "dashed" | "dotted" };
+
 function Toggle({
   label,
   pressed,
   onToggle,
+  swatch,
 }: {
   label: string;
   pressed: boolean;
   onToggle: () => void;
+  swatch?: Swatch;
 }) {
   return (
     <button
@@ -85,12 +107,23 @@ function Toggle({
       aria-pressed={pressed}
       onClick={onToggle}
       className={cn(
-        "rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
+        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
         pressed
           ? "border-accent/40 bg-accent/10 text-accent-ink"
           : "border-border/60 bg-surface text-muted-foreground hover:border-accent/30 hover:text-foreground"
       )}
     >
+      {swatch ? (
+        <span
+          aria-hidden="true"
+          className={cn("h-0 w-3 shrink-0 transition-opacity", pressed ? "opacity-100" : "opacity-45")}
+          style={{
+            borderTopWidth: 2,
+            borderTopStyle: swatch.style,
+            borderTopColor: swatch.color,
+          }}
+        />
+      ) : null}
       {label}
     </button>
   );
@@ -256,6 +289,20 @@ export function GraphControls({
               format={(value) => t("brain.graph.hops", { count: Math.round(value) })}
               onChange={(depth) => onLocalDepthChange(Math.round(depth))}
             />
+            <GraphSlider
+              id="graph-orbit-gap"
+              label={t("brain.graph.orbitGap")}
+              value={force.orbitGap}
+              min={0}
+              max={320}
+              step={10}
+              format={(value) =>
+                value <= 0
+                  ? t("brain.graph.orbitOff")
+                  : t("brain.graph.pixels", { value: formatNumber(Math.round(value)) })
+              }
+              onChange={(orbitGap) => setForce({ orbitGap })}
+            />
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               {t("brain.graph.recentreHint")}
             </p>
@@ -324,16 +371,19 @@ export function GraphControls({
             label={t("brain.graph.tierLinks", { count: formatNumber(visibleByTier.explicit) })}
             pressed={display.showExplicitEdges}
             onToggle={() => setDisplay({ showExplicitEdges: !display.showExplicitEdges })}
+            swatch={TIER_SWATCH.explicit}
           />
           <Toggle
             label={t("brain.graph.tierSemantic", { count: formatNumber(visibleByTier.semantic) })}
             pressed={display.showSemanticEdges}
             onToggle={() => setDisplay({ showSemanticEdges: !display.showSemanticEdges })}
+            swatch={TIER_SWATCH.semantic}
           />
           <Toggle
             label={t("brain.graph.tierContext", { count: formatNumber(visibleByTier.context) })}
             pressed={display.showContextEdges}
             onToggle={() => setDisplay({ showContextEdges: !display.showContextEdges })}
+            swatch={TIER_SWATCH.context}
           />
         </div>
         <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
@@ -540,6 +590,11 @@ export function GraphControls({
             onToggle={() => setDisplay({ showArrows: !display.showArrows })}
           />
           <Toggle
+            label={t("brain.graph.cosmos")}
+            pressed={display.cosmos}
+            onToggle={() => setDisplay({ cosmos: !display.cosmos })}
+          />
+          <Toggle
             label={t("brain.graph.animate")}
             pressed={display.animate}
             onToggle={() => setDisplay({ animate: !display.animate })}
@@ -589,6 +644,19 @@ export function GraphControls({
             step={0.05}
             format={(value) => t("brain.graph.multiplier", { value: decimal(value) })}
             onChange={(linkScale) => setDisplay({ linkScale })}
+          />
+          {/* Zero is worth naming: it is the old straight-line graph, not "0.00". */}
+          <GraphSlider
+            id="graph-edge-curve"
+            label={t("brain.graph.edgeCurve")}
+            value={display.edgeCurve}
+            min={0}
+            max={1}
+            step={0.05}
+            format={(value) =>
+              value <= 0 ? t("brain.graph.curveStraight") : decimal(value)
+            }
+            onChange={(edgeCurve) => setDisplay({ edgeCurve })}
           />
         </div>
       </Section>

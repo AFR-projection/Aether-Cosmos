@@ -8,7 +8,7 @@ import type {
   Ref,
 } from "react";
 import { Button } from "@/ui/primitives/button";
-import { FALLBACK_THEME } from "@brain/presentation/canvas/renderer";
+import { FALLBACK_THEME } from "@brain/presentation/canvas/theme";
 import { useT } from "@/shared/lib/i18n";
 
 /**
@@ -89,10 +89,11 @@ export function GraphCanvas({
   };
 
   return (
-    /* The ground colour is the renderer's, not a token: the graph is painted dark
-       in both themes (see FALLBACK_THEME) so grey edges stay readable. Taking it
-       from the same constant keeps the wrapper and the canvas from drifting apart
-       during the frame before the first paint. */
+    /* The ground colour is the renderer's, not a token: the graph is painted dark in
+       both themes (see FALLBACK_THEME) so a starfield and thin edges stay readable.
+       This is the outer tone of the canvas's own deep-field wash, taken from the same
+       constant so the wrapper and the canvas cannot drift apart during the frame
+       before the first paint. */
     <div
       className="relative h-full w-full overflow-hidden"
       style={{ background: FALLBACK_THEME.background }}

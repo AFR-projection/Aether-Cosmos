@@ -79,6 +79,26 @@ function toastForEvent(
         description: event.fileName,
         tone: "info",
       };
+    /**
+     * A subtitle track finished, or gave up.
+     *
+     * Worth a toast rather than only a menu update: making one takes minutes, and a viewer who
+     * asked for it has almost certainly moved on to another tab. The language is a BCP-47 tag,
+     * which is deliberately NOT resolved to a name here — this switch has no translator, and the
+     * tag is what the CC menu will name properly once it is opened.
+     */
+    case "subtitle_ready":
+      return {
+        title: "Subtitles ready",
+        description: event.language,
+        tone: "success",
+      };
+    case "subtitle_failed":
+      return {
+        title: "Subtitles didn't finish",
+        description: event.language,
+        tone: "warning",
+      };
     case "session_revoked":
       if (shouldForceLogout(event)) return null; // redirect handles UX
       return {

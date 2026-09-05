@@ -92,7 +92,7 @@ describe("the descriptor and the schema agree, column for column", () => {
   it("found the schema at all", () => {
     // Guards every test below: a refactor that stopped finding tables would make them
     // pass by comparing nothing to nothing.
-    expect(schemaTables.size).toBe(49);
+    expect(schemaTables.size).toBe(52);
     expect(CARRIED).toHaveLength(16);
   });
 
@@ -475,9 +475,10 @@ describe("carried plus excluded is every table of both domains", () => {
   it("carries the counts the design states", () => {
     expect(accountTables("files")).toHaveLength(3);
     expect(accountTables("brain")).toHaveLength(13);
-    expect(excludedAccountTables("files")).toHaveLength(5);
+    // 5 + the three `subtitle_*` tables, which the archive format has no room for.
+    expect(excludedAccountTables("files")).toHaveLength(8);
     expect(excludedAccountTables("brain")).toHaveLength(2);
-    expect(EXCLUDED_ACCOUNT_TABLES).toHaveLength(7);
+    expect(EXCLUDED_ACCOUNT_TABLES).toHaveLength(10);
   });
 
   it("gives every omission a reason a user could read", () => {

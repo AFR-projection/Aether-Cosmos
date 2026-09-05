@@ -1,5 +1,13 @@
 export type RealtimeEvent =
   | { type: "upload_complete"; fileId: string; name: string; sizeBytes?: number }
+  /**
+   * A subtitle track finished, or did not.
+   *
+   * `language` is a BCP-47 tag rather than a label: the toast names the language in the reader's
+   * own interface language, which the worker cannot know.
+   */
+  | { type: "subtitle_ready"; fileId: string; trackId: string; language: string }
+  | { type: "subtitle_failed"; fileId: string; trackId: string; language: string }
   | {
       type: "share_access";
       shareId: string;

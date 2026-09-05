@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import {
+  Captions,
   LayoutDashboard,
   Mail,
   ScrollText,
@@ -19,6 +20,7 @@ const tabs: { href: string; labelKey: TranslationKey; icon: typeof Users }[] = [
   { href: "/admin/users", labelKey: "admin.nav.users", icon: Users },
   { href: "/admin/shares", labelKey: "admin.nav.shares", icon: Share2 },
   { href: "/admin/email", labelKey: "admin.nav.email", icon: Mail },
+  { href: "/admin/subtitles", labelKey: "admin.nav.subtitles", icon: Captions },
   { href: "/admin/logs", labelKey: "admin.nav.logs", icon: ScrollText },
   { href: "/admin/settings", labelKey: "admin.nav.settings", icon: Sliders },
 ];

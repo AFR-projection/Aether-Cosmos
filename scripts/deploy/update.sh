@@ -78,6 +78,20 @@ main() {
   fi
 
   step "Checking .env, database, R2, DNS, ports"
+  # A release can introduce a variable that an existing .env has never held —
+  # BACKUP_MASTER_KEY was exactly that. install.sh fills those in before validating, and
+  # without the same two calls here `aether update` would leave the new key unset, /backup
+  # would answer 503, and nothing in validate.sh would name the missing variable. Safe on
+  # a live deployment because autofill_env never replaces a value that is already set, and
+  # .env was copied into .deploy/backups in step 1 before anything here could touch it.
+  #
+  # One caveat: bash sourced common.sh before the pull above, so the functions running here
+  # are the pre-update ones. A variable introduced by *this* pull is filled on the next
+  # run, which is why `git pull && ./install.sh` stays the documented path for a release
+  # that adds a secret.
+  normalize_env_file
+  autofill_env
+  load_env
   bash "$SCRIPT_DIR/validate.sh"
 
   step "Rebuilding containers"

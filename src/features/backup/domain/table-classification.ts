@@ -50,6 +50,11 @@ export const CORE_TABLES = [
  * not with Brain. Worth saying out loud, because "notes" sounds like a Second
  * Brain concern and is not one here. This is also the only domain with R2 blobs
  * behind it.
+ *
+ * The three `subtitle_*` tables are here for the same kind of reason: a track belongs to a
+ * file and cannot exist without one, so whatever the backup story is, it is the Files one.
+ * None of the three travels — {@link EXCLUDED_ACCOUNT_TABLES} in
+ * `../account/domain/tables.ts` says why for each.
  */
 export const FILES_TABLES = [
   "folders",
@@ -60,6 +65,9 @@ export const FILES_TABLES = [
   "folder_members",
   "folder_invitations",
   "change_history",
+  "subtitle_settings",
+  "subtitle_tracks",
+  "subtitle_cues",
 ] as const;
 
 /** `memories.embedding` rides along: delivery is a download with no size ceiling. */

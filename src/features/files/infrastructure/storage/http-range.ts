@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 /**
  * HTTP `Range` parsing for the byte-serving routes.
  *
@@ -66,7 +67,20 @@ export function isContinuationRange(range: ParsedRange | null): boolean {
   return range !== null && range.start > 0;
 }
 
-/** Normalize the several body shapes the S3 client can hand back. */
+/**
+ * Normalize the several body shapes the S3 client can hand back.
+ *
+ * The Node-stream branch used to attach a `data` listener and `controller.enqueue` every chunk the
+ * moment it arrived. Nothing in that consulted the consumer, so it was not a stream, it was a copy:
+ * a `bytes=0-` request for a 123 MB video pulled all 123 MB into the controller's queue before the
+ * browser had read the second chunk. On a 2 GB box also running the worker, nginx and Redis, that is
+ * enough GC pressure to stall the event loop — and a stalled event loop delays every OTHER request,
+ * which is how one large video made the whole app stutter rather than just that one playback.
+ *
+ * `Readable.toWeb` does the pull-based plumbing properly: the source stays paused until the consumer
+ * asks for more. `http-range.test.ts` pins that by counting how much a source produces while nobody
+ * is reading.
+ */
 export function toReadableStream(body: unknown): ReadableStream {
   if (body instanceof ReadableStream) return body;
   if (
@@ -75,16 +89,7 @@ export function toReadableStream(body: unknown): ReadableStream {
     "pipe" in body &&
     typeof (body as { pipe: unknown }).pipe === "function"
   ) {
-    return new ReadableStream({
-      start(controller) {
-        const nodeStream = body as NodeJS.ReadableStream & {
-          on: (event: string, cb: (...args: unknown[]) => void) => void;
-        };
-        nodeStream.on("data", (chunk: Uint8Array) => controller.enqueue(chunk));
-        nodeStream.on("end", () => controller.close());
-        nodeStream.on("error", (err: Error) => controller.error(err));
-      },
-    });
+    return Readable.toWeb(body as Readable) as ReadableStream;
   }
   return body as ReadableStream;
 }

@@ -136,5 +136,61 @@ See [Deployment § Daily operations](deployment.md#daily-operations), table row
 
 ---
 
+## Account backup and restore
+
+See [Backup & Restore](backup.md) for how the feature works. These are its failure
+modes.
+
+**`/backup` answers 503, or says backup is not configured**
+
+`BACKUP_MASTER_KEY` is unset or unusable. Nothing else in the app is affected.
+
+1. `aether doctor` — it names the key when it is empty.
+2. `aether update` fills it in (or `./install.sh` on an older deployment), generating
+   64 hex characters and never touching an existing value.
+
+**"This backup cannot be opened. Wrong recovery phrase, or the file is damaged."**
+
+One message, three causes — deliberately, so a wrong guess learns nothing:
+
+- the typed phrase does not belong to this archive;
+- the archive came from an install with a different `BACKUP_MASTER_KEY` and no phrase
+  was given (type the words shown when it was downloaded);
+- the upload ended early. This one is detected separately, by comparing the bytes that
+  arrived against the browser's own `Content-Length`, and is reported as a truncated
+  upload rather than a bad phrase.
+
+The `backup_restore_refused` activity-log row carries the real reason and its refusal
+number. Admin → Activity Logs, or the account's own activity list.
+
+**`/brain/graph` is empty after restoring a Brain archive**
+
+Expected, briefly. The scored edges behind the graph are derived data: they are
+recomputed after a restore, never carried in the archive. The restore response and its
+audit row say "queued N of M" — `queued 0 of 1` means the worker was not running.
+
+1. Start it: `aether restart worker` (production) or `npm run worker` (local).
+2. For a brain over 1,000 memories the sweep does not cover everything in one pass —
+   run `npm run brain:backfill-relate` once.
+
+**The export refuses because of encrypted files**
+
+End-to-end encrypted files are never included: the server holds no key to re-seal
+them, and an archive it cannot read is an archive it cannot verify. Download and
+decrypt those files separately.
+
+**"A backup was started for this section recently"**
+
+One backup per section per 10 minutes. Wait, or download the archive from the earlier
+attempt — its recovery phrase is still the one that opens it.
+
+**Clicking Download does nothing**
+
+The download ticket lives 90 seconds and the download itself is an ordinary navigation,
+so an expired ticket surfaces as a browser error rather than a message on the page.
+Start the backup again; the new download comes with its own new phrase.
+
+---
+
 **See also:** [Getting Started](getting-started.md) · [Deployment](deployment.md) ·
 [Architecture](architecture.md)

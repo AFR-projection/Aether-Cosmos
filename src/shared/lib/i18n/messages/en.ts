@@ -1534,6 +1534,8 @@ export const en = {
         mute: "Mute",
         unmute: "Unmute",
         volume: "Volume",
+        /** The playback-rate control. The rate itself renders as digits and an ×. */
+        speed: "Playback speed",
       },
       text: {
         loading: "Loading file content…",
@@ -2199,6 +2201,129 @@ export const en = {
       /** `{total}` is a "?" until the document reports its length. */
       pageOf: "Page {page} of {total}",
       loadFailed: "Couldn’t load this PDF.",
+    },
+
+    /**
+     * Subtitles.
+     *
+     * The wording carries a deliberate load here. Making a track sends this video's audio to a
+     * third party and spends money, so the strings that offer it say both of those things plainly
+     * rather than hiding them behind a wand icon — see `confirm` below. A language is never named
+     * in this dictionary: `languages.ts` names each one in itself, because a reader hunting for
+     * their own language is looking for the word they would write.
+     */
+    subtitles: {
+      cc: "Subtitles",
+      off: "Off",
+      menuTitle: "Subtitles",
+      allLanguages: "All languages",
+      moreLanguages: "More languages",
+      addLanguage: "Add a language…",
+      searchLanguage: "Search languages",
+      noMatch: "No language matches “{query}”.",
+      /** A generated track before the provider has reported what language the audio is. */
+      detecting: "Detecting language…",
+      /** Origin badges, so a hand-corrected track is distinguishable from a raw machine one. */
+      original: "Original",
+      translated: "Translated",
+      uploaded: "Attached",
+      /** Shown under the track list while nothing has been made yet. */
+      none: "No subtitles yet.",
+      status: {
+        queued: "Waiting to start…",
+        transcribing: "Listening to the audio… {percent}%",
+        translating: "Translating… {percent}%",
+        failed: "Didn’t finish",
+      },
+      /**
+       * The standing note at the bottom of the menu.
+       *
+       * This used to be a confirmation dialog, which made getting subtitles a four-press errand. The
+       * facts it carried are still worth stating — the audio leaves this server, and the month has a
+       * budget — so they live here instead: always visible, never in the way.
+       */
+      footer: {
+        sendsAudio: "Audio is sent to {provider} to be transcribed",
+        remaining: "{minutes} min left this month",
+      },
+      refusal: {
+        mime: "Only video files can have subtitles made for them.",
+        encrypted:
+          "This file is encrypted in your browser, so the server can’t read its audio.",
+        note: "A note has no audio to transcribe.",
+        tooLarge: "This video is too large to make subtitles for.",
+        disabled: "Subtitles aren’t set up on this server yet.",
+        noPermission: "You can watch with these subtitles, but not make new ones.",
+        quota: "This month’s subtitle allowance is used up. It resets on {date}.",
+        /** The worker, not the provider. An operator reading this needs to know which. */
+        queue: "The background worker isn't running, so no new subtitles can be made right now.",
+        translateUnavailable:
+          "Only the original language is available — translation isn’t set up on this server.",
+      },
+      appearance: {
+        title: "Appearance",
+        size: "Text size",
+        small: "Small",
+        medium: "Medium",
+        large: "Large",
+        huge: "Extra large",
+        background: "Backdrop",
+        backgroundNone: "None",
+        backgroundSoft: "Soft",
+        backgroundSolid: "Solid",
+        position: "Raise from bottom",
+        reset: "Reset to defaults",
+      },
+      actions: {
+        download: "Download .vtt",
+        delete: "Remove this track",
+        edit: "Edit subtitles",
+        translate: "Translate into…",
+        retry: "Try again",
+        attach: "Attach a subtitle file…",
+        regenerate: "Make again",
+      },
+      upload: {
+        title: "Attach a subtitle file",
+        pick: "Choose an .srt or .vtt file",
+        chosen: "{name} ({size})",
+        language: "Language of this file",
+        attach: "Attach",
+        tooLarge: "That file is larger than {max}.",
+        empty: "No subtitle lines could be read from that file.",
+        wrongType: "Only .srt and .vtt files can be attached.",
+        done: "{count} lines attached.",
+      },
+      editor: {
+        title: "Subtitle editor",
+        lines: "{count} lines",
+        start: "Start",
+        end: "End",
+        text: "Line",
+        jump: "Play from here",
+        split: "Split at the cursor",
+        merge: "Merge with the next line",
+        remove: "Delete this line",
+        add: "Add a line after this one",
+        shift: "Shift every line",
+        shiftHint: "Seconds. Negative moves the subtitles earlier.",
+        shiftApply: "Shift",
+        save: "Save",
+        saving: "Saving…",
+        saved: "Saved",
+        undo: "Undo",
+        empty: "This track has no lines.",
+        /** The unsaved-changes guard the preview already owns. */
+        unsaved: "You have unsaved subtitle edits.",
+        conflict: "Someone else saved this track while you were editing. Reload to see their version.",
+      },
+      toast: {
+        queued: "Making {language} subtitles. You can keep watching — they’ll appear when ready.",
+        ready: "{language} subtitles are ready.",
+        failed: "{language} subtitles didn’t finish.",
+        deleted: "Subtitle track removed.",
+        saved: "Subtitles saved.",
+      },
     },
   },
 
@@ -2915,6 +3040,11 @@ export const en = {
       fadeZoom: "zoom ≥ {value}x",
       nodeSize: "Node size",
       linkThickness: "Link thickness",
+      orbitGap: "Orbit spacing",
+      orbitOff: "off",
+      edgeCurve: "Link curve",
+      curveStraight: "straight",
+      cosmos: "Cosmos",
       visible: "Visible",
       visibleValue: "{nodes} nodes · {links} links",
       hiddenByFilters: "Hidden by filters",
@@ -3037,6 +3167,7 @@ export const en = {
       users: "Users",
       shares: "Shares",
       email: "Email",
+      subtitles: "Subtitles",
       logs: "Logs",
       settings: "Settings",
     },
@@ -3823,6 +3954,64 @@ export const en = {
       gatewayStatus: "Gateway status", gatewayHealthy: "Gateway healthy", gatewayAttention: "Gateway needs attention", healthyBody: "At least one verified sender has headroom, so outbound mail is going out.", attentionBody: "Mail may be delayed or failing. The reasons are listed below.", eligible: "{count} eligible", gatewaySummary: "{active} active · {verified} verified · daily cap {limit} per sender by default.", problemNone: "No Gmail sender configured yet. Add one to start sending OTP and notifications.", problemUnverified: "No sender is verified. Check each sender's App Password (16 chars, 2-Step Verification enabled) and re-run Test.", problemUnavailable: "Every verified sender is on cooldown or at its daily limit right now. Add another sender or raise the daily limit.",
       addTitle: "Add a Gmail sender", addSubtitle: "Saved only if Gmail accepts the login.", close: "Close", displayName: "Display name", displayHint: "How this sender is labelled in the console.", displayPlaceholder: "e.g. Main sender", gmailAddress: "Gmail address", appPassword: "App password", appPasswordHint: "Stored encrypted. It is never shown again after saving.", appPasswordPlaceholder: "16-character app password", showPassword: "Show app password", hidePassword: "Hide app password", fromName: "From name", fromHint: "What recipients see in their inbox.", appPasswordHelp: "Getting an app password: turn on 2-Step Verification for the Google account, then open Google Account → Security → App passwords, create one for “Mail”, and paste the 16-character code above.", cancel: "Cancel", verifySave: "Verify & save",
       activityTitle: "Recent email activity", activitySub: "Live tail from this server process — last 100 events, cleared on restart.", refresh: "Refresh", noEvents: "No email events. Sends, verifications, and OTP events show here.", activityLabel: "Recent email activity",
+    },
+    /**
+     * The subtitle providers.
+     *
+     * Two provider blocks rather than one, because transcription and translation are different
+     * services bought from different vendors — see `subtitle_settings` in the schema. The
+     * `secretWarning` string is not boilerplate: rotating SESSION_SECRET silently makes both
+     * stored keys unreadable, and an operator who has just rotated it needs to be told to come
+     * back here rather than to debug a provider outage that is not happening.
+     */
+    subtitles: {
+      kicker: "Subtitles",
+      title: "Subtitle providers",
+      lede: "Speech recognition turns a video's audio into timed lines; a language model translates them. Both are external services and both are billed per use, so nothing is offered to users until a key is stored and the switch below is on.",
+      enabled: "Subtitles enabled",
+      enabledHint: "Off means no user sees the option, whatever keys are stored.",
+      transcription: {
+        heading: "Transcription",
+        lede: "Any OpenAI-compatible /audio/transcriptions endpoint. Groq's whisper-large-v3-turbo is the cheapest per hour of audio by a wide margin; point the base URL at OpenAI to use theirs instead.",
+        baseUrl: "Base URL",
+        baseUrlHint: "Everything before /audio/transcriptions.",
+        model: "Model",
+        apiKey: "API key",
+      },
+      translation: {
+        heading: "Translation",
+        lede: "Any OpenAI-compatible /chat/completions endpoint. This is what turns the transcript into the language a viewer picked, so its quality is what people actually judge.",
+        baseUrl: "Base URL",
+        baseUrlHint: "Everything before /chat/completions.",
+        model: "Model",
+        apiKey: "API key",
+        sameKeyHint: "This may be the same key as above when one vendor serves both.",
+      },
+      keyStored: "A key is stored.",
+      keyRotate: "Paste a new key to replace it. Leave blank to keep it.",
+      keyClear: "Remove the stored key",
+      keyPlaceholder: "Paste a key",
+      showKey: "Show key",
+      hideKey: "Hide key",
+      secretWarning:
+        "Both keys are encrypted with this server's SESSION_SECRET. Changing that secret makes them unreadable — subtitles switch themselves off and the keys have to be pasted again here. Same behaviour as the Gmail app passwords.",
+      privacyWarning:
+        "Audio and dialogue are sent to whichever vendors are configured above. Where OpenRouter is used, this server asks it not to retain the content — the other vendors' policies are theirs.",
+      test: "Test",
+      testing: "Testing…",
+      testOkTranscribe: "Transcription reached {model}.",
+      testOkTranslate: "Translation reached {model}.",
+      testFailed: "Test failed: {reason}",
+      testNoKey: "Store a key first.",
+      save: "Save",
+      saving: "Saving…",
+      saved: "Saved.",
+      saveFailed: "Could not save: {reason}",
+      allowance: {
+        heading: "Per-user allowance",
+        lede: "Each account gets this many minutes of transcription per rolling 30 days. Set it per user in Users → an account. Zero means unlimited, which is what the master account has.",
+        openUsers: "Open Users",
+      },
     },
     // ADMIN-NEXT
   },

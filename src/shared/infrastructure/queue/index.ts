@@ -59,7 +59,13 @@ export type JobType =
   // P9: Semantic embedding. Idempotent via (embedding_model, embedding_updated_at) staleness;
   // both are no-ops when no embedding provider is configured.
   | "embed_memory"
-  | "embed_brain";
+  | "embed_brain"
+  // Subtitles. Both take a single `trackId` and claim it before doing anything, so a duplicate
+  // delivery is a no-op rather than a doubled bill — see `claimTrack` in
+  // `@files/infrastructure/subtitles/tracks.ts`. `transcribe_media` queues the translations it
+  // was asked for once it knows what language the audio actually is.
+  | "transcribe_media"
+  | "translate_subtitles";
 
 export async function enqueueJob(
   type: JobType,

@@ -147,6 +147,8 @@ Then set `REDIS_DISABLED=false` in `.env`.
 | `MASTER_USERNAME` | ✅ | - | Master admin username: 3–50 letters, numbers, dots, underscores, or hyphens |
 | `MASTER_PASSWORD` | ✅ | - | Master admin password, 6–128 characters |
 | `NEXT_PUBLIC_APP_URL` | ✅ | `http://localhost:3000` | Application base URL |
+| `BACKUP_MASTER_KEY` | ❌ | - | 32 bytes as 64 hex characters or base64. The installer generates it and never replaces it. While it is unset, `/backup` answers 503 and nothing else changes. See [Backup & Restore](backup.md#backup_master_key). |
+| `BACKUP_MASTER_KEY_PREVIOUS` | ❌ | - | Retired `BACKUP_MASTER_KEY` values, comma-separated, so archives written before a rotation still open without their recovery phrase. |
 | `BRAIN_EMBEDDING_PROVIDER` | ❌ | `none` | Embedding provider: `none` (default, semantic search abstains) or `openai` / `voyageai` (requires API key). See [Second Brain 2.0 § Embeddings](second-brain-2.0.md#embeddings). |
 | `REDIS_URL` | ❌ | `redis://localhost:6379` | Redis connection string |
 | `REDIS_DISABLED` | ❌ | `false` | Set `true` to disable Redis |

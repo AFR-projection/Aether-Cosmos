@@ -54,6 +54,23 @@ What Aether Cosmos ByAFR does, grouped by area. Setup instructions live in
 - **Hardening** — CSRF tokens on mutations, security headers, bot filtering,
   magic-byte file validation, and time-limited presigned URLs.
 
+## Backup and portability
+
+Every account, master included, exports **its own** data — nobody else's — from
+`/backup`:
+
+- **Two archives, one per section** — files and folders in one, the Second Brain in
+  another, each a single encrypted `.afrbak` file.
+- **Two keys open it** — this server's `BACKUP_MASTER_KEY`, or the nine-word recovery
+  phrase shown at download. Restoring here asks for nothing; restoring on another
+  install asks for the phrase.
+- **Merge or replace** — merge never loses anything (matching paths are skipped,
+  others restored under a new name); replace destroys what is there first and is
+  gated on the 2-Step Code.
+- **Not a server backup** — deployment recovery is PostgreSQL plus R2.
+
+Detail, limits, and the audit trail: [Backup & Restore](backup.md).
+
 ## Administration
 
 Covered in detail in [Admin Panel](admin.md): user management, impersonation, a

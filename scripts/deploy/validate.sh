@@ -164,6 +164,23 @@ validate_session_secret() {
   fi
 }
 
+validate_backup_master_key() {
+  log "Checking BACKUP_MASTER_KEY..."
+  # Read straight from the file: load_env does not export this one, and nothing in the
+  # deploy scripts needs its value — the containers get it through compose's `env_file`.
+  # Empty is a legitimate state (the /backup page answers 503 and nothing else changes),
+  # so this warns rather than failing the deploy. The format is deliberately NOT judged
+  # here: `parseMasterKeyRing` owns what counts as 32 bytes of key material, and a second
+  # opinion written in bash would eventually disagree with it and block a working deploy.
+  local key
+  key="$(env_get BACKUP_MASTER_KEY)"
+  if [[ -n "$key" ]]; then
+    check_mark 0 "BACKUP_MASTER_KEY is set (${#key} chars) — per-account backup enabled"
+  else
+    check_warn 1 "BACKUP_MASTER_KEY is empty — /backup answers 503 until it is set; ./install.sh generates one"
+  fi
+}
+
 validate_admin_and_email() {
   log "Checking admin credentials and certificate email..."
   local missing=0
@@ -224,6 +241,7 @@ run_validate() {
   validate_domain_format
   validate_app_url
   validate_session_secret
+  validate_backup_master_key
   validate_database_url
   validate_r2
   validate_dns
