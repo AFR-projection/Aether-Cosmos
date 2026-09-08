@@ -7,6 +7,7 @@ import { validateCsrf } from "@/shared/lib/security";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { completeUpload, getUpload, type UploadPartInput } from "@files/infrastructure/storage/upload-service";
 import { enqueueJob } from "@/shared/infrastructure/queue";
+import { enqueueMediaInspection } from "@files/application/jobs/media-inspection";
 import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
 import { publishToUser } from "@/shared/infrastructure/realtime/events";
 import { logActivity } from "@/shared/lib/auth/audit";
@@ -37,8 +38,24 @@ export async function POST(
       const after = await getUpload(id, userId);
       if (!after.mimeType.startsWith("application/octet-stream") &&
         (after.mimeType.startsWith("image/") || after.mimeType.startsWith("video/") || after.mimeType === "application/pdf" || after.mimeType.startsWith("audio/"))) {
-        await enqueueJob("generate_thumbnail", { fileId: after.fileId, r2Key: after.objectKey, mimeType: after.mimeType });
+        await enqueueJob(
+          "generate_thumbnail",
+          {
+            fileId: after.fileId,
+            r2Key: after.objectKey,
+            mimeType: after.mimeType,
+            version: after.version,
+          },
+          { jobId: `thumb-${after.fileId}-v${after.version}` },
+        );
       }
+      await enqueueMediaInspection({
+        id: after.fileId,
+        r2Key: after.objectKey,
+        mimeType: after.mimeType,
+        encrypted: after.encrypted,
+        version: after.version,
+      });
       void dispatchWebhookEvent(userId, "upload", { fileId: after.fileId, name: after.name, sizeBytes: after.totalSizeBytes, mimeType: after.mimeType });
       void publishToUser(userId, { type: "upload_complete", fileId: after.fileId, name: after.name, sizeBytes: after.totalSizeBytes });
       await logActivity(sessionUser, "upload", { resourceType: "file", resourceId: after.fileId, metadata: { uploadSessionId: id, verified: true }, ip: getClientIp(request) });

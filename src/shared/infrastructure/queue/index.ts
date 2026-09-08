@@ -39,10 +39,11 @@ export function getQueue(): Queue | null {
 
 export type JobType =
   | "generate_thumbnail"
+  | "inspect_media"
   | "compress_image"
   | "trim_media"
-  // Pull the audio track out of a video into a NEW file. Not idempotent by nature — a
-  // second run makes a second file — so the route is what stops a duplicate being sent.
+  // Pull the audio track out of a video into a stable output file. The route carries
+  // deterministic operation/output IDs and durable worker state makes retries converge.
   | "extract_audio"
   | "recalculate_quota"
   | "deliver_webhook"

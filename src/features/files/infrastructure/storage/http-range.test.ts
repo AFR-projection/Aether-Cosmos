@@ -20,64 +20,70 @@ import {
 const SIZE = 4096;
 
 describe("parseRangeHeader", () => {
+  it("distinguishes an absent header from an invalid one", () => {
+    expect(parseRangeHeader(null, SIZE)).toEqual({ kind: "none" });
+    expect(parseRangeHeader("", SIZE)).toEqual({ kind: "malformed" });
+  });
+
   it("parses a closed range", () => {
     expect(parseRangeHeader("bytes=0-1023", SIZE)).toEqual({
-      start: 0,
-      end: 1023,
-      byteRange: "bytes=0-1023",
+      kind: "range",
+      range: { start: 0, end: 1023, byteRange: "bytes=0-1023" },
     });
   });
 
-  it("parses an open-ended range to the last byte", () => {
+  it("parses open-ended and suffix ranges", () => {
     expect(parseRangeHeader("bytes=1024-", SIZE)).toEqual({
-      start: 1024,
-      end: SIZE - 1,
-      byteRange: `bytes=1024-${SIZE - 1}`,
+      kind: "range",
+      range: { start: 1024, end: SIZE - 1, byteRange: `bytes=1024-${SIZE - 1}` },
     });
-  });
-
-  it("parses a suffix range", () => {
     expect(parseRangeHeader("bytes=-500", SIZE)).toEqual({
-      start: SIZE - 500,
-      end: SIZE - 1,
-      byteRange: `bytes=${SIZE - 500}-${SIZE - 1}`,
+      kind: "range",
+      range: {
+        start: SIZE - 500,
+        end: SIZE - 1,
+        byteRange: `bytes=${SIZE - 500}-${SIZE - 1}`,
+      },
     });
   });
 
   it("clamps an end past the object", () => {
-    expect(parseRangeHeader("bytes=4000-99999", SIZE)?.end).toBe(SIZE - 1);
+    const parsed = parseRangeHeader("bytes=4000-99999", SIZE);
+    expect(parsed.kind === "range" ? parsed.range.end : null).toBe(SIZE - 1);
   });
 
   it("tolerates surrounding whitespace and a capitalised unit", () => {
-    expect(parseRangeHeader("  BYTES=0-9  ", SIZE)?.byteRange).toBe("bytes=0-9");
+    const parsed = parseRangeHeader("  BYTES=0-9  ", SIZE);
+    expect(parsed.kind === "range" ? parsed.range.byteRange : null).toBe("bytes=0-9");
   });
 
-  it("returns null for a start at or past the end of the object", () => {
-    expect(parseRangeHeader("bytes=4096-", SIZE)).toBeNull();
-    expect(parseRangeHeader("bytes=99999-", SIZE)).toBeNull();
+  it("marks a start at or past EOF as unsatisfiable", () => {
+    expect(parseRangeHeader("bytes=4096-", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseRangeHeader("bytes=99999-", SIZE)).toEqual({ kind: "unsatisfiable" });
   });
 
-  it("returns null for an inverted range", () => {
-    expect(parseRangeHeader("bytes=200-100", SIZE)).toBeNull();
+  it("marks an inverted or empty suffix range as unsatisfiable", () => {
+    expect(parseRangeHeader("bytes=200-100", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseRangeHeader("bytes=-0", SIZE)).toEqual({ kind: "unsatisfiable" });
   });
 
-  it("returns null for syntax it does not implement", () => {
+  it("marks unsupported or invalid syntax as malformed", () => {
     for (const header of [
-      "bytes=0-99,200-299", // multi-range
+      "bytes=0-99,200-299",
       "items=0-99",
       "bytes=",
       "bytes=-",
       "bytes=abc-def",
-      "bytes=-0",
-      "",
     ]) {
-      expect(parseRangeHeader(header, SIZE), JSON.stringify(header)).toBeNull();
+      expect(parseRangeHeader(header, SIZE), JSON.stringify(header)).toEqual({
+        kind: "malformed",
+      });
     }
   });
 
-  it("returns null when the object size is unknown, rather than inventing a range", () => {
-    expect(parseRangeHeader("bytes=0-", 0)).toBeNull();
-    expect(parseRangeHeader("bytes=0-", NaN)).toBeNull();
+  it("cannot satisfy a range when the object size is unknown", () => {
+    expect(parseRangeHeader("bytes=0-", 0)).toEqual({ kind: "unsatisfiable" });
+    expect(parseRangeHeader("bytes=0-", NaN)).toEqual({ kind: "unsatisfiable" });
   });
 });
 
@@ -89,18 +95,23 @@ describe("rangeLength", () => {
 });
 
 describe("isContinuationRange", () => {
+  function usable(header: string) {
+    const result = parseRangeHeader(header, SIZE);
+    return result.kind === "range" ? result.range : null;
+  }
+
   it("treats a range starting past byte 0 as a resume", () => {
-    expect(isContinuationRange(parseRangeHeader("bytes=1-", SIZE))).toBe(true);
-    expect(isContinuationRange(parseRangeHeader("bytes=-500", SIZE))).toBe(true);
+    expect(isContinuationRange(usable("bytes=1-"))).toBe(true);
+    expect(isContinuationRange(usable("bytes=-500"))).toBe(true);
   });
 
   it("does not treat a chunked fresh start as a resume", () => {
-    expect(isContinuationRange(parseRangeHeader("bytes=0-1023", SIZE))).toBe(false);
+    expect(isContinuationRange(usable("bytes=0-1023"))).toBe(false);
   });
 
   it("is false when there is no usable range at all", () => {
     expect(isContinuationRange(null)).toBe(false);
-    expect(isContinuationRange(parseRangeHeader("bytes=99999-", SIZE))).toBe(false);
+    expect(isContinuationRange(usable("bytes=99999-"))).toBe(false);
   });
 });
 

@@ -1,5 +1,9 @@
 import { RELATE_SWEEP_MAX } from "@brain/application/commands/relate-jobs";
 import { enqueueJob } from "@/shared/infrastructure/queue";
+import { db } from "@/shared/infrastructure/db";
+import { files } from "@/shared/infrastructure/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
+import { shouldInspectMedia } from "@files/application/jobs/media-inspection";
 
 /**
  * What a Brain restore leaves for the worker to finish.
@@ -64,6 +68,70 @@ export interface DerivedRebuildReport {
  *
  * `enqueue` is injected so this is verifiable without Redis; the default is the real queue.
  */
+export interface MediaInspectionReport {
+  files: number;
+  queued: number;
+}
+
+export interface RestoredMediaCandidate {
+  id: string;
+  r2Key: string;
+  mimeType: string;
+  encrypted: boolean;
+  isNote: boolean;
+  version: number;
+}
+
+async function loadRestoredMedia(userId: string): Promise<RestoredMediaCandidate[]> {
+  return db
+    .select({
+      id: files.id,
+      r2Key: files.r2Key,
+      mimeType: files.mimeType,
+      encrypted: files.encrypted,
+      isNote: files.isNote,
+      version: files.version,
+    })
+    .from(files)
+    .where(
+      and(
+        eq(files.userId, userId),
+        isNull(files.deletedAt),
+        isNull(files.restoreBatchId),
+        eq(files.status, "ready"),
+        isNull(files.mediaInspectedAt)
+      )
+    );
+}
+
+export async function scheduleRestoredMediaInspection(
+  userId: string,
+  enqueue: (file: RestoredMediaCandidate) => Promise<boolean> = (file) =>
+    enqueueJob(
+      "inspect_media",
+      {
+        fileId: file.id,
+        r2Key: file.r2Key,
+        mimeType: file.mimeType,
+        version: file.version,
+      },
+      { jobId: `inspect-${file.id}-v${file.version}` }
+    ),
+  load: (userId: string) => Promise<RestoredMediaCandidate[]> = loadRestoredMedia
+): Promise<MediaInspectionReport> {
+  const restored = await load(userId);
+  const candidates = restored.filter(shouldInspectMedia);
+  let queued = 0;
+  for (const file of candidates) {
+    try {
+      if (await enqueue(file)) queued += 1;
+    } catch {
+      // Restore is committed; unavailable aftercare must not report it as failed.
+    }
+  }
+  return { files: candidates.length, queued };
+}
+
 export async function scheduleDerivedGraphRebuild(
   brainIds: readonly string[],
   enqueue: (brainId: string) => Promise<boolean> = (brainId) =>

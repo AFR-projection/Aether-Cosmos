@@ -569,7 +569,7 @@ export async function getUpload(sessionId: string, userId: string) {
     })
     .from(uploadParts)
     .where(eq(uploadParts.uploadSessionId, session.id));
-  return { sessionId: session.id, fileId: file.id, name: file.name, mimeType: file.mimeType, objectKey: file.r2Key, status: session.status, fileStatus: file.status, uploadType: session.uploadType, uploadId: session.r2UploadId, totalSizeBytes: session.totalSizeBytes, partSizeBytes: session.partSizeBytes, retryCount: session.retryCount, failureCode: session.failureCode ?? file.failureCode, failureMessage: session.failureMessage ?? file.failureMessage, expiresAt: session.expiresAt, parts: persistedParts };
+  return { sessionId: session.id, fileId: file.id, name: file.name, mimeType: file.mimeType, objectKey: file.r2Key, encrypted: file.encrypted, version: file.version, status: session.status, fileStatus: file.status, uploadType: session.uploadType, uploadId: session.r2UploadId, totalSizeBytes: session.totalSizeBytes, partSizeBytes: session.partSizeBytes, retryCount: session.retryCount, failureCode: session.failureCode ?? file.failureCode, failureMessage: session.failureMessage ?? file.failureMessage, expiresAt: session.expiresAt, parts: persistedParts };
 }
 
 export async function getActiveUploads(userId: string) {

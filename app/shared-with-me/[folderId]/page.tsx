@@ -1,5 +1,6 @@
 import { FileBrowser, type BrowserCaps } from "@files/presentation/components/files/file-browser";
 import { LeaveSharedFolderButton } from "@files/presentation/components/folders/leave-shared-folder-button";
+import { SHARING_RECEIVED_HREF } from "@shares/domain/sharing-view";
 import { requireAuth } from "@/shared/lib/auth/session";
 import { getEffectiveUserId, resolveFolderAccess } from "@/shared/lib/auth/permissions";
 import { notFound } from "next/navigation";
@@ -38,6 +39,7 @@ export default async function SharedFolderPage({
       selectedFileId={select ?? null}
       isSharedContext={true}
       sharedFolderName={access.folder.name}
+      sharedReturnHref={SHARING_RECEIVED_HREF}
       caps={caps}
       sharedAction={
         // Only a real membership can be left; a master looking in via override has nothing
@@ -47,6 +49,7 @@ export default async function SharedFolderPage({
             folderId={access.shareRootId ?? folderId}
             folderName={access.folder.name}
             selfUserId={getEffectiveUserId(user)}
+            returnHref={SHARING_RECEIVED_HREF}
           />
         ) : null
       }

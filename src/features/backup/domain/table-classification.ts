@@ -116,6 +116,13 @@ export const DERIVED_TABLES = [
  * `restore_reservations` describe a restore that was running on another machine:
  * carrying them across would reserve quota for work that will never finish and
  * point a batch id at rows that do not exist here.
+ *
+ * `media_operations` is the same kind of row as `archive_jobs`: the record of a
+ * transform the worker had running — the exact source state at enqueue time, a staged
+ * object on this instance's bucket, and a publication state. None of it is user data
+ * (the bytes are in the file itself), and a restored row would be phantom work
+ * claiming a file id the files restore deliberately does not preserve, because those
+ * rows come back by path, not by id.
  */
 export const NEVER_TABLES = [
   "sessions",
@@ -132,6 +139,7 @@ export const NEVER_TABLES = [
   "account_backup_identities",
   "restore_batches",
   "restore_reservations",
+  "media_operations",
 ] as const;
 
 export type TableClass = "core" | "files" | "brain" | "derived" | "never";

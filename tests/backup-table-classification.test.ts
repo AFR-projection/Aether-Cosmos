@@ -80,7 +80,7 @@ describe("every table in the schema is classified exactly once", () => {
     expect(ALL_TABLES).toHaveLength(seen.size);
   });
 
-  it("accounts for all 52 tables in the documented split", () => {
+  it("accounts for all 53 tables in the documented split", () => {
     // The numbers are in the design (§1.1) and are asserted here so that a change to
     // either the schema or the split has to be deliberate.
     expect(CORE_TABLES).toHaveLength(8);
@@ -89,11 +89,12 @@ describe("every table in the schema is classified exactly once", () => {
     expect(FILES_TABLES).toHaveLength(11);
     expect(BRAIN_TABLES).toHaveLength(15);
     expect(DERIVED_TABLES).toHaveLength(4);
-    // 10 + `backup_keys` + the three per-account tables added by 0028, none of which a
-    // restore may write, for the reasons spelled out in table-classification.ts.
-    expect(NEVER_TABLES).toHaveLength(14);
-    expect(ALL_TABLES).toHaveLength(52);
-    expect(schemaTableNames).toHaveLength(52);
+    // 10 + `backup_keys` + the three per-account tables added by 0028 + `media_operations`
+    // from 0030, none of which a restore may write, for the reasons spelled out in
+    // table-classification.ts.
+    expect(NEVER_TABLES).toHaveLength(15);
+    expect(ALL_TABLES).toHaveLength(53);
+    expect(schemaTableNames).toHaveLength(53);
   });
 
   it("classifies a name it does not know as nothing at all", () => {

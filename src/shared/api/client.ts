@@ -67,6 +67,40 @@ export async function apiFetch<T>(
   return json;
 }
 
+/**
+ * `apiFetch`, but the caller also gets the HTTP status.
+ *
+ * Needed where the status is the decision and not just the message: the playback-URL hook
+ * falls back to the legacy proxy on a 5xx (the new path is broken, the old one still works) and
+ * must NOT fall back on a 403 (the old path would refuse identically, so falling back would
+ * turn one clear refusal into two confusing ones). `apiFetch` discards the status, and inferring
+ * it from the error text would be guesswork.
+ *
+ * A body that is not JSON — an nginx 502 page, say — throws here exactly as it does in
+ * `apiFetch`, and callers treat that as a transport failure.
+ */
+export async function apiFetchWithStatus<T>(
+  url: string,
+  options: RequestInit = {}
+): Promise<{ status: number; body: ApiResult<T> }> {
+  const method = options.method?.toUpperCase() ?? "GET";
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (method !== "GET" && method !== "HEAD") {
+    headers["x-csrf-token"] = await getCsrfToken();
+    if (!headers["Content-Type"] && options.body && typeof options.body === "string") {
+      headers["Content-Type"] = "application/json";
+    }
+  }
+
+  const res = await fetch(url, { ...options, headers });
+  const body = (await res.json()) as ApiResult<T>;
+  handleAuthSecurityCodes(body, res.status);
+  return { status: res.status, body };
+}
+
 async function cancelPendingUpload(fileId: string) {
   try {
     await apiFetch("/api/upload/cancel", {

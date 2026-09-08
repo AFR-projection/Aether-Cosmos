@@ -6,6 +6,7 @@ import {
 } from "@brain/domain/constants";
 import {
   BRAIN_OPERATION_KEYS,
+  BRAIN_RISKY_SCOPES,
   BRAIN_SCOPE_LABELS,
   ENTITY_TYPE_OPTIONS,
   MEMORY_TYPE_OPTIONS,
@@ -44,6 +45,15 @@ describe("UI constants track the database enums", () => {
     for (const key of Object.values(BRAIN_OPERATION_KEYS)) {
       expect(hasKey(key), key).toBe(true);
     }
+  });
+
+  it("marks unattended ingest as risky and labels its audit operations", () => {
+    expect(BRAIN_RISKY_SCOPES.has("brain.ingest")).toBe(true);
+    expect(BRAIN_OPERATION_KEYS).toMatchObject({
+      "memory.ingest": "brain.operation.memoryIngest",
+      "session.start": "brain.operation.sessionStart",
+      "session.end": "brain.operation.sessionEnd",
+    });
   });
 
   it("falls back to the raw wire value for anything it has no key for", () => {

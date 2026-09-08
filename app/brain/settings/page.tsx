@@ -1,14 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, Download, Loader2, Plus, Save, Settings2 } from "lucide-react";
+import { Archive, Loader2, Plus, Save, Settings2 } from "lucide-react";
 import { Button } from "@/ui/primitives/button";
 import { Input } from "@/ui/primitives/input";
 import { BrainShell } from "@brain/presentation/components/brain-shell";
 import { BrainLoading, BrainPanel } from "@brain/presentation/components/brain-states";
 import { EmbeddingSettingsCard } from "@brain/presentation/components/embedding-settings-card";
 import { notify } from "@/shared/lib/system/notify-store";
-import { apiFetch } from "@/shared/api/client";
 import { useFormat, useT } from "@/shared/lib/i18n";
 import { useActiveBrain, useCreateBrain, useUpdateBrain } from "@brain/presentation/hooks/use-brain";
 
@@ -23,7 +22,6 @@ export default function BrainSettingsPage() {
   const [description, setDescription] = useState(brain?.description ?? "");
   const [dirtyFor, setDirtyFor] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
-  const [exporting, setExporting] = useState(false);
 
   // Re-seed the form when the selected brain changes, without an effect: the
   // brain id we last seeded from is the state that matters.
@@ -69,38 +67,6 @@ export default function BrainSettingsPage() {
           }),
       }
     );
-  }
-
-  /**
-   * Export goes through the same JSON endpoint an agent uses, then is saved
-   * client-side so the download carries the brain name and today's date.
-   */
-  async function handleExport() {
-    if (!brain) return;
-    setExporting(true);
-    try {
-      const res = await apiFetch<Record<string, unknown>>(`/api/brain/${brain.id}/export`);
-      if (!res.success || !res.data) {
-        throw new Error(res.error ?? t("brain.settings.exportFailed"));
-      }
-      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      // The filename stays ASCII and locale-free: it has to survive every OS.
-      const slug = brain.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-      link.href = url;
-      link.download = `${slug || "brain"}-${new Date().toISOString().slice(0, 10)}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-      notify({ title: t("brain.settings.exported"), tone: "success" });
-    } catch (error) {
-      notify({
-        title: error instanceof Error ? error.message : t("brain.settings.exportFailed"),
-        tone: "error",
-      });
-    } finally {
-      setExporting(false);
-    }
   }
 
   function handleCreateBrain(event: React.FormEvent) {
@@ -194,27 +160,6 @@ export default function BrainSettingsPage() {
         </BrainPanel>
 
         <div className="space-y-5">
-          <BrainPanel icon={Download} title={t("brain.settings.exportTitle")}>
-            <p className="text-sm text-muted-foreground">{t("brain.settings.exportBody")}</p>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              {t("brain.settings.exportNote")}
-            </p>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="mt-3"
-              disabled={exporting}
-              onClick={() => void handleExport()}
-            >
-              {exporting ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Download className="h-4 w-4" aria-hidden="true" />
-              )}
-              {t("brain.settings.exportAction")}
-            </Button>
-          </BrainPanel>
-
           <BrainPanel icon={Archive} title={t("brain.settings.statusTitle")}>
             <p className="text-sm text-muted-foreground">
               {brain.status === "active"

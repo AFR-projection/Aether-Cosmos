@@ -89,6 +89,7 @@ export const en = {
     favorites: "Favorites",
     sharedWithMe: "Shared with me",
     shared: "Shared",
+    sharing: "Sharing",
     recycleBin: "Recycle Bin",
     backup: "Backup & Restore",
     settings: "Settings",
@@ -508,9 +509,43 @@ export const en = {
     },
   },
 
+  sharing: {
+    kicker: "Sharing workspace",
+    title: "Everything shared, in one place.",
+    intro: "Review invitations and shared folders, then manage every public link without leaving this workspace.",
+    viewLabel: "Sharing views",
+    receivedView: "Shared with me",
+    linksView: "Public links",
+    summaryLabel: "Sharing summary",
+    acceptedFolders: "Accepted folders",
+    pendingInvitations: "Pending invitations",
+    activeLinks: "Active links",
+    invitationAccepted: "Invitation accepted",
+    invitationDeclined: "Invitation declined",
+  },
+
   shares: {
     title: "Shared Links",
     subtitle: "Manage your shared file links and track who accessed them",
+    managedLinks: "Managed public links",
+    managedLinksSub: "Copy, review access, or revoke a link without losing context.",
+    searchPlaceholder: "Search by file name…",
+    searchLabel: "Search public links",
+    sortLabel: "Sort public links",
+    sortRecent: "Recently created",
+    sortName: "File name",
+    sortStatus: "Status",
+    loading: "Loading public links",
+    loadError: "Could not load your public links",
+    loadErrorHint: "Your links are unchanged. Try fetching the list again.",
+    openFiles: "Open files",
+    noMatch: "No public link matches “{query}”",
+    noMatchHint: "Try another file name, or clear the search to see every link.",
+    status: {
+      active: "Active",
+      expired: "Expired",
+      limitReached: "Limit reached",
+    },
     empty: "No shared links",
     emptyHint: "Share files from the file browser",
     /** The wire value is `view` / `edit`; this is only how the badge reads. */
@@ -522,16 +557,27 @@ export const en = {
     expiresOn: "Expires {date}",
     viewCount: { one: "{count} view", other: "{count} views" },
     viewCountCapped: { one: "{count} / {max} view", other: "{count} / {max} views" },
-    copyLink: "Copy Link",
+    copyLink: "Copy link",
+    copyLinkLabel: "Copy public link for {file}",
     copied: "Copied!",
     linkCopied: "Link copied!",
     copyFailed: "Failed to copy link",
     deleteShare: "Delete share",
+    revoke: "Revoke",
+    revokeLabel: "Revoke public link for {file}",
+    revokeConfirmTitle: "Revoke this public link?",
+    revokeConfirmBody: "Nobody will be able to use this link for “{file}” again. This cannot be undone.",
     deleteFailed: "Failed to delete share",
     deleted: "Share deleted",
     connectionFailed: "Connection failed",
     accessHistory: "Access history",
     viewAccessHistory: "View access history",
+    viewAccessHistoryLabel: "View access history for {file}",
+    hideAccessHistoryLabel: "Hide access history for {file}",
+    historyRegionLabel: "Access history for {file}",
+    historyLoading: "Loading access history",
+    historyError: "Could not load access history",
+    historyErrorHint: "The link is still available. Try loading its access events again.",
     accessCount: { one: "{count} access", other: "{count} accesses" },
     noAccessData: "No access data",
     noAccessDataHint: "Opens show here",
@@ -542,11 +588,8 @@ export const en = {
     isp: "ISP",
     timezone: "Timezone",
     mapAlt: "Map",
-    /**
-     * The recipient's side of a link — the standalone `/shared/[token]` page. The
-     * expiry row reuses `expiresOn` above, so a link's own page and the owner's
-     * list describe the same limit with the same sentence.
-     */
+    openMap: "Open in Google Maps",
+    openMapLabel: "Open this access location in Google Maps",
     public: {
       /**
        * Both the hover title on the counter and its screen-reader gloss: the
@@ -569,10 +612,12 @@ export const en = {
     tallyPending: "Pending",
     pendingTitle: "Pending invitations",
     pendingSub: "Accept to add the folder, decline to remove it.",
+    invitationLoadError: "Could not load pending invitations.",
     /** `{reason}` is the server's own sentence, or the generic one below. */
     respondError: "{reason} Nothing changed — try again.",
     respondFailed: "Could not respond to that invitation.",
     sharedFolders: "Shared folders",
+    sharedFoldersSub: "Folders you have accepted and can open anytime.",
     searchPlaceholder: "Folder or owner…",
     searchLabel: "Search shared folders",
     sortLabel: "Sort shared folders",
@@ -1520,9 +1565,24 @@ export const en = {
       /** The audio and video players, which share every control but their headline. */
       media: {
         audioFailed: "Audio cannot be played",
+        /**
+         * Four different failures, because the advice differs.
+         *
+         * A `<video>` reports one of four `MediaError` codes and they are not variations on a
+         * theme: a dropped connection is worth retrying, a decode error means the bytes are
+         * wrong, and an unsupported codec means retrying will fail identically forever. The
+         * player used to answer all of them with `videoFailed` + `codecHint`, which sent people
+         * hunting for a codec problem when their wifi had simply gone.
+         */
         videoFailed: "Video cannot be played",
         codecHint:
           "This browser may not support the file’s codec. Downloading and playing it locally usually works.",
+        networkFailed: "Playback stopped",
+        networkHint:
+          "The connection to the video dropped. Trying again continues from where it stopped.",
+        decodeFailed: "This video could not be decoded",
+        decodeHint:
+          "The browser reached data it could not read. Download the file and play it locally to see whether the file itself is damaged.",
         playing: "Playing",
         play: "Play",
         pause: "Pause",
@@ -1661,6 +1721,10 @@ export const en = {
         searchHint: "Nothing found for “{query}”. Try fewer words, or clear the search.",
         filterTitle: "Nothing of this type here",
         filterHint: "Pick All to see everything in this folder again.",
+        /** Favorites is a filter now, so its empty state speaks for itself. */
+        favoritesTitle: "No favorites yet",
+        favoritesHint:
+          "Star a file with the star icon in its menu and it will show up here.",
         reset: "Clear search and filters",
       },
     },
@@ -1804,6 +1868,7 @@ export const en = {
         audio: "Audio",
         documents: "Documents",
         archives: "Archives",
+        favorites: "Favorites",
       },
       move: "Move",
       clearSelection: "Clear selection",
@@ -2204,6 +2269,44 @@ export const en = {
     },
 
     /**
+     * Why a video has no picture yet.
+     *
+     * These are the CONTROL PLANE's answers, not the player's: the browser asks this server for
+     * permission to stream a file and gets one of these instead of a URL. They are separate from
+     * `viewer.media.*`, which describes a video that did start and then went wrong, because the
+     * two need different actions — nothing here is fixed by pressing play again.
+     *
+     * Each code gets a title and a hint. The title says what happened; the hint says the one
+     * thing the reader can do about it, and never repeats the title in other words.
+     */
+    playback: {
+      error: {
+        unauthorized: "You don’t have access to this video",
+        notFound: "This video isn’t here any more",
+        notReady: "This video is still being uploaded",
+        unsupported: "This file isn’t a video",
+        quota: "This month’s bandwidth allowance is used up",
+        rateLimited: "Too many requests for this video",
+        shareExpired: "This share link has expired",
+        shareExhausted: "This share link has reached its view limit",
+        server: "The video couldn’t be prepared",
+        network: "Couldn’t reach the server",
+      },
+      hint: {
+        unauthorized: "Sign in again, or ask the owner to share it with you.",
+        notFound: "It may have been deleted, or moved out of this folder.",
+        notReady: "Wait for the upload to finish, then try again.",
+        unsupported: "Only video files play here. Download it to open it in another app.",
+        quota: "Playback works again when the allowance resets.",
+        rateLimited: "Wait a moment before trying again.",
+        shareExpired: "Ask whoever sent this link for a new one.",
+        shareExhausted: "Ask whoever sent this link for a new one.",
+        server: "Something went wrong on this server. Trying again usually works.",
+        network: "Check your connection and try again.",
+      },
+    },
+
+    /**
      * Subtitles.
      *
      * The wording carries a deliberate load here. Making a track sends this video's audio to a
@@ -2597,12 +2700,13 @@ export const en = {
       linkDesc: "Connect memories to each other and to entities (backlinks)",
       deleteLabel: "Delete",
       deleteDesc: "Soft-delete memories and remove graph nodes",
-      exportLabel: "Export",
-      exportDesc: "Bulk-export the whole brain",
       importLabel: "Import",
       importDesc: "Bulk-import an .afrbrain archive into this brain",
       consolidateLabel: "Consolidate",
       consolidateDesc: "Merge duplicate memories and resolve flagged conflicts",
+      ingestLabel: "Auto-capture from conversations",
+      ingestDesc:
+        "Write memories on its own from conversation turns, without you reviewing them first",
     },
     operation: {
       memoryCreate: "Created a memory",
@@ -2611,6 +2715,9 @@ export const en = {
       memoryRestore: "Restored a memory version",
       memorySearch: "Searched the brain",
       memoryRecall: "Recalled context",
+      memoryIngest: "Captured from a conversation",
+      sessionStart: "Started a session",
+      sessionEnd: "Ended a session",
       entityUpsert: "Recorded an entity",
       entityUpdate: "Updated an entity",
       entityDelete: "Deleted an entity",
@@ -2796,15 +2903,13 @@ export const en = {
     },
     settings: {
       title: "Settings",
-      description: "Rename, archive, export, or add another brain.",
+      description: "Rename, archive, or add another brain.",
       loading: "Loading brain",
       updated: "Brain updated",
       updateFailed: "Could not update brain",
       archivedNotice: "Brain archived — it is now read-only",
       reactivated: "Brain reactivated",
       statusChangeFailed: "Could not change status",
-      exported: "Brain exported",
-      exportFailed: "Export failed",
       created: 'Created "{name}"',
       createFailed: "Could not create brain",
       thisBrain: "This brain",
@@ -2818,11 +2923,6 @@ export const en = {
       defaultChip: "default",
       currentChip: "current",
       createdOn: "Created {date}",
-      exportTitle: "Export",
-      exportBody:
-        "Downloads this brain as JSON: memories with their tags and provenance, projects, and the knowledge graph. No credentials are included.",
-      exportNote: "Export only. Use this for backups; import is not available.",
-      exportAction: "Export brain",
       statusTitle: "Status",
       statusActiveBody:
         "Archiving makes this brain read-only. Nothing is deleted, and agents can still recall from it.",
@@ -2905,7 +3005,7 @@ export const en = {
       namePlaceholder: "Agent name (OpenClaw, Hermes, …)",
       nameLabel: "Agent name",
       permissions: "Permissions",
-      riskyOff: "Delete and Export are off by default on purpose.",
+      riskyOff: "Delete and unattended ingest are off by default on purpose.",
       createAgent: "Create agent",
       loading: "Loading agents",
       loadFailed: "Could not load agents.",
@@ -2931,6 +3031,29 @@ export const en = {
       copyConfig: "Copy config",
       copyCommand: "Copy command",
       authentication: "Authentication",
+      install: {
+        title: "Install this Brain",
+        description:
+          "Choose the agent host, copy its safe configuration, then give it the operating instruction below. Every MCP-capable agent can connect; named hosts are examples, not an allowlist.",
+        targetLabel: "Agent host",
+        artifactLabel: "Installation artifact",
+        targetUniversal: "Universal MCP",
+        targetClaudeCode: "Claude Code",
+        targetClaudeDesktop: "Claude Desktop",
+        targetCodex: "Codex",
+        targetOpenCode: "OpenCode",
+        targetHermes: "Hermes",
+        targetOther: "Other MCP client",
+        ingestEnabled: "Session harvesting enabled",
+        ingestDisabled: "Session harvesting disabled",
+        copySafe: "Copy safe template",
+        copyReady: "Copy ready-to-paste",
+        readyWarning:
+          "Ready-to-paste inserts the one-time key into the copied text. Treat that copy as a secret and never commit it.",
+        instructionTitle: "Agent operating instruction",
+        copyInstruction: "Copy instruction",
+        verifyTitle: "Verify the connection",
+      },
     },
     presence: {
       live: "Connected",

@@ -11,6 +11,8 @@ import {
   buildImageEditRequest,
   buildExtractAudioArgs,
   buildTrimArgs,
+  buildVideoThumbnailArgs,
+  buildVideoTrimArgs,
   canExtractAudioFrom,
   canReencodeInPlace,
   chooseImageEncoder,
@@ -999,6 +1001,37 @@ describe("buildTrimArgs", () => {
 
   it("puts the output path last", () => {
     expect(args[args.length - 1]).toBe("/tmp/out.mp4");
+  });
+
+  it("moves MP4 metadata to the front without applying MP4 flags to other containers", () => {
+    const mp4 = buildVideoTrimArgs({
+      inputPath: "in.mp4",
+      outputPath: "out.mp4",
+      startSeconds: 1,
+      endSeconds: 2,
+      mimeType: "video/mp4",
+    });
+    expect(mp4.slice(mp4.indexOf("-movflags"), mp4.indexOf("-movflags") + 2)).toEqual([
+      "-movflags",
+      "+faststart",
+    ]);
+
+    const webm = buildVideoTrimArgs({
+      inputPath: "in.webm",
+      outputPath: "out.webm",
+      startSeconds: 1,
+      endSeconds: 2,
+      mimeType: "video/webm",
+    });
+    expect(webm).not.toContain("-movflags");
+  });
+
+  it("extracts one source frame with input-side seeking for all thumbnail sizes", () => {
+    const thumbnail = buildVideoThumbnailArgs("/tmp/in.mp4", "/tmp/frame.png");
+    expect(thumbnail.indexOf("-ss")).toBeLessThan(thumbnail.indexOf("-i"));
+    expect(thumbnail[thumbnail.indexOf("-frames:v") + 1]).toBe("1");
+    expect(thumbnail).not.toContain("scale=");
+    expect(thumbnail[thumbnail.length - 1]).toBe("/tmp/frame.png");
   });
 
   it("clamps a negative start to the beginning of the clip", () => {

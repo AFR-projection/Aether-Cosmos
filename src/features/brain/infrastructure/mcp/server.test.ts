@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createBrainMcpServer } from "@brain/infrastructure/mcp/server";
@@ -13,7 +13,16 @@ import type { McpPrincipal } from "@brain/infrastructure/mcp/principal";
  * Talks to the real MCP server over an in-memory transport. Listing tools never
  * runs a handler, so this needs no database — but it does prove the server
  * initializes, advertises its tools, and exposes usable input schemas.
+ *
+ * The handshake now reads standing instructions, which is the one thing here that
+ * would touch a database. It is stubbed empty: this file is about the tool surface,
+ * and the payload itself is covered in ./instructions.test.ts.
  */
+vi.mock("@brain/application/queries/directives", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@brain/application/queries/directives")>()),
+  listStandingInstructions: async () => [],
+}));
+
 const principal: McpPrincipal = {
   type: "agent",
   id: "agent-1",
@@ -32,7 +41,7 @@ const principal: McpPrincipal = {
 };
 
 async function connect() {
-  const server = createBrainMcpServer(principal);
+  const server = await createBrainMcpServer(principal);
   const client = new Client({ name: "test-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -77,6 +86,13 @@ describe("Brain MCP server", () => {
       expect(names).toContain("brain_health");
       // P7: provenance explanation.
       expect(names).toContain("brain_explain");
+      // v2.3: active conversation lifecycle plus conservative writeback.
+      expect(names).toContain("brain_session_start");
+      expect(names).toContain("brain_session_turn");
+      expect(names).toContain("brain_session_end");
+      expect(names).toContain("brain_ingest");
+      expect(names).not.toContain("brain_export_memories");
+      expect(names).toHaveLength(32);
     } finally {
       await client.close();
       await server.close();
@@ -155,7 +171,7 @@ describe("Brain MCP server", () => {
     // Fail-closed before any database work: a brainId that is not in the grants is
     // rejected by requireGrant, so an unauthorized call cannot even reach retrieval
     // (which is what makes this assertion safe without a live Postgres).
-    const server = createBrainMcpServer({ ...principal, grants: [] });
+    const server = await createBrainMcpServer({ ...principal, grants: [] });
     const client = new Client({ name: "test-client", version: "1.0.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -201,7 +217,7 @@ const INTELLIGENCE_CALLS: Array<{ name: string; arguments: Record<string, unknow
 ];
 
 async function connectAs(overrides: Partial<McpPrincipal>) {
-  const server = createBrainMcpServer({ ...principal, ...overrides });
+  const server = await createBrainMcpServer({ ...principal, ...overrides });
   const client = new Client({ name: "test-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

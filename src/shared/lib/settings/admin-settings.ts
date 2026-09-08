@@ -1,6 +1,12 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/shared/infrastructure/db";
 import { systemSettings } from "@/shared/infrastructure/db/schema";
+import {
+  clampPlaybackExpirySeconds,
+  PLAYBACK_EXPIRY_DEFAULT_SECONDS,
+  PLAYBACK_EXPIRY_MAX_SECONDS,
+  PLAYBACK_EXPIRY_MIN_SECONDS,
+} from "@/shared/lib/media/playback-policy";
 
 export interface AdminSettings {
   maintenanceMode: boolean;
@@ -44,6 +50,21 @@ export interface AdminSettings {
   uploadUrlExpiryMinutes: number;
   /** Lifetime of a download URL. Short: it is handed straight to the browser. */
   downloadUrlExpirySeconds: number;
+  /**
+   * Lifetime of a media playback URL, in seconds. Deliberately NOT the download value: a
+   * download is used once within seconds, while a playback URL signs every buffer segment and
+   * every seek for the whole viewing. See `PLAYBACK_EXPIRY_DEFAULT_SECONDS`.
+   */
+  playbackUrlExpirySeconds: number;
+  /**
+   * Where video bytes come from.
+   *
+   * `direct_r2` is the architecture: authorize once, then the browser talks to R2 and neither
+   * Next.js nor Aiven is in the byte path. `legacy_proxy` is the old behaviour, kept as a
+   * one-setting rollback for an operator who hits something in production that testing did
+   * not — it is a strictly slower path, not a safer one.
+   */
+  playbackMode: "direct_r2" | "legacy_proxy";
   // ── New accounts ──
   /** Egress allowance given to a new account, in GB. 0 = unmetered. */
   defaultBandwidthQuotaGB: number;
@@ -91,6 +112,8 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   loginLockoutMinutes: 15,
   uploadUrlExpiryMinutes: 15,
   downloadUrlExpirySeconds: 60,
+  playbackUrlExpirySeconds: PLAYBACK_EXPIRY_DEFAULT_SECONDS,
+  playbackMode: "direct_r2",
   defaultBandwidthQuotaGB: 0,
   allowedEmailDomains: [],
   publicSharingEnabled: true,
@@ -227,6 +250,16 @@ function normalizeSettings(raw: Partial<AdminSettings> | null | undefined): Admi
       3600,
       DEFAULT_ADMIN_SETTINGS.downloadUrlExpirySeconds
     ),
+    // Playback gets its own, wider band. The download ceiling of one hour would cut a
+    // two-hour film in half, and the download floor of 15 s would not survive the first
+    // buffer segment — see src/shared/lib/media/playback-policy.ts for the reasoning.
+    playbackUrlExpirySeconds: clamp(
+      Number(cleaned.playbackUrlExpirySeconds),
+      PLAYBACK_EXPIRY_MIN_SECONDS,
+      PLAYBACK_EXPIRY_MAX_SECONDS,
+      PLAYBACK_EXPIRY_DEFAULT_SECONDS
+    ),
+    playbackMode: cleaned.playbackMode === "legacy_proxy" ? "legacy_proxy" : "direct_r2",
     defaultBandwidthQuotaGB: clamp(
       Number(cleaned.defaultBandwidthQuotaGB),
       0,
@@ -361,6 +394,22 @@ export function uploadUrlExpirySeconds(settings?: AdminSettings): number {
 export function downloadUrlExpirySeconds(settings?: AdminSettings): number {
   const s = settings ?? getAdminSettingsSync();
   return s.downloadUrlExpirySeconds;
+}
+
+export function playbackUrlExpirySeconds(settings?: AdminSettings): number {
+  const s = settings ?? getAdminSettingsSync();
+  return clampPlaybackExpirySeconds(s.playbackUrlExpirySeconds);
+}
+
+/**
+ * `true` while the operator has pinned playback back onto the proxy route.
+ *
+ * Read through the sync snapshot on purpose: it is consulted on a page render, and the
+ * fallback (`direct_r2`) is the one we want if the snapshot is not warm yet.
+ */
+export function playbackProxyForced(settings?: AdminSettings): boolean {
+  const s = settings ?? getAdminSettingsSync();
+  return s.playbackMode === "legacy_proxy";
 }
 
 /**

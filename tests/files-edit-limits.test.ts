@@ -26,6 +26,7 @@ import { EDIT_MAX_DIMENSION, EDIT_SOURCE_MAX_BYTES } from "@files/domain/service
  */
 
 const NEW_FILE_ID = "9b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9";
+const TRIM_OPERATION_ID = "7a2b3c4d-5e6f-4789-8abc-0d1e2f3a4b5c";
 
 const store = vi.hoisted(() => ({
   file: null as Record<string, unknown> | null,
@@ -35,7 +36,11 @@ const store = vi.hoisted(() => ({
   r2Calls: 0,
   put: [] as { key: string; size: number; contentType: string; body: Buffer }[],
   snapshots: 0,
-  jobs: [] as { type: string; data: Record<string, unknown> }[],
+  jobs: [] as {
+    type: string;
+    data: Record<string, unknown>;
+    opts?: { jobId?: string };
+  }[],
   updates: [] as Record<string, unknown>[],
   inserts: [] as Record<string, unknown>[],
   recalculated: [] as string[],
@@ -92,9 +97,13 @@ vi.mock("@files/application/commands/versions", () => ({
 
 vi.mock("@/shared/infrastructure/queue", () => ({
   getQueue: vi.fn(() => (store.queueUp ? ({} as unknown) : null)),
-  enqueueJob: vi.fn(async (type: string, data: Record<string, unknown>) => {
+  enqueueJob: vi.fn(async (
+    type: string,
+    data: Record<string, unknown>,
+    opts?: { jobId?: string },
+  ) => {
     if (!store.queueUp) return false;
-    store.jobs.push({ type, data });
+    store.jobs.push({ type, data, opts });
     return true;
   }),
 }));
@@ -257,12 +266,13 @@ async function edit(body: Record<string, unknown>) {
 }
 
 async function trim(body: Record<string, unknown>) {
+  const payload = { operationId: TRIM_OPERATION_ID, ...body };
   const { PUT } = await import("@/app/api/files/edit/route");
   return PUT(
     new NextRequest("http://localhost/api/files/edit", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     })
   );
 }
@@ -293,6 +303,18 @@ describe("POST /api/files/edit — output size", () => {
     expect(response.status).toBe(200);
     expect(store.put).toHaveLength(1);
     expect(store.updates[0]).toMatchObject({ sizeBytes: store.put[0].size });
+    expect(store.jobs).toEqual([
+      {
+        type: "generate_thumbnail",
+        data: {
+          fileId: FILE_ID,
+          r2Key: `files/${FILE_ID}`,
+          mimeType: "image/png",
+          version: 2,
+        },
+        opts: { jobId: `thumb-${FILE_ID}-v2` },
+      },
+    ]);
   });
 
   it("refuses a 10-gigapixel resize before reading anything", async () => {
@@ -855,7 +877,9 @@ describe("POST /api/files/edit — save as copy", () => {
           fileId: NEW_FILE_ID,
           r2Key: `users/user-1/objects/${NEW_FILE_ID}`,
           mimeType: "image/png",
+          version: 1,
         },
+        opts: { jobId: `thumb-${NEW_FILE_ID}-v1` },
       },
     ]);
     expect(store.activity).toEqual([
@@ -915,19 +939,27 @@ describe("POST /api/files/edit — save as copy", () => {
 describe("PUT /api/files/edit — trim window", () => {
   it("queues a valid window", async () => {
     seedMedia();
-    const response = await trim({ fileId: FILE_ID, startSeconds: 1, endSeconds: 5 });
+    const response = await trim({
+      fileId: FILE_ID,
+      operationId: TRIM_OPERATION_ID,
+      startSeconds: 1,
+      endSeconds: 5,
+    });
 
     expect(response.status).toBe(200);
     expect(store.jobs).toEqual([
       {
         type: "trim_media",
         data: {
+          operationId: TRIM_OPERATION_ID,
           fileId: FILE_ID,
           r2Key: `files/${FILE_ID}`,
           mimeType: "video/mp4",
+          version: 2,
           startSeconds: 1,
           endSeconds: 5,
         },
+        opts: { jobId: `trim-${TRIM_OPERATION_ID}` },
       },
     ]);
   });

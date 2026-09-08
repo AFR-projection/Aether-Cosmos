@@ -28,6 +28,7 @@ const searchSchema = z.object({
   minSize: size.optional(),
   maxSize: size.optional(),
   folderId: z.string().uuid().optional(),
+  favorites: z.coerce.boolean().default(false),
   from: timestampParam.optional(),
   to: timestampParam.optional(),
   cursor: timestampParam.optional(),
@@ -66,6 +67,9 @@ export async function GET(request: NextRequest) {
     }
     if (params.folderId) {
       conditions.push(eq(files.folderId, params.folderId));
+    }
+    if (params.favorites) {
+      conditions.push(eq(files.isFavorite, true));
     }
     if (params.from) {
       conditions.push(gte(files.createdAt, params.from));

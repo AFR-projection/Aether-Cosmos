@@ -36,6 +36,12 @@ export type RememberInput = {
   confidence?: number;
   sourceType?: MemorySourceType;
   sourceId?: string | null;
+  /**
+   * Only set on the create path. Moving an existing memory between projects is a
+   * decision about that memory, not a side effect of writing the same title again —
+   * `updateMemory` takes it, but `rememberMemory` deliberately does not forward it.
+   */
+  projectId?: string | null;
   tags?: string[];
   metadata?: Record<string, unknown> | null;
 };

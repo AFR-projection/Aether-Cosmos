@@ -34,7 +34,9 @@ import { requireBackupRequester } from "../_guard";
 // one. See `_aftercare.ts` — the module needs `@brain/*` and lives here so `@backup` need not.
 import {
   scheduleDerivedGraphRebuild,
+  scheduleRestoredMediaInspection,
   type DerivedRebuildReport,
+  type MediaInspectionReport,
 } from "./_aftercare";
 
 /**
@@ -122,7 +124,8 @@ type RemovedCounts =
 function successBody(
   outcome: RestoreOutcome,
   removed: RemovedCounts | null,
-  graph: DerivedRebuildReport | null
+  graph: DerivedRebuildReport | null,
+  media: MediaInspectionReport | null
 ) {
   return {
     restoreBatchId: outcome.restoreBatchId,
@@ -148,6 +151,7 @@ function successBody(
     },
     removed,
     graph,
+    media,
   };
 }
 
@@ -358,12 +362,19 @@ export async function POST(request: NextRequest) {
      * not arrive.
      */
     let graph: DerivedRebuildReport | null = null;
+    let media: MediaInspectionReport | null = null;
     if (domain === "brain") {
       try {
         const owned = await listBrains(user.id);
         graph = await scheduleDerivedGraphRebuild(owned.map((each) => each.id));
       } catch {
         graph = { brains: 0, queued: 0 };
+      }
+    } else {
+      try {
+        media = await scheduleRestoredMediaInspection(user.id);
+      } catch {
+        media = { files: 0, queued: 0 };
       }
     }
 
@@ -395,12 +406,13 @@ export async function POST(request: NextRequest) {
         // Recorded because "the graph was empty after a restore" is a support question, and this
         // is the line that answers it: `queued` below `brains` means the worker was not reachable.
         ...(graph === null ? {} : { graphRebuild: graph }),
+        ...(media === null ? {} : { mediaInspection: media }),
         result: "ok",
       },
       ip,
     });
 
-    return apiSuccess(successBody(outcome, removed, graph));
+    return apiSuccess(successBody(outcome, removed, graph, media));
   } catch (error) {
     /**
      * A body that ended cleanly but short of what the browser said it was sending was cut in

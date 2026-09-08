@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { timestampParam } from "@/shared/api/query-params";
 
 /**
@@ -17,12 +19,18 @@ import { timestampParam } from "@/shared/api/query-params";
 const store = vi.hoisted(() => ({
   queries: 0,
   rows: [] as Record<string, unknown>[],
+  whereClauses: [] as SQL[],
 }));
 
 vi.mock("@/shared/infrastructure/db", () => {
   function chain(): Record<string, unknown> {
     const self: Record<string, unknown> = {};
-    for (const step of ["from", "where", "orderBy", "limit", "offset"]) {
+    self.from = () => self;
+    self.where = (condition: SQL) => {
+      store.whereClauses.push(condition);
+      return self;
+    };
+    for (const step of ["orderBy", "limit", "offset"]) {
       self[step] = () => self;
     }
     self.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) => {
@@ -70,6 +78,7 @@ function listRequest(query: string) {
 beforeEach(() => {
   store.queries = 0;
   store.rows = [];
+  store.whereClauses = [];
   vi.clearAllMocks();
 });
 
@@ -142,6 +151,16 @@ describe("GET /api/search — parameter validation", () => {
     const response = await search(searchRequest("q=invoice&page=2"));
     expect(response.status).toBe(200);
     expect(store.queries).toBe(1);
+  });
+
+  it("limits favorite searches to rows with the favorite flag", async () => {
+    const response = await search(searchRequest("q=roadmap&favorites=true"));
+
+    expect(response.status).toBe(200);
+    expect(store.queries).toBe(1);
+    const query = new PgDialect().sqlToQuery(store.whereClauses.at(-1)!);
+    expect(query.sql).toContain('"files"."is_favorite" = $');
+    expect(query.params).toContain(true);
   });
 });
 

@@ -92,7 +92,9 @@ describe("the descriptor and the schema agree, column for column", () => {
   it("found the schema at all", () => {
     // Guards every test below: a refactor that stopped finding tables would make them
     // pass by comparing nothing to nothing.
-    expect(schemaTables.size).toBe(52);
+    // 53: the original 52 + `media_operations` from migration 0030 (class `never` —
+    // a restore must not write half-finished work records for another machine).
+    expect(schemaTables.size).toBe(53);
     expect(CARRIED).toHaveLength(16);
   });
 

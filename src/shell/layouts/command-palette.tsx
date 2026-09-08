@@ -6,12 +6,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, FileText, FolderOpen, LayoutDashboard, Star, Command, ArrowRight, Brain, Network, Bot } from "lucide-react";
 import { apiFetch } from "@/shared/api/client";
 import { useT, type TranslationKey } from "@/shared/lib/i18n";
+import { FILES_FAVORITES_HREF } from "@files/domain/services/file-filter";
 
 /** Hoisted out of the render: the destinations never change, only their wording does. */
 const NAV_ITEMS = [
   { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, descKey: "palette.dashboardHint" },
   { href: "/files", labelKey: "nav.files", icon: FolderOpen, descKey: "palette.filesHint" },
-  { href: "/favorites", labelKey: "nav.favorites", icon: Star, descKey: "palette.favoritesHint" },
+  { href: FILES_FAVORITES_HREF, labelKey: "nav.favorites", icon: Star, descKey: "palette.favoritesHint" },
   { href: "/brain", labelKey: "nav.brain", icon: Brain, descKey: "palette.brainHint" },
   { href: "/brain/memories?new=1", labelKey: "palette.newMemory", icon: Brain, descKey: "palette.newMemoryHint" },
   { href: "/brain/graph", labelKey: "palette.graph", icon: Network, descKey: "palette.graphHint" },

@@ -158,13 +158,13 @@ describe("case 5 — brain scopes do not escalate", () => {
 
   it("write implies only link, never anything destructive or bulk", () => {
     expect(brainScopeSatisfied(["brain.write"], "brain.link")).toBe(true);
-    for (const scope of ["brain.delete", "brain.export", "brain.import", "brain.consolidate"]) {
+    for (const scope of ["brain.delete", "brain.import", "brain.consolidate"]) {
       expect(brainScopeSatisfied(["brain.write"], scope)).toBe(false);
     }
   });
 
   it("the default agent grant carries nothing destructive or bulk", () => {
-    for (const scope of ["brain.delete", "brain.export", "brain.import", "brain.consolidate"]) {
+    for (const scope of ["brain.delete", "brain.import", "brain.consolidate"]) {
       expect(DEFAULT_BRAIN_AGENT_SCOPES).not.toContain(scope);
       expect(brainScopeSatisfied(DEFAULT_BRAIN_AGENT_SCOPES, scope)).toBe(false);
     }
@@ -299,20 +299,21 @@ describe("case 9 — imported references cannot point outside the archive", () =
   });
 });
 
-describe("case 10 — export carries brain content only", () => {
-  it("the archive builder never reads a user, session, api key or credential table", () => {
+describe("case 10 — standalone brain export is not exposed", () => {
+  it("retains the archive builder only as an internal backup/import primitive", () => {
     const source = readFileSync(join(ROOT, "src", "features", "brain", "application", "commands", "export-service.ts"), "utf8");
     for (const forbidden of ["users", "sessions", "apiKeys", "mailSenders", "otpTokens", "oauth"]) {
-      expect(source).not.toMatch(new RegExp(`\b${forbidden}\b`));
+      expect(source).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
     }
   });
 
-  it("the export route refuses without the export scope", () => {
-    const source = readFileSync(join(ROOT, "app", "api", "brain", "[id]", "export", "route.ts"), "utf8");
-    expect(source).toMatch(/"brain\.export"/);
+  it("does not expose a standalone export route", () => {
+    expect(
+      brainRoutes.map((route) => route.path)
+    ).not.toContain("app/api/brain/[id]/export/route.ts");
   });
 
-  it("the import route is owner-only and refuses without the import scope", () => {
+  it("the import route remains owner-only and refuses without the import scope", () => {
     const source = readFileSync(join(ROOT, "app", "api", "brain", "[id]", "import", "route.ts"), "utf8");
     expect(source).toMatch(/requireBrainOwnerContext/);
     expect(source).toMatch(/"brain\.import"/);

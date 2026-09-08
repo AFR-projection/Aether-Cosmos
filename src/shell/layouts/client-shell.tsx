@@ -20,26 +20,11 @@ import { clearLocalUploads } from "@/shared/lib/system/local-upload-registry";
 import { publishActivityIdentity } from "@/shared/lib/activity/activity-identity";
 import { resetCsrfToken } from "@/shared/api/client";
 import { APP_NAME } from "@/shared/lib/app-version";
-import { createTranslator, getLocale, useT, type TranslationKey } from "@/shared/lib/i18n";
+import { createTranslator, getLocale, useT } from "@/shared/lib/i18n";
+import { getShellTitleKey } from "./navigation-route";
 import { OnboardingChecklist } from "@shell/compositions/onboarding-checklist";
 
 const STORAGE_KEY = "sidebar_collapsed";
-
-const PAGE_TITLE_KEYS: Record<string, TranslationKey> = {
-  "/dashboard": "nav.dashboard",
-  "/files": "nav.files",
-  "/favorites": "nav.favorites",
-  "/shares": "nav.shared",
-  "/recycle-bin": "nav.recycleBin",
-  "/backup": "nav.backup",
-};
-
-/** null means the route has no title of its own and the product name stands in —
- *  a brand is the same word in every locale, so it is not a translation key. */
-function getPageTitleKey(pathname: string): TranslationKey | null {
-  if (pathname.startsWith("/admin")) return "nav.admin";
-  return PAGE_TITLE_KEYS[pathname] ?? null;
-}
 
 function getStoredCollapsed(): boolean {
   if (typeof window === "undefined") return false;
@@ -169,7 +154,7 @@ export function ClientShell({
     return <div className="min-h-dvh bg-background" aria-busy="true" />;
   }
 
-  const titleKey = getPageTitleKey(pathname);
+  const titleKey = getShellTitleKey(pathname);
   const title = titleKey ? t(titleKey) : APP_NAME;
 
   return (

@@ -5517,16 +5517,11 @@ button.adm-tile:focus-visible {
   button.adm-metric { transition: none !important; }
 }
 
-/* ── Shared with me ───────────────────────────────────────────────────────
-   Page scope for /shared-with-me. It is a collaboration inbox: pending
-   invitations are the only thing that needs acting on, and the folders below
-   are a destination list, so the layout puts one decision above one grid and
-   spends nothing on decoration.
-
-   Same cascade contract as the other namespaces here — Tailwind utilities live
-   in a layer and these rules do not, so anything both could set (colour,
-   radius, padding) belongs to the rule and variants ride on [data-*]. */
-.shr-page {
+/* ── Unified Sharing workspace ─────────────────────────────────────────────
+   One canonical surface for received folders, invitations, managed links and
+   access history. Variants use data attributes because this unlayered namespace
+   intentionally outranks Tailwind utilities. */
+.shr-shell {
   --shr-panel: color-mix(in srgb, var(--surface) 94%, var(--background));
   --shr-hairline: color-mix(in srgb, var(--border) 88%, var(--accent) 12%);
   --shr-rim: color-mix(in srgb, var(--accent) 26%, transparent);
@@ -5536,10 +5531,11 @@ button.adm-tile:focus-visible {
   position: relative;
   max-width: 1440px;
   margin: 0 auto;
+  padding: clamp(1.25rem, 2.8vw, 2.5rem) clamp(1rem, 2.8vw, 2.5rem) 3rem;
 }
 
 /* One static wash behind the header, matching /dashboard. Never animated. */
-.shr-page::before {
+.shr-shell::before {
   content: "";
   position: absolute;
   z-index: -1;
@@ -5553,15 +5549,16 @@ button.adm-tile:focus-visible {
   pointer-events: none;
 }
 
-/* ── Header ── */
-.shr-header {
+/* ── Workspace hero ── */
+.shr-hero {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 1.5rem;
-  flex-wrap: wrap;
-  margin-bottom: clamp(1.5rem, 2.6vw, 2.25rem);
+  margin-bottom: 1rem;
 }
+
+.shr-hero__copy { min-width: 0; }
 
 .shr-kicker {
   display: inline-flex;
@@ -5575,15 +5572,12 @@ button.adm-tile:focus-visible {
   text-transform: uppercase;
 }
 
-.shr-kicker > span {
-  width: 0.46rem;
-  height: 0.46rem;
-  border-radius: 999px;
-  background: currentColor;
-  box-shadow: 0 0 0.75rem color-mix(in srgb, var(--accent) 70%, transparent);
+.shr-kicker > svg {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
-.shr-header h1 {
+.shr-hero h1 {
   margin: 0;
   color: var(--foreground);
   font-size: clamp(1.75rem, 3.2vw, 2.5rem);
@@ -5592,58 +5586,99 @@ button.adm-tile:focus-visible {
   line-height: 1.05;
 }
 
-.shr-header__copy > p:last-child {
-  max-width: 34rem;
+.shr-hero__copy > p:last-child {
+  max-width: 46rem;
   margin: 0.7rem 0 0;
   color: var(--shr-muted);
   font-size: 0.92rem;
   line-height: 1.6;
 }
 
-/* ── Tally ──
-   Two figures next to the title: how many folders, how many invitations still
-   waiting. Read-only on purpose — the counts label the sections below rather
-   than acting as a second set of controls. */
-.shr-tally {
-  display: flex;
-  gap: 0.6rem;
-  padding-bottom: 0.15rem;
-}
-
-.shr-tally__item {
-  min-width: 6.5rem;
-  padding: 0.6rem 0.85rem;
+/* ── View switcher ── */
+.shr-switcher {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: min(23rem, 100%);
+  padding: 0.25rem;
   border: 1px solid var(--shr-hairline);
   border-radius: 0.9rem;
   background: var(--shr-panel);
 }
 
-.shr-tally__item[data-tone="accent"] {
-  border-color: var(--shr-rim);
-  background: var(--shr-soft);
+.shr-switcher a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.68rem;
+  color: var(--shr-muted);
+  font-size: 0.8rem;
+  font-weight: 620;
+  text-align: center;
+  text-decoration: none;
+  transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
-.shr-tally__value {
-  display: block;
+.shr-switcher a:hover { color: var(--foreground); background: var(--shr-row); }
+.shr-switcher a[data-active] {
+  background: var(--surface);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-sm);
+}
+.shr-switcher a:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.shr-switcher svg { width: 0.95rem; height: 0.95rem; flex-shrink: 0; }
+
+/* ── Summary ── */
+.shr-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 1.1rem;
+}
+
+.shr-summary__tile {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--shr-hairline);
+  border-radius: 0.95rem;
+  background: var(--shr-panel);
+}
+
+.shr-summary__icon {
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex-shrink: 0;
+  border-radius: 0.75rem;
+  background: var(--shr-soft);
+  color: var(--accent-ink);
+}
+.shr-summary__icon svg { width: 1.05rem; height: 1.05rem; }
+.shr-summary__text { display: grid; min-width: 0; }
+.shr-summary__text strong {
   color: var(--foreground);
-  font-size: 1.35rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-size: 1.2rem;
+  font-weight: 680;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
-
-.shr-tally__item[data-tone="accent"] .shr-tally__value { color: var(--accent-ink); }
-
-.shr-tally__label {
-  display: block;
-  margin-top: 0.15rem;
+.shr-summary__text > span {
+  margin-top: 0.18rem;
   color: var(--shr-muted);
-  font-size: 0.67rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
+
+.shr-view { display: grid; }
 
 /* ── Panel ──
    The only container on the page. Header row carries an icon badge, a title, an
@@ -5878,6 +5913,8 @@ button.adm-tile:focus-visible {
 
 .shr-note[data-tone="danger"] { --tone: var(--danger); --tone-ink: var(--danger-ink); }
 .shr-note > svg { width: 0.95rem; height: 0.95rem; flex-shrink: 0; margin-top: 0.12rem; color: var(--tone-ink, var(--info-ink)); }
+.shr-note--retry { align-items: center; }
+.shr-note--retry > span { flex: 1; }
 
 /* ── Folder grid ──
    auto-fill rather than fixed column counts, so the cards reflow with the
@@ -5975,12 +6012,179 @@ button.adm-tile:focus-visible {
 .shr-card__who { color: var(--foreground); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shr-card__when { margin-left: auto; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
+/* ── Managed public links ── */
+.shr-panel__body--links { padding: 0.55rem; }
+.shr-links { display: grid; gap: 0.45rem; }
+
+.shr-link {
+  overflow: hidden;
+  border: 1px solid var(--shr-hairline);
+  border-radius: 0.95rem;
+  background: var(--surface);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+.shr-link:hover,
+.shr-link[data-expanded] { border-color: var(--shr-rim); }
+.shr-link[data-expanded] { background: color-mix(in srgb, var(--shr-soft) 42%, var(--surface)); }
+
+.shr-link__row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.8rem;
+}
+
+.shr-link__icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  border-radius: 0.78rem;
+  background: var(--shr-soft);
+  color: var(--accent-ink);
+}
+.shr-link__icon svg { width: 1.1rem; height: 1.1rem; }
+.shr-link__main { min-width: 0; flex: 1; }
+.shr-link__name {
+  margin: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.88rem;
+  font-weight: 630;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shr-link__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+  margin-top: 0.4rem;
+  color: var(--shr-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.shr-link__meta > span { display: inline-flex; align-items: center; gap: 0.28rem; }
+.shr-link__meta > span > svg { width: 0.76rem; height: 0.76rem; }
+
+.shr-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.15rem 0.48rem;
+  border: 1px solid var(--shr-hairline);
+  border-radius: 999px;
+  background: var(--shr-row);
+  color: var(--shr-muted);
+  font-weight: 650;
+  white-space: nowrap;
+}
+.shr-status[data-status="active"] {
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success-ink);
+}
+.shr-status[data-status="expired"],
+.shr-status[data-status="limit-reached"] {
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning-ink);
+}
+
+.shr-link__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.shr-link__actions button { min-height: 2.25rem; padding-inline: 0.58rem; }
+.shr-link__actions button svg { width: 0.86rem; height: 0.86rem; }
+.shr-link__actions button[data-danger="true"] { color: var(--danger-ink); }
+.shr-link__actions button[data-danger="true"]:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.shr-link[data-expanded] .shr-disclosure { transform: rotate(180deg); }
+.shr-disclosure { transition: transform 180ms ease; }
+
+.shr-link__history {
+  overflow: hidden;
+  border-top: 1px solid var(--shr-hairline);
+}
+
+/* ── Access history ── */
+.shr-history { padding: 0.85rem; background: color-mix(in srgb, var(--background) 32%, transparent); }
+.shr-history__head h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.65rem;
+  color: var(--foreground);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.shr-history__head svg { width: 0.88rem; height: 0.88rem; color: var(--accent-ink); }
+.shr-history__list { display: grid; gap: 0.42rem; margin: 0; padding: 0; list-style: none; }
+.shr-history__event {
+  display: flex;
+  gap: 0.65rem;
+  padding: 0.65rem;
+  border: 1px solid var(--shr-hairline);
+  border-radius: 0.8rem;
+  background: var(--surface);
+}
+.shr-history__device {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: 0.65rem;
+  background: var(--shr-soft);
+  color: var(--accent-ink);
+}
+.shr-history__device svg { width: 0.9rem; height: 0.9rem; }
+.shr-history__details { min-width: 0; flex: 1; }
+.shr-history__details p {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  margin: 0;
+  color: var(--shr-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.shr-history__details strong { color: var(--foreground); font-weight: 650; }
+.shr-history__meta { margin-top: 0.28rem !important; }
+.shr-history__meta > span,
+.shr-history__meta > a { display: inline-flex; align-items: center; gap: 0.25rem; }
+.shr-history__meta svg { width: 0.74rem; height: 0.74rem; flex-shrink: 0; }
+.shr-history__meta a { color: var(--accent-ink); font-weight: 600; text-decoration: none; }
+.shr-history__meta a:hover { text-decoration: underline; text-underline-offset: 0.18rem; }
+.shr-history__meta a:focus-visible { outline: 2px solid var(--shr-rim); outline-offset: 2px; border-radius: 0.2rem; }
+.shr-history__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.5rem 0.75rem;
+  color: var(--shr-muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+.shr-history__state > svg { width: 1.35rem; height: 1.35rem; }
+.shr-history__state strong { color: var(--foreground); }
+.shr-history__more { display: flex; margin: 0.65rem auto 0; }
+
 /* ── Loading & empty ──
    The skeleton mirrors the real card box so nothing moves when data lands; it
    reuses the global .skeleton shimmer rather than defining a second one. */
 .shr-skel { border-radius: 0.95rem; }
 .shr-skel--card { height: 7.5rem; }
-.shr-skel--head { height: 5.5rem; max-width: 30rem; margin-bottom: clamp(1.5rem, 2.6vw, 2.25rem); }
+.shr-skel--link { height: 5.3rem; }
 
 .shr-empty {
   display: flex;
@@ -6006,32 +6210,66 @@ button.adm-tile:focus-visible {
   line-height: 1.5;
 }
 
-/* ── Responsive ──
-   Below 640px the toolbar wraps under the title, the search takes the full row
-   and every answer button reaches a 44px tap target. */
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+  .shr-hero { align-items: stretch; flex-direction: column; }
+  .shr-switcher { width: 100%; }
+  .shr-link__row { align-items: flex-start; flex-wrap: wrap; }
+  .shr-link__actions { width: 100%; padding-left: 3.25rem; }
+}
+
 @media (max-width: 640px) {
-  .shr-page::before { display: none; }
-  .shr-tally { width: 100%; }
-  .shr-tally__item { flex: 1; min-width: 0; }
-  .shr-panel__head { flex-wrap: wrap; }
-  .shr-panel__tools { margin-left: 0; width: 100%; }
+  .shr-shell { padding: 1rem 0.75rem 2rem; }
+  .shr-shell::before { display: none; }
+  .shr-hero { gap: 1rem; }
+  .shr-hero h1 { font-size: clamp(1.65rem, 8vw, 2rem); }
+  .shr-switcher { min-width: 0; }
+  .shr-switcher a { min-width: 0; padding-inline: 0.45rem; }
+  .shr-summary { grid-template-columns: 1fr; gap: 0.45rem; }
+  .shr-summary__tile { padding: 0.65rem 0.75rem; }
+  .shr-summary__icon { width: 2.15rem; height: 2.15rem; }
+  .shr-panel__head { align-items: flex-start; flex-wrap: wrap; }
+  .shr-panel__head > div:not(.shr-panel__tools) { min-width: 0; flex: 1; }
+  .shr-panel__tools { margin-left: 0; width: 100%; flex-wrap: wrap; }
   .shr-search { width: 100%; }
-  .shr-select { flex-shrink: 0; }
-  .shr-invite { flex-wrap: wrap; }
+  .shr-select { width: 100%; flex-shrink: 0; }
+  .shr-invite { align-items: flex-start; flex-wrap: wrap; }
+  .shr-invite__main { flex-basis: calc(100% - 3.2rem); }
   .shr-invite__actions { width: 100%; }
   .shr-invite__actions > button { flex: 1; min-height: 2.75rem; }
+  .shr-grid { grid-template-columns: minmax(0, 1fr); }
   .shr-card { min-height: 2.75rem; }
+  .shr-link__row { gap: 0.65rem; padding: 0.7rem; }
+  .shr-link__main { flex-basis: calc(100% - 3.2rem); }
+  .shr-link__actions { display: grid; grid-template-columns: 1fr; padding-left: 0; }
+  .shr-link__actions button { width: 100%; min-height: 2.75rem; justify-content: flex-start; }
+  .shr-history { padding: 0.65rem; }
+  .shr-history__event { align-items: flex-start; padding: 0.58rem; }
+  .shr-history__details p { align-items: flex-start; flex-direction: column; }
+  .shr-card__meta { flex-wrap: wrap; }
+  .shr-card__when { width: 100%; margin-left: 1.9rem; }
+  .shr-note--retry { align-items: flex-start; flex-wrap: wrap; }
+  .shr-note--retry button { width: 100%; }
 }
 
 /* Touch targets — pointer type rather than viewport width, matching the console. */
 @media (pointer: coarse) {
   .shr-search,
   .shr-search input,
-  .shr-select { min-height: 2.75rem; }
+  .shr-select,
+  .shr-switcher a,
+  .shr-link__actions button { min-height: 2.75rem; }
   .shr-card { min-height: 2.75rem; }
 }
 
-.lite .shr-page::before { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .shr-switcher a,
+  .shr-card,
+  .shr-link,
+  .shr-disclosure { transition: none; }
+}
+
+.lite .shr-shell::before { display: none; }
 
 /* ── Settings ─────────────────────────────────────────────────────────────
    Page scope for /settings (the end-user page, not the master console). It is

@@ -22,10 +22,12 @@ export function LeaveSharedFolderButton({
   folderId,
   folderName,
   selfUserId,
+  returnHref = "/shares?view=received",
 }: {
   folderId: string;
   folderName: string;
   selfUserId: string;
+  returnHref?: string;
 }) {
   const router = useRouter();
   const t = useT();
@@ -62,7 +64,7 @@ export function LeaveSharedFolderButton({
         tone: "success",
         duration: 3500,
       });
-      router.replace("/shared-with-me");
+      router.replace(returnHref);
       router.refresh();
     } catch {
       notify({ title: t("errors.connectionFailed"), tone: "error", duration: 4000 });

@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 // Relative, and pointing into `app/`, because that is where the module lives: it needs
 // `@brain/*` and `src/features/backup` may not import a sibling feature, so the seam is composed
 // in the route folder. `vitest.config.ts` has no `app/*` alias, hence the path.
-import { scheduleDerivedGraphRebuild } from "../app/api/backup/restore/_aftercare";
+import {
+  scheduleDerivedGraphRebuild,
+  scheduleRestoredMediaInspection,
+  type RestoredMediaCandidate,
+} from "../app/api/backup/restore/_aftercare";
 import { RELATE_SWEEP_MAX } from "@brain/application/commands/relate-jobs";
 
 /** Jobs the stubbed queue accepted, for the one test that uses the real default enqueue. */
@@ -113,5 +117,53 @@ describe("scheduling the derived-graph rebuild after a restore", () => {
     expect(jobs).toEqual([
       { type: "relate_brain", data: { brainId: "brain-a", limit: RELATE_SWEEP_MAX } },
     ]);
+  });
+});
+
+describe("scheduling media inspection after a files restore", () => {
+  const restored = (overrides: Partial<RestoredMediaCandidate> = {}): RestoredMediaCandidate => ({
+    id: "file-a",
+    r2Key: "users/u/objects/file-a",
+    mimeType: "video/mp4",
+    encrypted: false,
+    isNote: false,
+    version: 1,
+    ...overrides,
+  });
+
+  it("queues only plaintext audio and video and reports queue acceptance", async () => {
+    const asked: string[] = [];
+    const report = await scheduleRestoredMediaInspection(
+      "user-a",
+      async (file) => {
+        asked.push(file.id);
+        return file.id !== "audio-a";
+      },
+      async () => [
+        restored(),
+        restored({ id: "audio-a", mimeType: "audio/mpeg" }),
+        restored({ id: "encrypted-a", encrypted: true }),
+        restored({ id: "document-a", mimeType: "application/pdf" }),
+      ]
+    );
+
+    expect(asked).toEqual(["file-a", "audio-a"]);
+    expect(report).toEqual({ files: 2, queued: 1 });
+  });
+
+  it("keeps scheduling after one enqueue throws", async () => {
+    const asked: string[] = [];
+    const report = await scheduleRestoredMediaInspection(
+      "user-a",
+      async (file) => {
+        asked.push(file.id);
+        if (file.id === "file-a") throw new Error("queue down");
+        return true;
+      },
+      async () => [restored(), restored({ id: "file-b" })]
+    );
+
+    expect(asked).toEqual(["file-a", "file-b"]);
+    expect(report).toEqual({ files: 2, queued: 1 });
   });
 });

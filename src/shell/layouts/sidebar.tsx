@@ -23,8 +23,6 @@ import {
   X,
   Loader2,
   Settings,
-  Users,
-  Mail,
 } from "lucide-react";
 import { useTheme } from "@/ui/providers/theme-provider";
 import { cn } from "@/shared/lib/utils";
@@ -37,6 +35,8 @@ import { getActivityScopeId } from "@/shared/lib/activity/activity-store";
 import { resetCsrfToken } from "@/shared/api/client";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useSyncExternalStore } from "react";
+import { SHARING_RECEIVED_HREF } from "@shares/domain/sharing-view";
+import { isNavigationPathActive } from "./navigation-route";
 
 interface SidebarProps {
   user: {
@@ -57,9 +57,7 @@ const navItems = [
   { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { href: "/files", labelKey: "nav.files", icon: FolderOpen },
   { href: "/brain", labelKey: "nav.brain", icon: Brain },
-  { href: "/favorites", labelKey: "nav.favorites", icon: Star },
-  { href: "/shared-with-me", labelKey: "nav.sharedWithMe", icon: Users },
-  { href: "/shares", labelKey: "nav.shared", icon: Share2 },
+  { href: SHARING_RECEIVED_HREF, labelKey: "nav.sharing", icon: Share2 },
   { href: "/recycle-bin", labelKey: "nav.recycleBin", icon: Trash2 },
   { href: "/backup", labelKey: "nav.backup", icon: Archive },
 ] as const satisfies readonly {
@@ -197,7 +195,7 @@ function SidebarInner({
         {navItems
           .filter((item) => !(user.role === "master" && item.href === "/dashboard"))
           .map(({ href, labelKey, icon: Icon }, idx) => {
-          const active = pathname === href || pathname.startsWith(`${href}/`);
+          const active = isNavigationPathActive(pathname, href);
           return (
             <motion.div
               key={href}

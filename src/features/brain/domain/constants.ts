@@ -42,15 +42,16 @@ export const BRAIN_API_SCOPES = [
   "brain.write",
   "brain.link",
   "brain.delete",
-  "brain.export",
   "brain.import",
   "brain.consolidate",
+  "brain.ingest",
 ] as const;
 export type BrainApiScope = (typeof BRAIN_API_SCOPES)[number];
 
 /**
- * Destructive and bulk scopes are never handed out by default (§8): delete,
- * export (bulk extraction), import (bulk write), consolidate (merges memories).
+ * Destructive, bulk, and unattended scopes are never handed out by default (§8):
+ * delete, import (bulk write), consolidate (merges memories), and ingest (unattended
+ * writes from a conversation, with no human in the loop).
  */
 export const DEFAULT_BRAIN_AGENT_SCOPES: BrainApiScope[] = [
   "brain.read",
@@ -63,7 +64,13 @@ export const DEFAULT_BRAIN_AGENT_SCOPES: BrainApiScope[] = [
  * Scopes implied by a broader one. `brain.write` covers `brain.link` because
  * creating an edge is a write, and because every agent key issued before
  * `brain.link` existed would otherwise lose brain_link at the next deploy.
- * Nothing implies delete/export/import/consolidate.
+ * Nothing implies delete/import/consolidate.
+ *
+ * `brain.write` deliberately does **not** imply `brain.ingest`. A deliberate
+ * `brain_remember` call is a decision an agent made about one memory; ingest is a
+ * pipeline that decides for itself, on material the user never reviewed, and can
+ * write standing instructions that steer every later session. Every key already in
+ * the wild carries `brain.write` — none of them should wake up with that.
  */
 const BRAIN_SCOPE_IMPLIES: Partial<Record<BrainApiScope, readonly BrainApiScope[]>> = {
   "brain.write": ["brain.link"],

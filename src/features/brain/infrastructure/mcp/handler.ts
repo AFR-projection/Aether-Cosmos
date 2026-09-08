@@ -108,7 +108,7 @@ export async function handleBrainMcpRequest(request: Request): Promise<Response>
     );
   }
 
-  const server = createBrainMcpServer(principal);
+  const server = await createBrainMcpServer(principal);
   // sessionIdGenerator undefined = stateless: no session id is issued or required.
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,

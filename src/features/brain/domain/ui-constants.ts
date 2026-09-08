@@ -77,10 +77,6 @@ export const BRAIN_SCOPE_LABELS: Record<
     labelKey: "brain.scope.deleteLabel",
     descriptionKey: "brain.scope.deleteDesc",
   },
-  "brain.export": {
-    labelKey: "brain.scope.exportLabel",
-    descriptionKey: "brain.scope.exportDesc",
-  },
   "brain.import": {
     labelKey: "brain.scope.importLabel",
     descriptionKey: "brain.scope.importDesc",
@@ -89,14 +85,20 @@ export const BRAIN_SCOPE_LABELS: Record<
     labelKey: "brain.scope.consolidateLabel",
     descriptionKey: "brain.scope.consolidateDesc",
   },
+  "brain.ingest": {
+    labelKey: "brain.scope.ingestLabel",
+    descriptionKey: "brain.scope.ingestDesc",
+  },
 };
 
 /**
- * Scopes that let an agent destroy or exfiltrate the brain. The UI marks these
- * so a user ticking through a list notices them instead of granting them out of
- * momentum — they are also the two the API leaves out of the defaults.
+ * Scopes worth a second look before granting: `brain.delete`, which can destroy brain
+ * data, and `brain.ingest`, which writes into it unattended — including standing
+ * instructions that then steer every later session. The UI marks these so a user
+ * ticking through a list notices them instead of granting them out of momentum. They
+ * are also left out of the API defaults.
  */
-export const BRAIN_RISKY_SCOPES = new Set(["brain.delete", "brain.export"]);
+export const BRAIN_RISKY_SCOPES = new Set(["brain.delete", "brain.ingest"]);
 
 /**
  * Keys for brain_audit_logs.operation. Shared by the activity log and the agents
@@ -109,6 +111,9 @@ export const BRAIN_OPERATION_KEYS: Record<string, TranslationKey> = {
   "memory.restore": "brain.operation.memoryRestore",
   "memory.search": "brain.operation.memorySearch",
   "memory.recall": "brain.operation.memoryRecall",
+  "memory.ingest": "brain.operation.memoryIngest",
+  "session.start": "brain.operation.sessionStart",
+  "session.end": "brain.operation.sessionEnd",
   "entity.upsert": "brain.operation.entityUpsert",
   "entity.update": "brain.operation.entityUpdate",
   "entity.delete": "brain.operation.entityDelete",

@@ -322,9 +322,11 @@ function SortHeader({ labelKey, sortKey, current, order, onSort }: SortHeaderPro
 export type FileGridEmpty = {
   /** The active query, when the listing is empty because of a search. */
   searchQuery?: string;
-  /** A type filter (Images, Videos, …) is narrowing the listing. */
+  /** A filter (Images, Videos, Favorites, …) is narrowing the listing. */
   filterActive?: boolean;
-  /** Clears both the search and the type filter. */
+  /** The Favorites filter, which has its own copy — it is not a MIME type. */
+  favoritesActive?: boolean;
+  /** Clears both the search and the filter. */
   onResetFilters?: () => void;
   /** Offered only when nothing is filtering — e.g. an Upload button. */
   action?: React.ReactNode;
@@ -336,28 +338,32 @@ export type FileGridEmpty = {
 
 function FilesEmptyState({ trash, empty }: { trash: boolean; empty?: FileGridEmpty }) {
   const t = useT();
-  const { searchQuery, filterActive, onResetFilters, action, compact, readOnly } = empty ?? {};
+  const { searchQuery, filterActive, favoritesActive, onResetFilters, action, compact, readOnly } = empty ?? {};
   const searching = !!searchQuery;
 
-  const icon = trash ? Trash2 : searching ? SearchX : filterActive ? Filter : FileIcon2;
+  const icon = trash ? Trash2 : searching ? SearchX : favoritesActive ? Star : filterActive ? Filter : FileIcon2;
   // The trash wording is the recycle bin's own, reused rather than restated:
   // this listing IS that surface when `trash` is set.
   const title = trash
     ? t("recycleBin.empty")
     : searching
       ? t("files.list.empty.searchTitle")
-      : filterActive
-        ? t("files.list.empty.filterTitle")
-        : t("files.list.empty.noFiles");
+      : favoritesActive
+        ? t("files.list.empty.favoritesTitle")
+        : filterActive
+          ? t("files.list.empty.filterTitle")
+          : t("files.list.empty.noFiles");
   const description = trash
     ? t("recycleBin.emptyHint")
     : searching
       ? t("files.list.empty.searchHint", { query: searchQuery })
-      : filterActive
-        ? t("files.list.empty.filterHint")
-        : readOnly
-          ? t("files.list.empty.readOnlyHint")
-          : t("files.list.empty.noFilesHint");
+      : favoritesActive
+        ? t("files.list.empty.favoritesHint")
+        : filterActive
+          ? t("files.list.empty.filterHint")
+          : readOnly
+            ? t("files.list.empty.readOnlyHint")
+            : t("files.list.empty.noFilesHint");
 
   // With folders listed above, a full-height panel pushes them off screen — a single
   // line says the same thing without hiding what is actually here.

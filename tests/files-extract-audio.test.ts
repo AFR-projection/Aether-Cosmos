@@ -13,6 +13,8 @@ import { EXTRACT_AUDIO_SOURCE_MAX_BYTES } from "@files/domain/services/edit-limi
  */
 
 const FILE_ID = "6f1a1b1e-1c2d-4e3f-8a4b-5c6d7e8f9a01";
+const OPERATION_ID = "7a2b3c4d-5e6f-4789-8abc-0d1e2f3a4b5c";
+const OUTPUT_FILE_ID = "8b3c4d5e-6f70-489a-9bcd-1e2f3a4b5c6d";
 const OTHER_FOLDER = "3c2b1a09-8f7e-4d6c-9b5a-4d3c2b1a0987";
 
 const store = vi.hoisted(() => ({
@@ -25,7 +27,11 @@ const store = vi.hoisted(() => ({
   destination: { ok: true, folderId: null } as Record<string, unknown>,
   /** Whether Redis is reachable, which is what makes `queued: true` true. */
   queueUp: true,
-  jobs: [] as { type: string; data: Record<string, unknown> }[],
+  jobs: [] as {
+    type: string;
+    data: Record<string, unknown>;
+    opts?: { jobId?: string };
+  }[],
   activity: [] as { action: string; metadata: unknown }[],
   objectChecks: 0,
 }));
@@ -62,9 +68,13 @@ vi.mock("@files/infrastructure/storage/r2", () => ({
 
 vi.mock("@/shared/infrastructure/queue", () => ({
   getQueue: vi.fn(() => (store.queueUp ? ({} as unknown) : null)),
-  enqueueJob: vi.fn(async (type: string, data: Record<string, unknown>) => {
+  enqueueJob: vi.fn(async (
+    type: string,
+    data: Record<string, unknown>,
+    opts?: { jobId?: string },
+  ) => {
     if (!store.queueUp) return false;
-    store.jobs.push({ type, data });
+    store.jobs.push({ type, data, opts });
     return true;
   }),
 }));
@@ -102,7 +112,13 @@ function seedVideo(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function extract(body: unknown = { fileId: FILE_ID }) {
+async function extract(
+  body: unknown = {
+    fileId: FILE_ID,
+    operationId: OPERATION_ID,
+    outputFileId: OUTPUT_FILE_ID,
+  },
+) {
   const { POST } = await import("@/app/api/files/extract-audio/route");
   return POST(
     new NextRequest("http://localhost/api/files/extract-audio", {
@@ -131,7 +147,11 @@ describe("POST /api/files/extract-audio — the happy path", () => {
     seedVideo();
     store.destination = { ok: true, folderId: OTHER_FOLDER };
 
-    const response = await extract();
+    const response = await extract({
+      fileId: FILE_ID,
+      operationId: OPERATION_ID,
+      outputFileId: OUTPUT_FILE_ID,
+    });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true, data: { queued: true } });
 
@@ -139,15 +159,19 @@ describe("POST /api/files/extract-audio — the happy path", () => {
     expect(store.jobs[0]).toEqual({
       type: "extract_audio",
       data: {
+        operationId: OPERATION_ID,
+        outputFileId: OUTPUT_FILE_ID,
         fileId: FILE_ID,
         r2Key: `files/${FILE_ID}`,
         mimeType: "video/mp4",
+        version: 1,
         // The OWNER, not the caller: a shared video's audio belongs in the same account
         // as the video, or it counts against the wrong quota.
         userId: "owner-1",
         folderId: OTHER_FOLDER,
         name: "clip.mp4",
       },
+      opts: { jobId: `extract-audio-${OPERATION_ID}` },
     });
   });
 

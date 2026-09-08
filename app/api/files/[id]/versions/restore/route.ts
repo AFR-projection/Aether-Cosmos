@@ -6,6 +6,7 @@ import { logActivity } from "@/shared/lib/auth/audit";
 import { validateCsrf } from "@/shared/lib/security";
 import { restoreFileVersion } from "@files/application/commands/versions";
 import { enqueueJob } from "@/shared/infrastructure/queue";
+import { enqueueMediaInspection } from "@files/application/jobs/media-inspection";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 
@@ -43,12 +44,25 @@ export async function POST(
       restored.mimeType === "application/pdf" ||
       restored.mimeType.startsWith("audio/")
     ) {
-      await enqueueJob("generate_thumbnail", {
-        fileId: restored.id,
-        r2Key: restored.r2Key,
-        mimeType: restored.mimeType,
-      });
+      await enqueueJob(
+        "generate_thumbnail",
+        {
+          fileId: restored.id,
+          r2Key: restored.r2Key,
+          mimeType: restored.mimeType,
+          version: restored.version,
+        },
+        { jobId: `thumb-${restored.id}-v${restored.version}` },
+      );
     }
+    await enqueueMediaInspection({
+      id: restored.id,
+      r2Key: restored.r2Key,
+      mimeType: restored.mimeType,
+      encrypted: restored.encrypted,
+      isNote: restored.isNote,
+      version: restored.version,
+    });
 
     await logActivity(sessionUser, "restore", {
       resourceType: "file",

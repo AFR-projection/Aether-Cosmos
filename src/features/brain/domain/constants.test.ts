@@ -36,6 +36,13 @@ describe("brain scopes", () => {
     ).toEqual(["brain.read"]);
   });
 
+  it("drops the retired export scope from legacy grants", () => {
+    expect(isBrainApiScope("brain.export")).toBe(false);
+    expect(normalizeBrainScopes(["brain.read", "brain.export"])).toEqual([
+      "brain.read",
+    ]);
+  });
+
   it("defaults to read + search + write + link", () => {
     expect(DEFAULT_BRAIN_AGENT_SCOPES).toEqual([
       "brain.read",
@@ -48,8 +55,13 @@ describe("brain scopes", () => {
     }
   });
 
-  it("never hands out a destructive or bulk scope by default (§8)", () => {
-    for (const scope of ["brain.delete", "brain.export", "brain.import", "brain.consolidate"]) {
+  it("never hands out a destructive, bulk, or unattended scope by default (§8)", () => {
+    for (const scope of [
+      "brain.delete",
+      "brain.import",
+      "brain.consolidate",
+      "brain.ingest",
+    ]) {
       expect(DEFAULT_BRAIN_AGENT_SCOPES).not.toContain(scope);
     }
   });
@@ -62,8 +74,13 @@ describe("brainScopeSatisfied — implication table", () => {
     expect(keyHasScope(["brain.write"], "brain.link")).toBe(true);
   });
 
-  it("does not let write imply anything destructive or bulk", () => {
-    for (const scope of ["brain.delete", "brain.export", "brain.import", "brain.consolidate"]) {
+  it("does not let write imply anything destructive, bulk, or unattended", () => {
+    for (const scope of [
+      "brain.delete",
+      "brain.import",
+      "brain.consolidate",
+      "brain.ingest",
+    ]) {
       expect(brainScopeSatisfied(["brain.write"], scope)).toBe(false);
     }
   });
@@ -87,7 +104,7 @@ describe("keyHasScope — brain.* is a separate namespace from storage scopes", 
     // Every key already issued with `full` must not silently gain the owner's memories.
     expect(keyHasScope(["full"], "brain.read")).toBe(false);
     expect(keyHasScope(["full"], "brain.write")).toBe(false);
-    expect(keyHasScope(["read", "write", "delete", "full"], "brain.export")).toBe(false);
+    expect(keyHasScope(["read", "write", "delete", "full"], "brain.import")).toBe(false);
   });
 
   it("grants only the explicit brain scope", () => {

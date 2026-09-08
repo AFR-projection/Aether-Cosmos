@@ -11,7 +11,8 @@ Persistent, user-owned memory and knowledge infrastructure for AI agents.
 Second Brain is a knowledge management system designed for AI agents. Unlike ephemeral agent memory that resets with each session, Second Brain stores memories, relationships, and knowledge in PostgreSQL, making it:
 
 - **Persistent** — Survives agent reinstalls, VPS migrations, model changes
-- **Portable** — Export/import via `.afrbrain.zip` format
+- **Protected** — Brain data has no standalone download surface; encrypted AFR account
+  backup provides backup and recovery
 - **Isolated** — Multi-tenant with row-level `brain_id` authorization
 - **Auditable** — Complete activity timeline with agent attribution
 
@@ -40,12 +41,15 @@ Second Brain is a knowledge management system designed for AI agents. Unlike eph
 - Filter memories by project
 
 ### AI Agent Integration
-- **MCP Server** — 29 tools for reading, writing, searching memories, using the
-  2.0 intelligence layer (retrieval, context, health, consolidation), and batching
-  or inspecting the brain (analytics, semantic status, export)
+- **MCP Server** — 32 tools for reading, writing, searching memories, using the
+  2.0 intelligence layer (retrieval, context, health, consolidation), batching and
+  observability, plus the stateless lifecycle and conservative ingest pipeline
+- **Universal MCP compatibility** — Any AI agent or client that supports MCP can
+  connect. Claude Code, Claude Desktop, Codex, OpenCode, and Hermes templates are
+  examples, not an allowlist.
 - **Scoped Access** — Per-brain API keys with 8 granular scopes: `brain.read`,
-  `brain.search`, `brain.write`, `brain.link`, `brain.delete`, `brain.export`,
-  `brain.import`, `brain.consolidate`
+  `brain.search`, `brain.write`, `brain.link`, `brain.delete`, `brain.import`,
+  `brain.consolidate`, `brain.ingest`
 - **Rate Limited** — Separate `brain:*` buckets so agent traffic cannot starve file
   uploads
 
@@ -86,12 +90,16 @@ The API key is shown once and only its hash is stored.
 
 ### 2. Configure MCP Client
 
-Point your MCP client (Hermes, OpenClaw, etc.) to:
+Point any AI agent or client with MCP support to:
 
 ```
 POST https://yourdomain.com/api/brain/mcp
 Authorization: Bearer sk_<agent-key>
 ```
+
+Claude Code, Claude Desktop, Codex, OpenCode, Hermes, OpenClaw, and other named
+clients are examples only, not an allowlist. Compatibility depends on MCP support
+and the endpoint plus Bearer credential.
 
 ### 3. Grant Permissions
 
@@ -99,8 +107,9 @@ Default scopes for a new agent: `brain.read`, `brain.search`, `brain.write`,
 `brain.link`.
 
 `brain.write` implies `brain.link` — an agent that can create memories can link
-them. `brain.delete`, `brain.export`, `brain.import`, and `brain.consolidate` are
-user-only operations by default.
+them. `brain.delete`, `brain.import`, and `brain.consolidate` are user-only by
+default. `brain.ingest` is separate and must be granted explicitly for unattended
+conversation harvesting.
 
 ---
 
@@ -125,33 +134,23 @@ user-only operations by default.
 
 ---
 
-## Export & Import
+## Protected Backup & Recovery
 
-### Export Brain
+Second Brain has no standalone download surface in the web UI, REST API, or MCP. Brain
+data is protected with the rest of the account, and the supported backup/recovery path
+is the encrypted AFR account backup. The backup system includes Brain data internally
+without publishing a separate Brain archive endpoint.
 
-```bash
-GET /api/brain/{id}/export
-```
-
-Downloads `.afrbrain.zip` containing:
-- Memories with full version history
-- Entities and relationships
-- Projects and tags
-- Agent configurations (no secrets)
-
-### Import Brain
+An owner-controlled import primitive remains available for compatible Brain archives:
 
 ```bash
 POST /api/brain/{id}/import
 ```
 
-Upload `.afrbrain.zip`. The system:
-1. Validates format
-2. Previews counts
-3. Merges projects, entities, tags, and relationships by natural keys; memories,
-   memory links, and versions are additive (non-idempotent — importing the same
-   archive twice creates duplicates)
-4. Restores data
+The system validates and previews the archive, merges projects, entities, tags, and
+relationships by natural key, and adds memories, memory links, and versions. The
+internal archive builder and parser remain available to account backup, restore, and
+import code; they are not standalone export features.
 
 ---
 

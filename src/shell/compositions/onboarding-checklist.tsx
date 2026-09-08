@@ -5,6 +5,7 @@ import { Brain, Check, Files, ShieldCheck, Share2, Sparkles, X } from "lucide-re
 import { useEffect, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 
+import { SHARING_LINKS_HREF } from "@shares/domain/sharing-view";
 import { Button } from "@/ui/primitives/button";
 import { useT } from "@/shared/lib/i18n";
 
@@ -12,7 +13,7 @@ const EVENT = "aether:onboarding";
 
 const STEPS = [
   { id: "files", href: "/files", match: "/files", icon: Files, title: "onboarding.filesTitle", body: "onboarding.filesBody" },
-  { id: "share", href: "/shares", match: "/shares", icon: Share2, title: "onboarding.shareTitle", body: "onboarding.shareBody" },
+  { id: "share", href: SHARING_LINKS_HREF, match: "/shares", icon: Share2, title: "onboarding.shareTitle", body: "onboarding.shareBody" },
   { id: "security", href: "/settings", match: "/settings", icon: ShieldCheck, title: "onboarding.securityTitle", body: "onboarding.securityBody" },
   { id: "brain", href: "/brain", match: "/brain", icon: Brain, title: "onboarding.brainTitle", body: "onboarding.brainBody" },
 ] as const;

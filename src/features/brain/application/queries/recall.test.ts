@@ -143,7 +143,10 @@ describe("the five sections", () => {
     await recallBrainContext({ brainId: BRAIN, query: "redis queue" });
 
     const memoryReads = readsOf(MEMORY_TABLE);
-    expect(memoryReads.map((read) => read.limit)).toEqual([8, 8, 5, 5]);
+    // The directive read asks for more rows than it will keep: a project directive can
+    // override a brain-wide one *after* the rows arrive, so the query over-fetches and
+    // resolveDirectives caps the result at DIRECTIVE_LIMIT.
+    expect(memoryReads.map((read) => read.limit)).toEqual([36, 8, 5, 5]);
     // The entity section only runs once there is a query to match names against.
     expect(readsOf(ENTITY_TABLE)).toHaveLength(1);
     expect(readOf(ENTITY_TABLE)!.limit).toBe(8);
@@ -209,16 +212,22 @@ describe("the five sections", () => {
 });
 
 describe("standing rules are brain-wide, the rest is project-scoped", () => {
-  it("keeps the project out of the directive query and in the other three", async () => {
-    // An instruction like "always answer in English" applies to every task; filtering
-    // it by project would silently drop the user's standing rules.
+  it("lets a project narrow the directive query, but never past the brain-wide rules", async () => {
+    // An instruction like "always answer in English" applies to every task, so a
+    // brain-wide rule survives any project filter. What a project DOES do is bring its
+    // own rules in and keep another project's out — the override that makes "commit
+    // style" mean one thing here and another there. The predicate therefore mentions
+    // the project, but as `project_id IS NULL OR project_id = ...`, never as equality
+    // alone: equality would drop the brain-wide rules this test exists to protect.
     memorySections({});
     rows[ENTITY_TABLE] = [[]];
 
     await recallBrainContext({ brainId: BRAIN, query: "redis", projectId: PROJECT });
 
     const [directives, relevant, important, recent] = readsOf(MEMORY_TABLE);
-    expect(describeSql(directives.where)).not.toContain(PROJECT);
+    // The project is a factor in the directive predicate now; that brain-wide rules
+    // still survive it is asserted on data in ./directives.test.ts, where it belongs.
+    expect(describeSql(directives.where)).toContain(PROJECT);
     for (const read of [relevant, important, recent]) {
       expect(describeSql(read.where)).toContain(PROJECT);
     }
@@ -542,7 +551,7 @@ describe("the rendered context an agent pastes into a prompt", () => {
     const { contextText } = await recallBrainContext({ brainId: BRAIN, query: "redis" });
 
     expect(contextText.startsWith("Brain context:")).toBe(true);
-    expect(contextText).toContain("Standing instructions and preferences:");
+    expect(contextText).toContain("Standing instructions and preferences (already in force):");
     expect(contextText).toContain('Relevant to "redis":');
     expect(contextText).toContain("Important long-term memories:");
     expect(contextText).toContain("Recently updated:");

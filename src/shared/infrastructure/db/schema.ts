@@ -122,6 +122,18 @@ export const deletionItemStatusEnum = pgEnum("deletion_item_status", [
   "completed",
   "failed",
 ]);
+export const mediaOperationKindEnum = pgEnum("media_operation_kind", [
+  "trim",
+  "extract_audio",
+]);
+export const mediaOperationStatusEnum = pgEnum("media_operation_status", [
+  "queued",
+  "staged",
+  "publishing",
+  "completed",
+  "stale",
+  "failed",
+]);
 export type FileUploadStatus = (typeof fileUploadStatusEnum.enumValues)[number];
 export type UploadSessionStatus = (typeof uploadSessionStatusEnum.enumValues)[number];
 export type UploadPartStatus = (typeof uploadPartStatusEnum.enumValues)[number];
@@ -341,6 +353,19 @@ export const files = pgTable(
     isFavorite: boolean("is_favorite").notNull().default(false),
     isNote: boolean("is_note").notNull().default(false),
     thumbnailKey: text("thumbnail_key"),
+    /** Derived asynchronously by ffprobe. Null means uninspected or not applicable. */
+    mediaDurationMs: bigint("media_duration_ms", { mode: "number" }),
+    mediaWidth: integer("media_width"),
+    mediaHeight: integer("media_height"),
+    mediaFps: real("media_fps"),
+    mediaVideoCodec: text("media_video_codec"),
+    mediaAudioCodec: text("media_audio_codec"),
+    mediaBitrateBps: bigint("media_bitrate_bps", { mode: "number" }),
+    mediaContainer: text("media_container"),
+    mediaFaststart: boolean("media_faststart"),
+    mediaCompatible: boolean("media_compatible"),
+    mediaCompatibilityReason: text("media_compatibility_reason"),
+    mediaInspectedAt: timestamp("media_inspected_at", { withTimezone: true }),
     // Searchable body text: note plaintext today; extracted PDF/Office text later
     // (Phase B). Kept separate from name so the FTS vector can weight them.
     contentText: text("content_text"),
@@ -372,6 +397,50 @@ export const files = pgTable(
     index("files_restore_batch_idx")
       .on(table.restoreBatchId)
       .where(sql`restore_batch_id is not null`),
+  ]
+);
+
+export const mediaOperations = pgTable(
+  "media_operations",
+  {
+    /** Client-generated idempotency identity, also used as the deterministic queue identity. */
+    id: uuid("id").primaryKey(),
+    kind: mediaOperationKindEnum("kind").notNull(),
+    sourceFileId: uuid("source_file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    sourceR2Key: text("source_r2_key").notNull(),
+    sourceMimeType: text("source_mime_type").notNull(),
+    sourceVersion: integer("source_version").notNull(),
+    /** Stable identity of the new file created by extract_audio; null for in-place trim. */
+    outputFileId: uuid("output_file_id"),
+    stagingKey: text("staging_key").notNull(),
+    status: mediaOperationStatusEnum("status").notNull().default("queued"),
+    outputSizeBytes: bigint("output_size_bytes", { mode: "number" }),
+    outputMimeType: text("output_mime_type"),
+    outputName: text("output_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("media_operations_source_idx").on(table.sourceFileId, table.sourceVersion),
+    uniqueIndex("media_operations_output_file_unique")
+      .on(table.outputFileId)
+      .where(sql`output_file_id is not null`),
+    index("media_operations_status_updated_idx").on(table.status, table.updatedAt),
+    check("media_operations_source_version_chk", sql`"source_version" > 0`),
+    check(
+      "media_operations_output_size_chk",
+      sql`"output_size_bytes" IS NULL OR "output_size_bytes" > 0`
+    ),
+    check(
+      "media_operations_kind_output_chk",
+      sql`("kind" = 'trim' AND "output_file_id" IS NULL) OR ("kind" = 'extract_audio' AND "output_file_id" IS NOT NULL)`
+    ),
+    check(
+      "media_operations_staged_output_chk",
+      sql`"status" = 'queued' OR "output_size_bytes" IS NOT NULL`
+    ),
   ]
 );
 
@@ -1073,6 +1142,15 @@ export const filesRelations = relations(files, ({ one, many }) => ({
   uploadSessions: many(uploadSessions),
   shares: many(shares),
   changeHistory: many(changeHistory),
+  sourceOperations: many(mediaOperations, { relationName: "mediaOperationSource" }),
+}));
+
+export const mediaOperationsRelations = relations(mediaOperations, ({ one }) => ({
+  sourceFile: one(files, {
+    fields: [mediaOperations.sourceFileId],
+    references: [files.id],
+    relationName: "mediaOperationSource",
+  }),
 }));
 
 export const uploadSessionsRelations = relations(uploadSessions, ({ one, many }) => ({
@@ -1115,6 +1193,8 @@ export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type Folder = typeof folders.$inferSelect;
 export type File = typeof files.$inferSelect;
+export type MediaOperation = typeof mediaOperations.$inferSelect;
+export type NewMediaOperation = typeof mediaOperations.$inferInsert;
 export type Share = typeof shares.$inferSelect;
 export type UploadSession = typeof uploadSessions.$inferSelect;
 export type UploadPart = typeof uploadParts.$inferSelect;

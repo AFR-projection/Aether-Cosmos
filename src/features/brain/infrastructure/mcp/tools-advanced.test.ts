@@ -1,8 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createBrainMcpServer } from "./server";
+import { createBrainMcpServer, BRAIN_MCP_SERVER_VERSION } from "./server";
 import type { McpPrincipal } from "./principal";
+
+/** The handshake's directive read is the only database touch here; stub it empty. */
+vi.mock("@brain/application/queries/directives", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@brain/application/queries/directives")>()),
+  listStandingInstructions: async () => [],
+}));
 
 const principal: McpPrincipal = {
   type: "agent",
@@ -22,7 +28,7 @@ const principal: McpPrincipal = {
 };
 
 async function connect() {
-  const server = createBrainMcpServer(principal);
+  const server = await createBrainMcpServer(principal);
   const client = new Client({ name: "test-client-advanced", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -42,12 +48,14 @@ describe("Advanced Brain MCP tools", () => {
       expect(names).toContain("brain_analytics");
       expect(names).toContain("brain_suggest_queries");
       expect(names).toContain("brain_semantic_status");
-      expect(names).toContain("brain_export_memories");
+      expect(names).not.toContain("brain_export_memories");
 
-      // Check server version
+      // Pinned against the constant rather than a literal: the version is part of the
+      // handshake clients see, and it moved when prompts and live standing
+      // instructions were added.
       const serverInfo = await client.getServerVersion();
       expect(serverInfo).toBeDefined();
-      expect(serverInfo?.version).toBe("2.1.0");
+      expect(serverInfo?.version).toBe(BRAIN_MCP_SERVER_VERSION);
     } finally {
       await client.close();
       await server.close();
@@ -110,28 +118,6 @@ describe("Advanced Brain MCP tools", () => {
     }
   });
 
-  it("brain_export_memories supports JSON and markdown", async () => {
-    const { client, server } = await connect();
-    try {
-      const { tools } = await client.listTools();
-      const exportTool = tools.find((t) => t.name === "brain_export_memories");
-
-      expect(exportTool).toBeDefined();
-      expect(exportTool?.description).toContain("portable");
-      expect(exportTool?.description).toContain("backup");
-
-      const schema = exportTool?.inputSchema as Record<string, unknown>;
-      const props = (schema.properties as Record<string, unknown>) || {};
-      const format = props.format as Record<string, unknown>;
-
-      expect(format).toBeDefined();
-      expect(format.enum).toEqual(["json", "markdown"]);
-    } finally {
-      await client.close();
-      await server.close();
-    }
-  });
-
   it("brain_suggest_queries has correct schema", async () => {
     const { client, server } = await connect();
     try {
@@ -184,7 +170,6 @@ describe("Advanced Brain MCP tools", () => {
         "brain_analytics",
         "brain_suggest_queries",
         "brain_semantic_status",
-        "brain_export_memories",
         "brain_batch_context",
       ];
 
@@ -208,14 +193,13 @@ describe("Advanced Brain MCP tools", () => {
     try {
       const { tools } = await client.listTools();
 
-      // Verify all 6 advanced tools are registered
+      // Verify all 5 advanced tools are registered
       const advancedTools = [
         "brain_batch_search",
         "brain_batch_context",
         "brain_analytics",
         "brain_suggest_queries",
         "brain_semantic_status",
-        "brain_export_memories",
       ];
 
       const toolNames = tools.map((t) => t.name);
@@ -223,8 +207,8 @@ describe("Advanced Brain MCP tools", () => {
         expect(toolNames, `Expected to find ${advTool}`).toContain(advTool);
       }
 
-      // Should have at least 29 core + 6 advanced = 35 tools
-      expect(tools.length).toBeGreaterThanOrEqual(29);
+      // The complete MCP surface currently contains 32 tools.
+      expect(tools).toHaveLength(32);
     } finally {
       await client.close();
       await server.close();

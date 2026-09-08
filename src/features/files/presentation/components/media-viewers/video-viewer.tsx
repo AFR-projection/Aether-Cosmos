@@ -2,12 +2,25 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Captions, Check, Maximize2, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
+  Captions,
+  Check,
+  Maximize2,
+  Minimize2,
+  Pause,
+  Play,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { Button } from "@/ui/primitives/button";
 import { Spinner } from "@/ui/feedback/spinner";
 import { cn } from "@/shared/lib/utils";
-import { useT } from "@/shared/lib/i18n";
+import { useT, type TranslationKey } from "@/shared/lib/i18n";
+import {
+  MEDIA_RECOVERY_LIMIT,
+  mediaErrorOutcome,
+} from "@files/domain/services/playback-recovery";
 import { SUBTITLE_REFUSAL_KEYS } from "@files/domain/services/subtitles/eligibility";
 import {
   subtitleLanguageLabel,
@@ -16,6 +29,14 @@ import {
 import { SubtitleMenu } from "@files/presentation/components/subtitles/subtitle-menu";
 import { SubtitleOverlay } from "@files/presentation/components/subtitles/subtitle-overlay";
 import { SubtitleUploadDialog } from "@files/presentation/components/subtitles/subtitle-upload-dialog";
+import {
+  PLAYBACK_ERROR_KEYS,
+  type PlaybackErrorCode,
+} from "@files/presentation/hooks/use-playback-source";
+import {
+  usePlaybackTelemetry,
+  type PlaybackTelemetrySource,
+} from "@files/presentation/hooks/use-playback-telemetry";
 import { useSubtitleSelection } from "@files/presentation/hooks/use-subtitle-selection";
 import {
   useSubtitleTracks,
@@ -23,8 +44,79 @@ import {
 } from "@files/presentation/hooks/use-subtitle-tracks";
 import { isTypingTarget, ViewerMessage } from "./viewer-chrome";
 
+/**
+ * The control plane behind this video, when it has one.
+ *
+ * Everything here exists because the bytes no longer come from this app: the URL is a signed
+ * capability with an expiry, so the player has to be able to ask for a new one, and it has to be
+ * able to tell "your signature died" apart from "your file is broken". A surface that has no
+ * control plane — an encrypted file playing out of a Blob, or the proxy fallback — passes `null`
+ * and the player behaves as it always did.
+ */
+export type VideoPlaybackHandle = {
+  /** Which path the bytes travel. Only `direct_r2` can be re-issued. */
+  source: PlaybackTelemetrySource;
+  /** The file being watched, or `null` when there is nothing to attribute a report to. */
+  fileId: string | null;
+  /** Whether a report may be posted at the end. False on a share page: no endpoint for it. */
+  telemetry: boolean;
+  /** No usable URL at all, already classified into something sayable. */
+  errorCode: PlaybackErrorCode | null;
+  /** Control-plane latency of the first issuance, for the report. */
+  urlLatencyMs: number | null;
+  refreshCount: number;
+  /** Ask for a fresh URL, preserving position and play state. */
+  refresh: () => void;
+};
+
+/** What a `<video>` reported, in the three flavours worth different advice. */
+type MediaFailure = "network" | "decode" | "unsupported";
+
+const MEDIA_ERR_ABORTED = 1;
+const MEDIA_ERR_NETWORK = 2;
+const MEDIA_ERR_DECODE = 3;
+
+/**
+ * The element's own failures, which are not the control plane's.
+ *
+ * `unsupported` keeps the original codec wording because that is what a browser means by
+ * SRC_NOT_SUPPORTED once a fresh URL has already been tried and did not help.
+ */
+const MEDIA_FAILURE_KEYS: Record<
+  MediaFailure,
+  { title: TranslationKey; hint: TranslationKey }
+> = {
+  network: {
+    title: "files.viewer.media.networkFailed",
+    hint: "files.viewer.media.networkHint",
+  },
+  decode: {
+    title: "files.viewer.media.decodeFailed",
+    hint: "files.viewer.media.decodeHint",
+  },
+  unsupported: {
+    title: "files.viewer.media.videoFailed",
+    hint: "files.viewer.media.codecHint",
+  },
+};
+
+/**
+ * Refusals a second attempt can plausibly change.
+ *
+ * Everything else — an expired share link, a file that is gone, a viewer without access — is a
+ * settled fact, and offering a button that cannot work is worse than offering none.
+ */
+const RETRYABLE_PLAYBACK_ERRORS: ReadonlySet<PlaybackErrorCode> =
+  new Set<PlaybackErrorCode>([
+    "network",
+    "server",
+    "rate-limited",
+    "not-ready",
+  ]);
+
 interface VideoViewerProps {
-  src: string;
+  /** `null` while the control plane is still deciding where the bytes come from. */
+  src: string | null;
   fileName: string;
   /**
    * Where this player's subtitles come from, or `null` for none at all.
@@ -36,6 +128,7 @@ interface VideoViewerProps {
   subtitleSource?: SubtitleSource | null;
   /** Open the cue editor for a track. Absent means the editor is not reachable from here. */
   onEditSubtitles?: (trackId: string) => void;
+  playback?: VideoPlaybackHandle | null;
 }
 
 function formatTime(s: number): string {
@@ -54,11 +147,28 @@ export function VideoViewer({
   fileName,
   subtitleSource = null,
   onEditSubtitles,
+  playback = null,
 }: VideoViewerProps) {
   const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * The mounted element, held in state as well as in a ref.
+   *
+   * Two consumers with different needs. Event handlers want the ref — always current, no
+   * re-render. Effects want the state, because the player is unmounted while an error message is
+   * on screen: "the element I attached listeners to" and "the URL I am playing" are genuinely
+   * different things, and keying the effects on the URL alone would mean a recovered error came
+   * back with a video nobody was listening to — controls frozen, position stuck at 0:00, no
+   * telemetry.
+   */
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const attachVideo = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    setVideoEl(el);
+  }, []);
 
   const subtitles = useSubtitleTracks(subtitleSource);
   const selection = useSubtitleSelection(subtitles.tracks);
@@ -70,16 +180,36 @@ export function VideoViewer({
   const menuAnchorRef = useRef<HTMLDivElement | null>(null);
   const ccButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  const [playing, setPlaying] = useState(false);  const [currentTime, setCurrentTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [buffered, setBuffered] = useState(0);
   const [showControls, setShowControls] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  /** What the element itself reported, once it is past recovering from. */
+  const [mediaFailure, setMediaFailure] = useState<MediaFailure | null>(null);
   const [loading, setLoading] = useState(true);
   const [retryKey, setRetryKey] = useState(0);
+
+  /**
+   * Position and play state carried across a URL replacement.
+   *
+   * Written when a URL that was already playing is swapped out, read once on the next
+   * `loadedmetadata`. This is the whole reason a two-hour film survives its signature expiring:
+   * without it, every re-issue would drop the viewer back at 0:00.
+   */
+  const resumeRef = useRef<{ time: number; playing: boolean } | null>(null);
+  /**
+   * How many times a broken element has been handed a fresh URL, since frames last flowed.
+   *
+   * Bounded because the failure it exists for — a dead signature — is indistinguishable from a
+   * truncated object that will break again on the next URL, and an unbounded "try a new URL"
+   * would turn one damaged file into a request loop. Reset on `playing`, which is the only proof
+   * that anything actually recovered.
+   */
+  const recoveryAttemptsRef = useRef(0);
 
   /** play() rejects on autoplay policies and on a detached element — an
    *  unhandled rejection there used to surface as a console error and a play
@@ -102,32 +232,106 @@ export function VideoViewer({
     else void containerRef.current?.requestFullscreen();
   }, []);
 
+  /**
+   * What the element reported, turned into either a silent recovery or one honest sentence.
+   *
+   * The important case is the invisible one: an expired presigned URL does not look like an
+   * expiry to a media element. R2 answers 403 with an XML body, and browsers variously call that
+   * a network failure or an unsupported source — so both get a silent re-issue before anything is
+   * said. A DECODE failure never does: those bytes arrived and could not be read, and a new URL
+   * delivers the same bytes.
+   */
+  const handleMediaError = useCallback(() => {
+    const code = videoRef.current?.error?.code ?? 0;
+    const reissuable = playback !== null && playback.source === "direct_r2";
+    const outcome = mediaErrorOutcome({
+      aborted: code === MEDIA_ERR_ABORTED,
+      decode: code === MEDIA_ERR_DECODE,
+      network: code === MEDIA_ERR_NETWORK || code === 0,
+      reissuable,
+      recoveryAttempts: recoveryAttemptsRef.current,
+      recoveryLimit: MEDIA_RECOVERY_LIMIT,
+    });
+
+    // ABORTED is almost always us: replacing `src` mid-load aborts the load in progress.
+    if (outcome === "ignore") return;
+    if (outcome === "recover") {
+      // "recover" is only produced when `reissuable`; the check keeps the narrowing honest.
+      if (reissuable) {
+        recoveryAttemptsRef.current += 1;
+        playback.refresh();
+      }
+      return;
+    }
+
+    setMediaFailure(outcome);
+    setLoading(false);
+  }, [playback]);
+
+  /** Throw away both halves — the element and, on the direct path, the URL — and start over. */
+  const retryPlayback = useCallback(() => {
+    recoveryAttemptsRef.current = 0;
+    resumeRef.current = null;
+    setMediaFailure(null);
+    setLoading(true);
+    playback?.refresh();
+    setRetryKey((k) => k + 1);
+  }, [playback]);
+
   // Playback state is mirrored from the element's own events, so the UI cannot
   // disagree with what the video is actually doing.
   useEffect(() => {
-    const v = videoRef.current;
+    const v = videoEl;
     if (!v) return;
     const onTime = () => setCurrentTime(v.currentTime);
     const onDuration = () => setDuration(v.duration);
     const onBuffer = () => {
-      if (v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
+      if (v.buffered.length > 0)
+        setBuffered(v.buffered.end(v.buffered.length - 1));
     };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onEnded = () => setPlaying(false);
     const onCanPlay = () => {
       setLoading(false);
-      setLoadError(false);
+      setMediaFailure(null);
+    };
+    /**
+     * The moment the new URL knows its own duration is the moment it can be seeked.
+     *
+     * Restoring here rather than on `canplay` matters on a slow connection: seeking first means
+     * the browser buffers the part the viewer is actually watching instead of buffering the
+     * opening seconds and then throwing them away. It is also where the spinner goes away —
+     * `preload="metadata"` may never reach `canplay` until somebody presses play, and a spinner
+     * that sits on top of a perfectly good first frame reads as a broken player.
+     */
+    const onLoadedMeta = () => {
+      onDuration();
+      setLoading(false);
+      const resume = resumeRef.current;
+      resumeRef.current = null;
+      if (!resume) return;
+      if (resume.time > 0 && Number.isFinite(v.duration)) {
+        v.currentTime = Math.min(resume.time, v.duration);
+      }
+      if (resume.playing) void v.play().catch(() => setPlaying(false));
     };
     const onWaiting = () => setLoading(true);
-    const onPlaying = () => setLoading(false);
+    const onPlaying = () => {
+      setLoading(false);
+      // Frames are flowing: whatever went wrong before is allowed to be recovered from again.
+      recoveryAttemptsRef.current = 0;
+    };
+    /** A URL was just applied. The spinner belongs to the element's own state, not to the swap. */
+    const onLoadStart = () => setLoading(true);
     const onVolume = () => {
       setVolume(v.volume);
       setMuted(v.muted);
     };
     v.addEventListener("timeupdate", onTime);
-    v.addEventListener("loadedmetadata", onDuration);
+    v.addEventListener("loadedmetadata", onLoadedMeta);
     v.addEventListener("durationchange", onDuration);
+    v.addEventListener("loadstart", onLoadStart);
     v.addEventListener("progress", onBuffer);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
@@ -138,8 +342,9 @@ export function VideoViewer({
     v.addEventListener("volumechange", onVolume);
     return () => {
       v.removeEventListener("timeupdate", onTime);
-      v.removeEventListener("loadedmetadata", onDuration);
+      v.removeEventListener("loadedmetadata", onLoadedMeta);
       v.removeEventListener("durationchange", onDuration);
+      v.removeEventListener("loadstart", onLoadStart);
       v.removeEventListener("progress", onBuffer);
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
@@ -149,7 +354,62 @@ export function VideoViewer({
       v.removeEventListener("playing", onPlaying);
       v.removeEventListener("volumechange", onVolume);
     };
-  }, [retryKey]);
+  }, [videoEl]);
+
+  /**
+   * The URL is applied by hand, not rendered.
+   *
+   * A `src` attribute in the JSX would fight this: React would reset the element every time the
+   * presigned URL was re-issued, and resetting a media element means back to 0:00 with a fresh
+   * buffer — the exact thing PHASE 2 forbids. So the element is rendered without a source and
+   * given one here, which lets the swap carry the viewer's position with it.
+   *
+   * The applied attribute is the source of truth for "what is loaded" rather than a ref, because
+   * a remount produces a blank element and a ref would still claim the old URL was applied.
+   *
+   * `videoEl` is the trigger and `videoRef` is the handle: the assignment goes through the ref
+   * because `react-hooks/immutability` forbids writing to anything held in state, and it cannot
+   * tell a DOM node — whose properties are the API — from a value that ought to be replaced.
+   */
+  useEffect(() => {
+    if (!videoEl) return;
+    const v = videoRef.current;
+    if (!v || !src) return;
+    const applied = v.getAttribute("src");
+    if (applied === src) return;
+    // Replacing a URL that was already loaded: remember where the viewer is, and whether they
+    // were watching, so `loadedmetadata` can put them back. The spinner comes back on its own —
+    // `load()` fires `loadstart`, and letting the element say so keeps the UI honest.
+    if (applied !== null) {
+      resumeRef.current = {
+        time: v.currentTime,
+        playing: !v.paused && !v.ended,
+      };
+    }
+    v.src = src;
+    v.load();
+  }, [src, videoEl]);
+
+  /**
+   * One report per viewing, from the element's own events.
+   *
+   * Disabled on a share page: there is no session to attribute the numbers to and no endpoint
+   * that would accept them. A re-issued URL deliberately does not end the measurement — that is
+   * one viewing, and splitting it in two would hide exactly the long films this work was for.
+   */
+  usePlaybackTelemetry({
+    video: videoEl,
+    enabled: Boolean(playback?.telemetry),
+    fileId: playback?.fileId ?? null,
+    source: playback?.source ?? "legacy_proxy",
+    urlLatencyMs: playback?.urlLatencyMs ?? null,
+    refreshCount: playback?.refreshCount ?? 0,
+    // Prefixed, because "the browser could not decode this" and "the server would not issue a
+    // URL" land in the same column of the admin snapshot and mean opposite things.
+    errorCode:
+      playback?.errorCode ?? (mediaFailure ? `media:${mediaFailure}` : null),
+    resetKey: playback?.fileId ?? "local",
+  });
 
   useEffect(() => {
     const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
@@ -157,16 +417,20 @@ export function VideoViewer({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
-  useEffect(() => () => {
-    if (controlsTimer.current) clearTimeout(controlsTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (controlsTimer.current) clearTimeout(controlsTimer.current);
+    },
+    [],
+  );
 
   // Bare media keys: never steal a keystroke from a field, and never fight a
   // browser shortcut.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const v = videoRef.current;
-      if (!v || isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!v || isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey)
+        return;
       switch (e.key) {
         case " ":
           e.preventDefault();
@@ -217,7 +481,8 @@ export function VideoViewer({
     setShowControls(true);
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
     controlsTimer.current = setTimeout(() => {
-      if (videoRef.current && !videoRef.current.paused && !menuOpen) setShowControls(false);
+      if (videoRef.current && !videoRef.current.paused && !menuOpen)
+        setShowControls(false);
     }, 2600);
   }, [menuOpen]);
 
@@ -255,22 +520,45 @@ export function VideoViewer({
   }, [speedOpen]);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-  const bufferPct = duration > 0 ? Math.min(100, (buffered / duration) * 100) : 0;
+  const bufferPct =
+    duration > 0 ? Math.min(100, (buffered / duration) * 100) : 0;
   /** The chrome is up, or the video is not playing, or a menu is open — any of the three. */
   const chromeVisible = showControls || !playing || menuOpen;
 
-  if (loadError) {
+  /**
+   * Two failures with nothing in common, and neither of them is "video gagal diputar".
+   *
+   * A refusal from the control plane means the bytes were never offered at all — out of quota,
+   * share link used up, file still uploading. A media failure means they were offered and
+   * something downstream could not use them. The old single message sent somebody whose
+   * connection had dropped hunting for a codec problem, which is what PHASE 18 is about.
+   */
+  if (playback?.errorCode) {
+    const keys = PLAYBACK_ERROR_KEYS[playback.errorCode];
     return (
       <ViewerMessage
         icon={Play}
         tone="warning"
-        title={t("files.viewer.media.videoFailed")}
-        hint={t("files.viewer.media.codecHint")}
-        onRetry={() => {
-          setLoadError(false);
-          setLoading(true);
-          setRetryKey((k) => k + 1);
-        }}
+        title={t(keys.title)}
+        hint={t(keys.hint)}
+        onRetry={
+          RETRYABLE_PLAYBACK_ERRORS.has(playback.errorCode)
+            ? retryPlayback
+            : undefined
+        }
+      />
+    );
+  }
+
+  if (mediaFailure) {
+    const keys = MEDIA_FAILURE_KEYS[mediaFailure];
+    return (
+      <ViewerMessage
+        icon={Play}
+        tone="warning"
+        title={t(keys.title)}
+        hint={t(keys.hint)}
+        onRetry={retryPlayback}
       />
     );
   }
@@ -295,19 +583,32 @@ export function VideoViewer({
             <Spinner size="lg" />
           </div>
         )}
+        {/*
+          No `src` attribute and no `crossOrigin`, both deliberately.
+
+          `src` is applied in an effect so a re-issued URL does not reset the element (see above).
+          `crossOrigin` is absent because the bytes are fetched no-cors: a media element does not
+          need CORS to play a cross-origin file or to seek in it, and asking for CORS would put
+          the whole of playback behind an R2 bucket policy that only the operator can fix. The
+          `<track>` files below are same-origin with the page, so they load either way.
+
+          `preload="metadata"` rather than `auto` (PHASE 14): with the proxy, `auto` had Next.js
+          pulling a whole film through the VPS the moment somebody clicked a thumbnail. Direct
+          from R2 that is no longer the VPS's problem, but it is still the owner's egress and
+          their bandwidth allowance, for a video that may never be played. `metadata` fetches the
+          header, which is all the scrubber needs, and startup is dominated by the control-plane
+          request anyway. `startupMs` in the admin snapshot is the number that would justify
+          changing this back.
+        */}
         <video
           key={retryKey}
-          ref={videoRef}
-          src={src}
+          ref={attachVideo}
           className="max-h-full max-w-full"
           playsInline
-          preload="auto"
+          preload="metadata"
           aria-label={fileName}
           onClick={togglePlay}
-          onError={() => {
-            setLoadError(true);
-            setLoading(false);
-          }}
+          onError={handleMediaError}
         >
           {/*
             One `<track>` per ready track, and the overlay decides which is showing. `default` is
@@ -356,10 +657,14 @@ export function VideoViewer({
               "flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-full",
               "bg-black/45 text-white ring-1 ring-white/20 backdrop-blur-md",
               "transition-[transform,background-color] duration-150 hover:bg-black/60",
-              "motion-safe:hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              "motion-safe:hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
             )}
           >
-            <Play className="ml-1 h-8 w-8" fill="currentColor" aria-hidden="true" />
+            <Play
+              className="ml-1 h-8 w-8"
+              fill="currentColor"
+              aria-hidden="true"
+            />
           </button>
         </div>
       )}
@@ -370,7 +675,7 @@ export function VideoViewer({
           // putting a hard edge across the picture.
           "absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-2 pt-14 sm:px-4",
           "transition-opacity duration-200",
-          chromeVisible ? "opacity-100" : "pointer-events-none opacity-0"
+          chromeVisible ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
         <input
@@ -402,13 +707,23 @@ export function VideoViewer({
             variant="ghost"
             size="icon"
             className="text-white hover:bg-white/10 hover:text-white"
-            aria-label={t(playing ? "files.viewer.media.pause" : "files.viewer.media.play")}
+            aria-label={t(
+              playing ? "files.viewer.media.pause" : "files.viewer.media.play",
+            )}
             onClick={togglePlay}
           >
             {playing ? (
-              <Pause className="h-5 w-5" fill="currentColor" aria-hidden="true" />
+              <Pause
+                className="h-5 w-5"
+                fill="currentColor"
+                aria-hidden="true"
+              />
             ) : (
-              <Play className="h-5 w-5" fill="currentColor" aria-hidden="true" />
+              <Play
+                className="h-5 w-5"
+                fill="currentColor"
+                aria-hidden="true"
+              />
             )}
           </Button>
           {/* The skip pair is the first thing to go on a narrow player: arrow keys do the same job
@@ -450,7 +765,7 @@ export function VideoViewer({
               size="sm"
               className={cn(
                 "min-w-[2.75rem] px-2 text-xs tabular-nums text-white/75 hover:bg-white/10 hover:text-white",
-                speed !== 1 && "text-white"
+                speed !== 1 && "text-white",
               )}
               aria-label={t("files.viewer.media.speed")}
               aria-haspopup="menu"
@@ -474,7 +789,7 @@ export function VideoViewer({
                       "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs tabular-nums transition-colors",
                       speed === rate
                         ? "bg-white/[0.16] text-white"
-                        : "text-white/80 hover:bg-white/10 hover:text-white"
+                        : "text-white/80 hover:bg-white/10 hover:text-white",
                     )}
                     onClick={() => {
                       const video = videoRef.current;
@@ -484,7 +799,10 @@ export function VideoViewer({
                     }}
                   >
                     <Check
-                      className={cn("h-3.5 w-3.5", speed === rate ? "opacity-100" : "opacity-0")}
+                      className={cn(
+                        "h-3.5 w-3.5",
+                        speed === rate ? "opacity-100" : "opacity-0",
+                      )}
                       aria-hidden="true"
                     />
                     {rate}×
@@ -517,11 +835,16 @@ export function VideoViewer({
               className={cn(
                 "relative flex h-9 items-center gap-1.5 rounded-lg px-2 transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
-                menuOpen ? "bg-white/[0.16] text-white" : "text-white/75 hover:bg-white/10 hover:text-white",
-                selection.activeTrackId !== null && "text-white"
+                menuOpen
+                  ? "bg-white/[0.16] text-white"
+                  : "text-white/75 hover:bg-white/10 hover:text-white",
+                selection.activeTrackId !== null && "text-white",
               )}
             >
-              <Captions className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+              <Captions
+                className="h-[1.15rem] w-[1.15rem]"
+                aria-hidden="true"
+              />
               {selection.activeTrack && (
                 <span className="text-[11px] font-semibold uppercase tracking-wide">
                   {selection.activeTrack.language === UNDETERMINED_LANGUAGE
@@ -541,7 +864,9 @@ export function VideoViewer({
               {subtitles.pending && (
                 <>
                   <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-warning" />
-                  <span className="sr-only">{t("files.subtitles.status.queued")}</span>
+                  <span className="sr-only">
+                    {t("files.subtitles.status.queued")}
+                  </span>
                 </>
               )}
             </button>
@@ -551,7 +876,9 @@ export function VideoViewer({
             variant="ghost"
             size="icon"
             className="text-white/80 hover:bg-white/10 hover:text-white"
-            aria-label={t(muted ? "files.viewer.media.unmute" : "files.viewer.media.mute")}
+            aria-label={t(
+              muted ? "files.viewer.media.unmute" : "files.viewer.media.mute",
+            )}
             aria-pressed={muted}
             onClick={() => {
               const v = videoRef.current;
@@ -590,7 +917,9 @@ export function VideoViewer({
             size="icon"
             className="text-white/80 hover:bg-white/10 hover:text-white"
             aria-label={t(
-              fullscreen ? "files.preview.exitFullscreen" : "files.preview.fullscreen"
+              fullscreen
+                ? "files.preview.exitFullscreen"
+                : "files.preview.fullscreen",
             )}
             onClick={toggleFullscreen}
           >

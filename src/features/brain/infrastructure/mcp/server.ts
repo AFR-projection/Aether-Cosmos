@@ -1,6 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { buildAgentInstructions } from "./instructions";
+import { registerBrainMcpPrompts } from "./prompts";
 import { registerBrainMcpTools } from "./tools";
 import { registerAdvancedBrainMcpTools } from "./tools-advanced";
+import { registerBrainSessionTools } from "./tools-session";
 import type { McpPrincipal } from "./principal";
 
 /**
@@ -11,7 +14,7 @@ import type { McpPrincipal } from "./principal";
  * `/api/brain/[id]/connect` hands out, so the snippet has to be re-pasted.
  */
 export const BRAIN_MCP_SERVER_NAME = "aether-cosmos-brain";
-export const BRAIN_MCP_SERVER_VERSION = "2.1.0";
+export const BRAIN_MCP_SERVER_VERSION = "2.3.0";
 
 /**
  * A server instance scoped to ONE authenticated principal.
@@ -21,46 +24,21 @@ export const BRAIN_MCP_SERVER_VERSION = "2.1.0";
  * with the stateless transport (a fresh server per HTTP request) this removes the
  * shared-session state that the previous MCP implementation kept in a module-level
  * Map — which could not survive more than one Node process.
+ *
+ * Async because the handshake instructions now carry the user's own standing
+ * instructions (see ./instructions.ts). That read is cached per brain and falls back
+ * to the static protocol on any failure, so the cost per request is a cache hit and
+ * the failure mode is a less helpful server rather than an unreachable one.
  */
-export function createBrainMcpServer(principal: McpPrincipal): McpServer {
+export async function createBrainMcpServer(principal: McpPrincipal): Promise<McpServer> {
   const server = new McpServer(
     { name: BRAIN_MCP_SERVER_NAME, version: BRAIN_MCP_SERVER_VERSION },
-    {
-      instructions: [
-        "This is the user's Second Brain: their permanent, portable long-term memory.",
-        "",
-        "Protocol:",
-        "1. Call brain_recall once at the start of a task to load standing instructions and relevant context.",
-        "   With a token budget to respect, call brain_context instead: same purpose, but bounded in",
-        "   tokens and it tells you why each memory was chosen and what was left out.",
-        "2. Use brain_search / brain_read while working to look things up.",
-        "3. Call brain_remember only for knowledge worth keeping permanently — facts, decisions,",
-        "   preferences, procedures, project context. Not transient conversation.",
-        "4. Use brain_update to correct an existing memory instead of writing a contradicting one.",
-        "5. Use brain_link_memory to create explicit relationships between memories.",
-        "   Use brain_link to record entity relationships the brain should know about.",
-        "",
-        "Advanced features (NEW in v2.1):",
-        "- brain_batch_search: Execute multiple queries in parallel for efficiency",
-        "- brain_analytics: Get usage insights and quality metrics",
-        "- brain_suggest_queries: Generate query suggestions based on brain content",
-        "- brain_semantic_status: Check semantic search availability and backfill progress",
-        "- brain_export_memories: Export for backup or migration (JSON/Markdown)",
-        "",
-        "Retrieval notes:",
-        "- Semantic search can be enabled from /brain/settings (OpenRouter embeddings).",
-        "  Check status with brain_semantic_status. When enabled, retrieval uses:",
-        "  lexical (FTS) + entity overlap + graph proximity + semantic similarity.",
-        "- brain_related returns memories connected by explicit links (memory_links table),",
-        "  derived relationships (scored by local algorithms), or semantic/entity overlap.",
-        "  If results are empty, use brain_link_memory to create explicit links.",
-        "",
-        "You are a guest here. The brain outlives you: keep it valuable, not exhaustive.",
-      ].join("\n"),
-    }
+    { instructions: await buildAgentInstructions(principal) }
   );
 
   registerBrainMcpTools(server, principal);
   registerAdvancedBrainMcpTools(server, principal);
+  registerBrainSessionTools(server, principal);
+  registerBrainMcpPrompts(server, principal);
   return server;
 }

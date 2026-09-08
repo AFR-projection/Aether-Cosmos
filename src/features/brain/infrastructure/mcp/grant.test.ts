@@ -67,7 +67,7 @@ describe("requireGrant — isolation (§46: agent A must not reach brain B)", ()
 
 describe("requireGrant — scope enforcement", () => {
   it("blocks a scope the grant does not include", () => {
-    for (const scope of ["brain.write", "brain.delete", "brain.export"] as const) {
+    for (const scope of ["brain.write", "brain.delete", "brain.import"] as const) {
       try {
         requireGrant(readOnlyOnA, BRAIN_A, scope);
         throw new Error(`expected ${scope} to be refused`);

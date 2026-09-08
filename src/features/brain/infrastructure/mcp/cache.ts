@@ -39,6 +39,9 @@ export const CACHE_TTL = {
   search: 30_000, // 30s - search feels stale faster
   analytics: 120_000, // 2min - aggregates don't need real-time
   semantic_status: 30_000, // 30s
+  // Standing instructions ride in every handshake, so this one is read far more often
+  // than it changes — and a write invalidates the brain's whole cache anyway.
+  instructions: 60_000,
 };
 
 /**

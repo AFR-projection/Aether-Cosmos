@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/shared/infrastructure/db";
 import { files, fileVersions, changeHistory, type File } from "@/shared/infrastructure/db/schema";
 import { copyR2Object, objectExists } from "@files/infrastructure/storage/r2";
+import { mediaMetadataReset } from "@files/application/jobs/media-inspection";
 
 function versionObjectKey(file: File, version: number): string {
   return `${file.userId}/${file.id}/versions/${version}/${file.name}`;
@@ -47,7 +48,11 @@ export async function snapshotFileVersion(
   const newVersion = previousVersion + 1;
   await db
     .update(files)
-    .set({ version: newVersion, updatedAt: new Date() })
+    .set({
+      version: newVersion,
+      ...mediaMetadataReset(),
+      updatedAt: new Date(),
+    })
     .where(eq(files.id, file.id));
 
   await db.insert(changeHistory).values({

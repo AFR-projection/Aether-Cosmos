@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useRef, useMemo, type ElementType } from "react";
 import { QUICK_ACTION_EVENT, type QuickAction } from "@/shared/lib/system/quick-actions";
 import {
@@ -46,6 +47,12 @@ import {
   loadTreeOpen, saveTreeOpen, loadTreeWidth, saveTreeWidth,
   SORT_OPTIONS,
 } from "@files/domain/services/view-prefs";
+import {
+  buildFilesFilterHref,
+  matchesFileFilter,
+  type FileFilter,
+} from "@files/domain/services/file-filter";
+import { buildFilesListRequest } from "@files/domain/services/files-list-request";
 import { sortFiles } from "@files/domain/services/sort";
 import { FolderTreeSidebar } from "./folder-tree-sidebar";
 import { folderChildrenQuery } from "@files/presentation/hooks/use-folder-children";
@@ -106,17 +113,12 @@ const FILTERS = [
   { key: "audio", labelKey: "files.browser.filter.audio", icon: Music },
   { key: "document", labelKey: "files.browser.filter.documents", icon: FileText },
   { key: "archive", labelKey: "files.browser.filter.archives", icon: FileArchive },
-] as const satisfies readonly { key: string; labelKey: TranslationKey; icon: ElementType }[];
-
-type FilterKey = (typeof FILTERS)[number]["key"];
-
-const FILTER_MIME_MAP: Record<string, string[]> = {
-  image: ["image/"],
-  video: ["video/"],
-  audio: ["audio/"],
-  document: ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument", "text/", "application/vnd.ms-excel", "application/vnd.ms-powerpoint"],
-  archive: ["application/zip", "application/x-rar", "application/x-7z", "application/gzip", "application/x-tar"],
-};
+  { key: "favorites", labelKey: "files.browser.filter.favorites", icon: Star },
+] as const satisfies readonly {
+  key: FileFilter;
+  labelKey: TranslationKey;
+  icon: ElementType;
+}[];
 
 /** Actions that mutate the folder's contents, so they need `canEdit`. */
 const NEEDS_EDIT_ACTIONS = new Set(["rename", "move", "duplicate", "copy", "clip-cut"]);
@@ -128,12 +130,6 @@ const NEEDS_EDIT_ACTIONS = new Set(["rename", "move", "duplicate", "copy", "clip
  */
 type FilePage = { files: FileRecord[]; nextCursor: string | null; nextPage: number | null };
 const EMPTY_PAGE: FilePage = { files: [], nextCursor: null, nextPage: null };
-
-function matchesFilter(file: FileRecord, filter: FilterKey): boolean {
-  if (filter === "all") return true;
-  const prefixes = FILTER_MIME_MAP[filter] ?? [];
-  return prefixes.some((p) => file.mimeType.startsWith(p));
-}
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -169,7 +165,7 @@ export const OWNER_CAPS: BrowserCaps = {
 interface FileBrowserProps {
   folderId?: string | null;
   trash?: boolean;
-  favorites?: boolean;
+  filter?: FileFilter;
   selectedFileId?: string | null;
   isSharedContext?: boolean;
   sharedFolderName?: string;
@@ -177,6 +173,8 @@ interface FileBrowserProps {
   caps?: BrowserCaps;
   /** Slot in the shared-folder header — currently the "Leave shared folder" button. */
   sharedAction?: React.ReactNode;
+  /** Shell-owned return target keeps this feature independent from Sharing routes. */
+  sharedReturnHref?: string;
 }
 
 /**
@@ -281,14 +279,16 @@ const CONTROL_H = "h-9";
 export function FileBrowser({
   folderId = null,
   trash = false,
-  favorites = false,
+  filter = "all",
   selectedFileId = null,
   isSharedContext = false,
   sharedFolderName = "",
   caps = OWNER_CAPS,
   sharedAction = null,
+  sharedReturnHref = "/shares?view=received",
 }: FileBrowserProps) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const t = useT();
   const { askPrompt, askConfirm, dialogs } = useDialogs();
   // Only framer-motion needs this: the global `prefers-reduced-motion` block in
@@ -298,7 +298,8 @@ export function FileBrowser({
   // View + search + filter + sort (view & sort persist across sessions)
   const [view, setView] = useState<"grid" | "list">(() => loadView());
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<FilterKey>("all");
+  const typeFilter = filter;
+  const favoritesActive = typeFilter === "favorites";
   const [sortBy, setSortBy] = useState<string>(() => loadSortBy());
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => loadSortOrder());
 
@@ -379,25 +380,26 @@ export function FileBrowser({
   const [morePage, setMorePage] = useState<number | null | undefined>(undefined);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const listScope = `${folderId ?? "root"}:${trash}:${favorites}:${search}`;
+  const listScope = `${folderId ?? "root"}:${trash}:${typeFilter}:${search}`;
 
   // ── File fetching ──
   const filesQuery = useQuery({
-    queryKey: ["files", folderId, trash, favorites, search],
+    queryKey: ["files", folderId, trash, typeFilter, search],
     queryFn: async () => {
-      if (search) {
-        const params = new URLSearchParams({ q: search, limit: "100" });
-        if (folderId) params.set("folderId", folderId);
-        const res = await apiFetch<FilePage>(`/api/search?${params}`);
-        if (!res.success) throw new Error(res.error ?? t("files.browser.error.search"));
-        return res.data ?? EMPTY_PAGE;
+      const url = buildFilesListRequest({
+        filter: typeFilter,
+        folderId,
+        search,
+        limit: 100,
+        trash,
+      });
+      const res = await apiFetch<FilePage>(url);
+      if (!res.success) {
+        throw new Error(
+          res.error ??
+            t(search ? "files.browser.error.search" : "files.browser.error.load")
+        );
       }
-      const params = new URLSearchParams({ limit: "100" });
-      if (folderId) params.set("folderId", folderId);
-      if (trash) params.set("trash", "true");
-      if (favorites) params.set("favorites", "true");
-      const res = await apiFetch<FilePage>(`/api/files?${params}`);
-      if (!res.success) throw new Error(res.error ?? t("files.browser.error.load"));
       return res.data ?? EMPTY_PAGE;
     },
     staleTime: 5_000,
@@ -536,7 +538,7 @@ export function FileBrowser({
   // entry for this folder's children instead of fetching its own copy.
   const foldersQuery = useQuery({
     ...folderChildrenQuery(folderId, trash),
-    enabled: !favorites && !search,
+    enabled: !favoritesActive && !search,
   });
 
   const folders = foldersQuery.data ?? [];
@@ -553,22 +555,15 @@ export function FileBrowser({
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const params = new URLSearchParams({ limit: "100" });
-      if (folderId) params.set("folderId", folderId);
-      let url: string;
-      if (search) {
-        // Keep paging the SEARCH endpoint. Asking `/api/files` for the next page of a
-        // search returned the folder's contents instead, so page two of any search was
-        // a list of files that never matched the query.
-        params.set("q", search);
-        params.set("page", String(nextPage));
-        url = `/api/search?${params}`;
-      } else {
-        params.set("cursor", nextCursor!);
-        if (trash) params.set("trash", "true");
-        if (favorites) params.set("favorites", "true");
-        url = `/api/files?${params}`;
-      }
+      const url = buildFilesListRequest({
+        filter: typeFilter,
+        folderId,
+        search,
+        limit: 100,
+        cursor: search ? null : nextCursor,
+        page: search ? nextPage : null,
+        trash,
+      });
       const res = await apiFetch<FilePage>(url);
       if (!res.success || !res.data) {
         throw new Error(apiErrorMessage(res, t, "files.browser.error.loadMore"));
@@ -581,16 +576,13 @@ export function FileBrowser({
     } finally {
       setLoadingMore(false);
     }
-  }, [hasMore, nextCursor, nextPage, loadingMore, search, folderId, trash, favorites, showError, t]);
+  }, [hasMore, nextCursor, nextPage, loadingMore, search, folderId, trash, typeFilter, showError, t]);
 
   // ── Filter + sort files (client-side) ──
-  const filteredFiles = useMemo(() => {
-    let list = allFiles;
-    if (typeFilter !== "all") {
-      list = list.filter((f) => matchesFilter(f, typeFilter));
-    }
-    return list;
-  }, [allFiles, typeFilter]);
+  const filteredFiles = useMemo(
+    () => allFiles.filter((file) => matchesFileFilter(file, typeFilter)),
+    [allFiles, typeFilter]
+  );
 
   // ── Drag state (manual tracking replaces react-dropzone isDragActive) ──
   const [isDragActive, setIsDragActive] = useState(false);
@@ -599,9 +591,9 @@ export function FileBrowser({
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     dragCounter.current++;
-    // No "drop to upload" overlay when the viewer may not write here.
-    if (caps.canEdit) setIsDragActive(true);
-  }, [caps.canEdit]);
+    // Favorites is a cross-folder view, so it has no destination for an upload.
+    if (caps.canEdit && !favoritesActive) setIsDragActive(true);
+  }, [caps.canEdit, favoritesActive]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -613,11 +605,11 @@ export function FileBrowser({
   const onDropNative = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
-      // Dropping onto a folder you may only read must not start an upload.
-      if (!caps.canEdit) {
+      // Dropping onto a read-only or cross-folder surface must not start an upload.
+      if (!caps.canEdit || favoritesActive) {
         dragCounter.current = 0;
         setIsDragActive(false);
-        refuse("edit");
+        if (!caps.canEdit) refuse("edit");
         return;
       }
       const items = e.dataTransfer.items;
@@ -680,7 +672,7 @@ export function FileBrowser({
 
       queue.addFolderStructure(uploadItems);
     },
-    [folderId, getQueue, showError, caps.canEdit, refuse, t]
+    [folderId, getQueue, showError, caps.canEdit, favoritesActive, refuse, t]
   );
 
   // ── Clipboard: copy / cut (paste lives below, needs folderId handlers) ──
@@ -1386,7 +1378,7 @@ export function FileBrowser({
   // Mobile bottom-nav "+" delegates here so we never duplicate upload/note/
   // folder logic. Disabled in trash/favorites where creation isn't allowed.
   useEffect(() => {
-    if (trash || favorites || !caps.canEdit) return;
+    if (trash || favoritesActive || !caps.canEdit) return;
     const handler = (e: Event) => {
       const action = (e as CustomEvent<QuickAction>).detail;
       if (action === "upload") uploadInputRef.current?.click();
@@ -1397,7 +1389,7 @@ export function FileBrowser({
     return () => window.removeEventListener(QUICK_ACTION_EVENT, handler);
     // createNote/createFolder are stable closures over folderId; re-bind on it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trash, favorites, folderId, caps.canEdit]);
+  }, [trash, favoritesActive, folderId, caps.canEdit]);
 
   const isLoading = filesQuery.isPending && !filesQuery.data;
 
@@ -1458,7 +1450,7 @@ export function FileBrowser({
 
       // Ctrl/Cmd+V pastes the clipboard into the current folder (works with an
       // empty selection too — that's the common Explorer flow).
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && !trash) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && !trash && !favoritesActive) {
         if (getClipboard()) { e.preventDefault(); void pasteHere(); }
         return;
       }
@@ -1519,7 +1511,7 @@ export function FileBrowser({
     // ancestor chain out of this closure — a stale one would paste into the folder the user
     // was looking at a navigation ago.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIds, filteredFiles, trash, overlayOpen, folderId, folderPath.data, pasteHere]);
+  }, [selectedIds, filteredFiles, trash, favoritesActive, overlayOpen, folderId, folderPath.data, pasteHere]);
 
   useEffect(() => {
     if (filesQuery.isError) {
@@ -1553,7 +1545,7 @@ export function FileBrowser({
   // breadcrumb and folder cards remain the way around, so nothing is lost — and no tree
   // requests are made for rows nobody can see.
   const wideEnoughForTree = useMediaQuery("(min-width: 1280px)");
-  const showTree = wideEnoughForTree && treeOpen && !trash && !favorites;
+  const showTree = wideEnoughForTree && treeOpen && !trash && !favoritesActive;
 
   // Inside a share the cached path is already trimmed to start at the folder that was
   // shared, so `crumbs[0]` IS the root the member is allowed to see. Before it lands the
@@ -1591,7 +1583,7 @@ export function FileBrowser({
         })
       : t("files.browser.fileCount", { count: allFiles.length });
 
-  const canCreate = !trash && !favorites && caps.canEdit;
+  const canCreate = !trash && !favoritesActive && caps.canEdit;
 
   // The menu closes itself after an item runs, so these only do the work.
   const newItems: FloatingMenuItem[] = [
@@ -1680,9 +1672,24 @@ export function FileBrowser({
   /** Puts the listing back to "everything here" from the empty state. */
   const resetFilters = useCallback(() => {
     setSearch("");
-    setTypeFilter("all");
     setSelectedIds(new Set());
-  }, []);
+    router.replace(buildFilesFilterHref("all"));
+  }, [router]);
+
+  const selectFilter = useCallback(
+    (nextFilter: FileFilter) => {
+      setSelectedIds(new Set());
+      router.replace(buildFilesFilterHref(nextFilter));
+    },
+    [router]
+  );
+
+  /**
+   * `typeFilter` is owned by the route (`?filter=`), so a filter picked from the
+   * chips cannot live in component state — the navigation above re-renders the
+   * server component with the resolved value. While the transition lands, the
+   * listing already reflects the active filter, so nothing is optimistically set.
+   */
 
   return (
     // `pointerWithin` rather than the default rectangle intersection: the targets here
@@ -1737,17 +1744,17 @@ export function FileBrowser({
       </AnimatePresence>
 
       {/* ── Page header ──
-          One block for every surface. `trash`/`favorites` are headed by their own page,
-          so this stays out of their way rather than printing a second H1. */}
-      {!trash && !favorites && (
+          Trash owns a separate page heading. Every /files filter, including Favorites,
+          remains part of My Files and keeps this shared header. */}
+      {!trash && (
         <div className="mb-5">
           {isSharedContext && (
             <Link
-              href="/shared-with-me"
+              href={sharedReturnHref}
               className="group mb-3 -ml-1.5 inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >
               <ArrowLeft aria-hidden className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
-              <span>{t("nav.sharedWithMe")}</span>
+              <span>{t("nav.sharing")}</span>
             </Link>
           )}
 
@@ -1849,7 +1856,7 @@ export function FileBrowser({
           <div className="mb-3 flex flex-wrap items-center gap-2">
             {/* Folder tree toggle. Only offered where the pane can actually appear —
                 below `xl` there is no room for it, and trash/favorites are flat lists. */}
-            {!trash && !favorites && (
+            {!trash && !favoritesActive && (
               <Button
                 type="button"
                 variant="ghost"
@@ -2047,7 +2054,7 @@ export function FileBrowser({
               </>
             )}
 
-            {!trash && !favorites && <ActivityCenter uploadQueue={uploadQueue} inline />}
+            {!trash && !favoritesActive && <ActivityCenter uploadQueue={uploadQueue} inline />}
 
             <div className="mx-0.5 hidden h-5 w-px bg-border/40 sm:block" />
 
@@ -2145,22 +2152,29 @@ export function FileBrowser({
 
           {/* ── Filter chips ──
               Kept on screen during a search too: the type filter still applies to the
-              results, so hiding the chips made the narrowed count look like a bug. */}
-          {!trash && !favorites && (
+              results, so hiding the chips made the narrowed count look like a bug.
+              Favorites keeps them as well — the row is how you leave it. */}
+          {!trash && (
             <div
               role="group"
               aria-label={t("files.browser.filterLabel")}
               className="no-scrollbar mb-4 flex items-center gap-1.5 overflow-x-auto"
             >
               {FILTERS.map(({ key, labelKey, icon: Icon }) => {
-                const count = key !== "all" ? allFiles.filter((f) => matchesFilter(f, key)).length : allFiles.length;
+                // In the cross-folder Favorites view the loaded page IS the filtered
+                // set, so a per-chip count read off it would be misleading — the
+                // counts only stay truthful inside a single folder listing.
+                const count =
+                  favoritesActive || key === "all"
+                    ? null
+                    : allFiles.filter((f) => matchesFileFilter(f, key)).length;
                 const active = typeFilter === key;
                 return (
                   <button
                     key={key}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => { setTypeFilter(key); setSelectedIds(new Set()); }}
+                    onClick={() => { selectFilter(key); setSearch(""); }}
                     className={cn(
                       "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
                       active
@@ -2170,7 +2184,7 @@ export function FileBrowser({
                   >
                     <Icon aria-hidden className="h-3 w-3" />
                     {t(labelKey)}
-                    {count > 0 && key !== "all" && (
+                    {count !== null && count > 0 && (
                       // Subordinate by weight, not by opacity: `opacity-40` on an already
                       // muted chip put the count under the contrast floor.
                       <span className="font-mono text-xs font-normal tabular-nums">{count}</span>
@@ -2256,6 +2270,7 @@ export function FileBrowser({
             empty={{
               searchQuery: search || undefined,
               filterActive: typeFilter !== "all",
+              favoritesActive,
               onResetFilters: resetFilters,
               readOnly: !canCreate,
               action: canCreate ? (

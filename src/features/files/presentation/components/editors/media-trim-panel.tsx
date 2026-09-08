@@ -144,6 +144,9 @@ export default function MediaTrimPanel({
   const container = containerExtensionFor(mimeType);
 
   const mediaRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  const trimOperationIdRef = useRef(crypto.randomUUID());
+  const extractOperationIdRef = useRef(crypto.randomUUID());
+  const extractedFileIdRef = useRef(crypto.randomUUID());
   /** Playback started from "Play selection", so it should stop at the out point. */
   const previewingRef = useRef(false);
 
@@ -232,6 +235,7 @@ export default function MediaTrimPanel({
         method: "PUT",
         body: JSON.stringify({
           fileId,
+          operationId: trimOperationIdRef.current,
           startSeconds: clip.startSeconds,
           endSeconds: clip.endSeconds,
         }),
@@ -272,7 +276,11 @@ export default function MediaTrimPanel({
     try {
       const res = await apiFetch<{ queued: boolean }>("/api/files/extract-audio", {
         method: "POST",
-        body: JSON.stringify({ fileId }),
+        body: JSON.stringify({
+          fileId,
+          operationId: extractOperationIdRef.current,
+          outputFileId: extractedFileIdRef.current,
+        }),
       });
       if (!res.success) {
         setAudioError({ kind: "api", error: res.error, code: res.code });

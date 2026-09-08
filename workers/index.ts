@@ -22,14 +22,35 @@ import {
   deletionJobs,
   files,
   folders,
+  mediaOperations,
   users,
   webhooks,
 } from "@/shared/infrastructure/db/schema";
-import { QUEUE_NAME } from "@/shared/infrastructure/queue";
+import { QUEUE_NAME, enqueueJob } from "@/shared/infrastructure/queue";
+import {
+  createMediaWorkerCore,
+  type ExactMediaState,
+  type ExtractedAudioInput,
+  type InspectionValues,
+  type MediaFileState,
+  type MediaOperation,
+  type MediaWorkerCoreDependencies,
+  type TrimMediaInput,
+} from "@files/application/jobs/media-worker-core";
+import {
+  createMediaPublicationCoordinator,
+  type MediaPublicationTransaction,
+} from "@files/application/jobs/media-publication";
+import {
+  renderThumbnailSet,
+  type ThumbnailRenderDependencies,
+} from "@files/application/jobs/thumbnail-renderer";
+import { mediaMetadataReset } from "@files/application/jobs/media-inspection";
 import {
   AUDIO_EXTRACT_TARGETS,
   buildExtractAudioArgs,
-  buildTrimArgs,
+  buildVideoThumbnailArgs,
+  buildVideoTrimArgs,
   chooseImageEncoder,
   containerExtensionFor,
   DEFAULT_EDIT_QUALITY,
@@ -54,13 +75,21 @@ import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
 import {
   buildR2Key,
+  copyR2Object,
   deleteR2Object,
   deleteR2Objects,
   downloadFromR2Stream,
   headObject,
+  putR2Object,
   uploadR2Stream,
 } from "@files/infrastructure/storage/r2";
 import { renderPdfFirstPage } from "@files/infrastructure/storage/pdf-thumbnail";
+import {
+  buildFfprobeArgs,
+  classifyVideoCompatibility,
+  detectMp4FaststartFromAtoms,
+  parseMediaProbe,
+} from "@files/domain/services/media-metadata";
 
 const execFileAsync = promisify(execFile);
 
@@ -176,36 +205,32 @@ async function generateImageThumbnails(fileId: string, buffer: Buffer): Promise<
 async function generateVideoThumbnail(fileId: string, r2Key: string): Promise<boolean> {
   const fs = await import("fs/promises");
   const tmpIn = tmpPath(`${fileId}-input`);
+  const tmpFrame = tmpPath(`${fileId}-thumb-frame.png`);
   await downloadR2ToFile(r2Key, tmpIn);
 
-  let generated300 = false;
   try {
-    // Generate multiple sizes from video frame
-    for (const size of THUMB_SIZES) {
-      const tmpOut = tmpPath(`${fileId}-thumb-${size}.webp`);
-      try {
-        await execFileAsync("ffmpeg", [
-          "-i", tmpIn,
-          "-ss", "00:00:01",
-          "-vframes", "1",
-          "-vf", `scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2`,
-          "-y", tmpOut,
-        ]);
-        const thumbBuffer = await fs.readFile(tmpOut);
-        // Convert to webp via sharp
-        const webpBuffer = await sharp(thumbBuffer).webp({ quality: 80 }).toBuffer();
-        await uploadToR2(`thumbnails/${fileId}_${size}.webp`, webpBuffer, "image/webp");
-        if (size === 300) generated300 = true;
-      } catch {
-        // If size fails, skip it
-      } finally {
-        await fs.unlink(tmpOut).catch(() => {});
-      }
-    }
+    // Decode one frame once. Sharp performs the four cheap image resizes; starting ffmpeg four
+    // times made every thumbnail job seek and decode the same video four times.
+    await execFileAsync("ffmpeg", buildVideoThumbnailArgs(tmpIn, tmpFrame));
+    const frame = await fs.readFile(tmpFrame);
+    await Promise.all(
+      THUMB_SIZES.map(async (size) => {
+        const webp = await sharp(frame)
+          .resize(size, size, {
+            fit: "contain",
+            background: { r: 15, g: 23, b: 42, alpha: 1 },
+            withoutEnlargement: true,
+          })
+          .webp({ quality: 80, effort: 4 })
+          .toBuffer();
+        await uploadToR2(`thumbnails/${fileId}_${size}.webp`, webp, "image/webp");
+      })
+    );
+    return true;
   } finally {
     await fs.unlink(tmpIn).catch(() => {});
+    await fs.unlink(tmpFrame).catch(() => {});
   }
-  return generated300;
 }
 
 async function generatePdfThumbnail(fileId: string, r2Key: string): Promise<boolean> {
@@ -283,7 +308,93 @@ async function generateAudioThumbnail(fileId: string, r2Key: string): Promise<bo
   return true;
 }
 
-async function generateThumbnail(fileId: string, r2Key: string, mimeType: string) {
+async function inspectMediaLegacy(
+  fileId: string,
+  r2Key: string,
+  mimeType: string,
+  expectedVersion: number
+): Promise<void> {
+  const [file] = await db
+    .select({
+      id: files.id,
+      r2Key: files.r2Key,
+      mimeType: files.mimeType,
+      encrypted: files.encrypted,
+      isNote: files.isNote,
+      status: files.status,
+      version: files.version,
+    })
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+
+  // A delayed job must never probe bytes from a replaced version or persist stale metadata.
+  if (
+    !file ||
+    file.r2Key !== r2Key ||
+    file.mimeType !== mimeType ||
+    file.version !== expectedVersion ||
+    file.encrypted ||
+    file.isNote ||
+    file.status !== "ready" ||
+    (!mimeType.startsWith("video/") && !mimeType.startsWith("audio/"))
+  ) return;
+
+  const fs = await import("fs/promises");
+  const extension = containerExtensionFor(mimeType) ?? "bin";
+  const tmpIn = tmpPath(`${fileId}-probe-v${expectedVersion}.${extension}`);
+  try {
+    await downloadR2ToFile(r2Key, tmpIn);
+    const { stdout } = await execFileAsync("ffprobe", buildFfprobeArgs(tmpIn), {
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const metadata = parseMediaProbe(JSON.parse(stdout));
+    if (metadata.container === "mp4") {
+      // Atom headers are tiny. Reading a bounded prefix detects normal faststart files while
+      // returning null for a moov atom outside the window instead of guessing.
+      const handle = await fs.open(tmpIn, "r");
+      try {
+        const prefix = Buffer.alloc(8 * 1024 * 1024);
+        const { bytesRead } = await handle.read(prefix, 0, prefix.length, 0);
+        metadata.faststart = detectMp4FaststartFromAtoms(prefix.subarray(0, bytesRead));
+      } finally {
+        await handle.close();
+      }
+    }
+    const compatibility = metadata.videoCodec
+      ? classifyVideoCompatibility(metadata)
+      : { compatible: true, reason: null };
+
+    await db
+      .update(files)
+      .set({
+        mediaDurationMs: metadata.durationMs,
+        mediaWidth: metadata.width,
+        mediaHeight: metadata.height,
+        mediaFps: metadata.fps,
+        mediaVideoCodec: metadata.videoCodec,
+        mediaAudioCodec: metadata.audioCodec,
+        mediaBitrateBps: metadata.bitrateBps,
+        mediaContainer: metadata.container,
+        mediaFaststart: metadata.faststart,
+        mediaCompatible: compatibility.compatible,
+        mediaCompatibilityReason: compatibility.reason,
+        mediaInspectedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(files.id, fileId),
+          eq(files.r2Key, r2Key),
+          eq(files.version, expectedVersion)
+        )
+      );
+  } finally {
+    await fs.unlink(tmpIn).catch(() => {});
+  }
+}
+
+async function generateThumbnailLegacy(fileId: string, r2Key: string, mimeType: string) {
   if (r2Key.startsWith("notes/")) return;
 
   const thumbKey = `thumbnails/${fileId}_300.webp`;
@@ -371,10 +482,11 @@ async function recomputeUsedBytes(userId: string) {
  * the output extension is what picks the muxer, and Matroska packets do not go into
  * an `.mp4`.
  */
-async function trimMedia(
+async function trimMediaLegacy(
   fileId: string,
   r2Key: string,
   mimeType: string,
+  expectedVersion: number,
   startSeconds: number,
   endSeconds: number
 ) {
@@ -392,7 +504,13 @@ async function trimMedia(
   try {
     await execFileAsync(
       "ffmpeg",
-      buildTrimArgs({ inputPath: tmpIn, outputPath: tmpOut, startSeconds, endSeconds })
+      buildVideoTrimArgs({
+        inputPath: tmpIn,
+        outputPath: tmpOut,
+        startSeconds,
+        endSeconds,
+        mimeType,
+      })
     );
     const output = await fs.readFile(tmpOut);
     // A seek past the last keyframe can produce a valid, empty container. Writing that
@@ -403,12 +521,20 @@ async function trimMedia(
     const [row] = await db
       .update(files)
       .set({ sizeBytes: output.length, updatedAt: new Date() })
-      .where(eq(files.id, fileId))
+      .where(
+        and(
+          eq(files.id, fileId),
+          eq(files.r2Key, r2Key),
+          eq(files.version, expectedVersion)
+        )
+      )
       .returning({ userId: files.userId });
-    if (row) await recomputeUsedBytes(row.userId);
+    if (!row) return;
+    await recomputeUsedBytes(row.userId);
 
     // The poster frame was taken from a part of the clip that may no longer exist.
-    await generateThumbnail(fileId, r2Key, mimeType);
+    await generateThumbnailLegacy(fileId, r2Key, mimeType);
+    await inspectMediaLegacy(fileId, r2Key, mimeType, expectedVersion);
   } finally {
     await fs.unlink(tmpIn).catch(() => {});
     await fs.unlink(tmpOut).catch(() => {});
@@ -426,7 +552,7 @@ async function trimMedia(
  * The audio is re-encoded rather than copied out of the container (see
  * `AUDIO_EXTRACT_TARGETS`), so the result plays in the browser whatever the video held.
  */
-async function extractAudio(data: {
+async function extractAudioLegacy(data: {
   fileId: string;
   r2Key: string;
   mimeType: string;
@@ -525,7 +651,8 @@ async function extractAudio(data: {
       .where(eq(files.id, created.id));
     await recomputeUsedBytes(data.userId);
     // Album art if the video carried any, a waveform placeholder otherwise.
-    await generateThumbnail(created.id, key, produced.target.mimeType);
+    await generateThumbnailLegacy(created.id, key, produced.target.mimeType);
+    await inspectMediaLegacy(created.id, key, produced.target.mimeType, created.version);
     console.log(`extract_audio ${data.fileId}: wrote ${name} (${produced.body.length} bytes)`);
   } finally {
     await fs.unlink(tmpIn).catch(() => {});
@@ -534,6 +661,410 @@ async function extractAudio(data: {
     }
   }
 }
+
+async function transformTrim(input: TrimMediaInput) {
+  const extension = containerExtensionFor(input.mimeType);
+  if (!extension) throw new Error("Unsupported trim container");
+  const fs = await import("fs/promises");
+  const tmpIn = tmpPath(`${input.operationId}-trim-in.${extension}`);
+  const tmpOut = tmpPath(`${input.operationId}-trim-out.${extension}`);
+  try {
+    await downloadR2ToFile(input.r2Key, tmpIn);
+    await execFileAsync(
+      "ffmpeg",
+      buildVideoTrimArgs({
+        inputPath: tmpIn,
+        outputPath: tmpOut,
+        startSeconds: input.startSeconds,
+        endSeconds: input.endSeconds,
+        mimeType: input.mimeType,
+      }),
+    );
+    const body = await fs.readFile(tmpOut);
+    return { body, sizeBytes: body.length };
+  } finally {
+    await fs.unlink(tmpIn).catch(() => {});
+    await fs.unlink(tmpOut).catch(() => {});
+  }
+}
+
+async function transformAudio(input: ExtractedAudioInput) {
+  const fs = await import("fs/promises");
+  const extension = containerExtensionFor(input.mimeType) ?? "bin";
+  const tmpIn = tmpPath(`${input.operationId}-audio-in.${extension}`);
+  const candidates = AUDIO_EXTRACT_TARGETS.map((target) => ({
+    target,
+    path: tmpPath(`${input.operationId}-audio-out${target.extension}`),
+  }));
+  try {
+    await downloadR2ToFile(input.r2Key, tmpIn);
+    let lastError: unknown = null;
+    for (const candidate of candidates) {
+      try {
+        await execFileAsync(
+          "ffmpeg",
+          buildExtractAudioArgs({
+            inputPath: tmpIn,
+            outputPath: candidate.path,
+            target: candidate.target,
+          }),
+        );
+        const body = await fs.readFile(candidate.path);
+        return {
+          body,
+          sizeBytes: body.length,
+          mimeType: candidate.target.mimeType,
+          extension: candidate.target.extension,
+        };
+      } catch (error) {
+        lastError = error;
+        if (isMissingAudioStreamError(String((error as { stderr?: unknown }).stderr ?? ""))) {
+          throw new Error("Video has no audio track");
+        }
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Audio extraction failed");
+  } finally {
+    await fs.unlink(tmpIn).catch(() => {});
+    await Promise.all(candidates.map((candidate) => fs.unlink(candidate.path).catch(() => {})));
+  }
+}
+
+async function inspectExactMedia(input: ExactMediaState): Promise<InspectionValues> {
+  const fs = await import("fs/promises");
+  const extension = containerExtensionFor(input.mimeType) ?? "bin";
+  const tmpIn = tmpPath(`${input.fileId}-probe-v${input.version}.${extension}`);
+  try {
+    await downloadR2ToFile(input.r2Key, tmpIn);
+    const { stdout } = await execFileAsync("ffprobe", buildFfprobeArgs(tmpIn), {
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const metadata = parseMediaProbe(JSON.parse(stdout));
+    if (metadata.container === "mp4") {
+      const handle = await fs.open(tmpIn, "r");
+      try {
+        const prefix = Buffer.alloc(8 * 1024 * 1024);
+        const { bytesRead } = await handle.read(prefix, 0, prefix.length, 0);
+        metadata.faststart = detectMp4FaststartFromAtoms(prefix.subarray(0, bytesRead));
+      } finally {
+        await handle.close();
+      }
+    }
+    const compatibility = metadata.videoCodec
+      ? classifyVideoCompatibility(metadata)
+      : { compatible: true, reason: null };
+    return {
+      mediaDurationMs: metadata.durationMs,
+      mediaWidth: metadata.width,
+      mediaHeight: metadata.height,
+      mediaFps: metadata.fps,
+      mediaVideoCodec: metadata.videoCodec,
+      mediaAudioCodec: metadata.audioCodec,
+      mediaBitrateBps: metadata.bitrateBps,
+      mediaContainer: metadata.container,
+      mediaFaststart: metadata.faststart,
+      mediaCompatible: compatibility.compatible,
+      mediaCompatibilityReason: compatibility.reason,
+    };
+  } finally {
+    await fs.unlink(tmpIn).catch(() => {});
+  }
+}
+
+const thumbnailRenderDependencies: ThumbnailRenderDependencies = {
+  loadBytes: (input) => downloadFromR2(input.r2Key),
+  async extractVideoFrame(input) {
+    const fs = await import("fs/promises");
+    const tmpIn = tmpPath(`${input.fileId}-thumb-v${input.version}-input`);
+    const tmpFrame = tmpPath(`${input.fileId}-thumb-v${input.version}-frame.png`);
+    try {
+      await downloadR2ToFile(input.r2Key, tmpIn);
+      await execFileAsync("ffmpeg", buildVideoThumbnailArgs(tmpIn, tmpFrame));
+      return await fs.readFile(tmpFrame);
+    } finally {
+      await fs.unlink(tmpIn).catch(() => {});
+      await fs.unlink(tmpFrame).catch(() => {});
+    }
+  },
+  async extractAudioCover(input) {
+    const fs = await import("fs/promises");
+    const tmpIn = tmpPath(`${input.fileId}-audio-thumb-v${input.version}-input`);
+    const tmpCover = tmpPath(`${input.fileId}-audio-thumb-v${input.version}-cover.jpg`);
+    try {
+      await downloadR2ToFile(input.r2Key, tmpIn);
+      try {
+        await execFileAsync("ffmpeg", [
+          "-i", tmpIn,
+          "-vframes", "1",
+          "-an",
+          "-y", tmpCover,
+        ]);
+        return await fs.readFile(tmpCover);
+      } catch {
+        return null;
+      }
+    } finally {
+      await fs.unlink(tmpIn).catch(() => {});
+      await fs.unlink(tmpCover).catch(() => {});
+    }
+  },
+  async renderPdf(input) {
+    return renderPdfFirstPage(await downloadFromR2(input.r2Key));
+  },
+  async resizeWebp(source, size, fit) {
+    return sharp(source)
+      .resize(size, size, {
+        fit,
+        background: { r: 15, g: 23, b: 42, alpha: 1 },
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 80, effort: 4 })
+      .toBuffer();
+  },
+};
+
+async function renderExactThumbnails(input: ExactMediaState) {
+  return renderThumbnailSet(input, thumbnailRenderDependencies);
+}
+
+function toMediaFileState(row: typeof files.$inferSelect): MediaFileState {
+  return {
+    id: row.id,
+    userId: row.userId,
+    folderId: row.folderId,
+    name: row.name,
+    r2Key: row.r2Key,
+    mimeType: row.mimeType,
+    sizeBytes: Number(row.sizeBytes),
+    version: row.version,
+    encrypted: row.encrypted,
+    isNote: row.isNote,
+    status: row.status,
+    deletedAt: row.deletedAt,
+    restoreBatchId: row.restoreBatchId,
+  };
+}
+
+function toMediaOperation(row: typeof mediaOperations.$inferSelect): MediaOperation {
+  return {
+    id: row.id,
+    kind: row.kind,
+    sourceFileId: row.sourceFileId,
+    sourceR2Key: row.sourceR2Key,
+    sourceMimeType: row.sourceMimeType,
+    sourceVersion: row.sourceVersion,
+    outputFileId: row.outputFileId,
+    stagingKey: row.stagingKey,
+    status: row.status,
+    outputSizeBytes: row.outputSizeBytes === null ? null : Number(row.outputSizeBytes),
+    outputMimeType: row.outputMimeType,
+    outputName: row.outputName,
+  };
+}
+
+const exactFilePredicate = (input: ExactMediaState) => and(
+  eq(files.id, input.fileId),
+  eq(files.r2Key, input.r2Key),
+  eq(files.mimeType, input.mimeType),
+  eq(files.version, input.version),
+  eq(files.encrypted, false),
+  eq(files.isNote, false),
+  eq(files.status, "ready"),
+  drizzleSql`${files.deletedAt} IS NULL`,
+  drizzleSql`${files.restoreBatchId} IS NULL`,
+);
+
+function createPublicationTransaction(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+): MediaPublicationTransaction {
+  return {
+    async lockOperation(operationId) {
+      const [row] = await tx
+        .select()
+        .from(mediaOperations)
+        .where(eq(mediaOperations.id, operationId))
+        .limit(1)
+        .for("update");
+      return row ? toMediaOperation(row) : null;
+    },
+    async lockExactFile(expected) {
+      const [row] = await tx
+        .select()
+        .from(files)
+        .where(exactFilePredicate(expected))
+        .limit(1)
+        .for("update");
+      return row ? toMediaFileState(row) : null;
+    },
+    async loadFile(fileId) {
+      const [row] = await tx.select().from(files).where(eq(files.id, fileId)).limit(1);
+      return row ? toMediaFileState(row) : null;
+    },
+    async lockOwner(userId) {
+      const [row] = await tx
+        .select({
+          quotaBytes: users.quotaBytes,
+          usedBytes: users.usedBytes,
+          reservedBytes: users.reservedBytes,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+        .for("update");
+      return row ?? null;
+    },
+    async setOperationStatus(operationId, status) {
+      await tx
+        .update(mediaOperations)
+        .set({ status, updatedAt: new Date() })
+        .where(eq(mediaOperations.id, operationId));
+    },
+    async updateTrimFile(input) {
+      const rows = await tx
+        .update(files)
+        .set({ sizeBytes: input.sizeBytes, ...mediaMetadataReset(), updatedAt: new Date() })
+        .where(exactFilePredicate(input))
+        .returning({ id: files.id });
+      return rows.length === 1;
+    },
+    async insertExtractedOutput(input) {
+      const [row] = await tx
+        .insert(files)
+        .values({
+          id: input.outputFileId,
+          userId: input.userId,
+          folderId: input.folderId,
+          name: input.outputName,
+          mimeType: input.outputMimeType,
+          sizeBytes: input.sizeBytes,
+          r2Key: input.outputKey,
+          status: "created",
+          isNote: false,
+        })
+        .onConflictDoNothing({ target: files.id })
+        .returning();
+      return row ? toMediaFileState(row) : null;
+    },
+    async finalizeExtractedOutput(input) {
+      const now = new Date();
+      const [row] = await tx
+        .update(files)
+        .set({
+          name: input.outputName,
+          mimeType: input.outputMimeType,
+          sizeBytes: input.sizeBytes,
+          r2Key: input.outputKey,
+          status: "ready",
+          completedAt: now,
+          verifiedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(files.id, input.outputFileId),
+            eq(files.userId, input.userId),
+            eq(files.r2Key, input.outputKey),
+            eq(files.status, "created"),
+          ),
+        )
+        .returning();
+      return row ? toMediaFileState(row) : null;
+    },
+  };
+}
+
+const mediaPublicationCoordinator = createMediaPublicationCoordinator({
+  transaction: (work) => db.transaction((tx) => work(createPublicationTransaction(tx))),
+});
+
+const mediaWorkerDependencies: MediaWorkerCoreDependencies = {
+  async loadFile(fileId) {
+    const [row] = await db.select().from(files).where(eq(files.id, fileId)).limit(1);
+    return row ? toMediaFileState(row) : null;
+  },
+  async ensureOperation(seed) {
+    await db.insert(mediaOperations).values(seed).onConflictDoNothing({ target: mediaOperations.id });
+    const [row] = await db.select().from(mediaOperations).where(eq(mediaOperations.id, seed.id)).limit(1);
+    if (!row) throw new Error("Media operation could not be loaded");
+    return toMediaOperation(row);
+  },
+  async markOperationStaged(operationId, output) {
+    const [row] = await db
+      .update(mediaOperations)
+      .set({
+        stagingKey: output.stagingKey,
+        outputSizeBytes: output.sizeBytes,
+        outputMimeType: output.mimeType,
+        outputName: output.name ?? null,
+        status: "staged",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(mediaOperations.id, operationId), eq(mediaOperations.status, "queued")))
+      .returning();
+    if (row) return toMediaOperation(row);
+    const [existing] = await db.select().from(mediaOperations).where(eq(mediaOperations.id, operationId)).limit(1);
+    if (!existing) throw new Error("Media operation disappeared while staging");
+    return toMediaOperation(existing);
+  },
+  async markOperationTerminal(operationId, status) {
+    await db.update(mediaOperations).set({ status, updatedAt: new Date() }).where(eq(mediaOperations.id, operationId));
+  },
+  transformTrim,
+  transformAudio,
+  inspect: inspectExactMedia,
+  renderThumbnails: renderExactThumbnails,
+  putObject: putR2Object,
+  copyObject: copyR2Object,
+  deleteObjects: deleteR2Objects,
+  async persistInspection(expected, values) {
+    const rows = await db
+      .update(files)
+      .set({ ...values, mediaInspectedAt: new Date(), updatedAt: new Date() })
+      .where(exactFilePredicate(expected))
+      .returning({ id: files.id });
+    return rows.length === 1;
+  },
+  repairStorageAccounting: recomputeUsedBytes,
+  async publishThumbnails(expected, thumbnailKey, publish) {
+    const [claimed] = await db.transaction(async (tx) => {
+      const rows = await tx
+        .select({ id: files.id })
+        .from(files)
+        .where(exactFilePredicate(expected))
+        .limit(1)
+        .for("update");
+      if (!rows[0]) return [];
+      await publish();
+      return tx
+        .update(files)
+        .set({ thumbnailKey, updatedAt: new Date() })
+        .where(exactFilePredicate(expected))
+        .returning({ id: files.id });
+    });
+    return !!claimed;
+  },
+  async publishTrim(input, publish) {
+    const outcome = await mediaPublicationCoordinator.publishTrim(input, publish);
+    if (outcome === "completed") {
+      const [source] = await db
+        .select({ userId: files.userId })
+        .from(files)
+        .where(eq(files.id, input.fileId))
+        .limit(1);
+      if (source) await recomputeUsedBytes(source.userId);
+    }
+    return outcome;
+  },
+  async publishExtractedAudio(input, publish) {
+    const publication = await mediaPublicationCoordinator.publishExtractedAudio(input, publish);
+    if (publication.outcome === "completed") await recomputeUsedBytes(input.userId);
+    return publication;
+  },
+  enqueue: (type, data, jobId) => enqueueJob(type, data, { jobId }),
+  buildOutputKey: buildR2Key,
+};
+
+const mediaWorker = createMediaWorkerCore(mediaWorkerDependencies);
 
 async function deliverWebhook(data: {
   webhookId: string;
@@ -1008,6 +1539,9 @@ const worker = new Worker(
       fileId?: string;
       r2Key?: string;
       mimeType?: string;
+      version?: number;
+      operationId?: string;
+      outputFileId?: string;
       startSeconds?: number;
       endSeconds?: number;
       userId?: string;
@@ -1028,24 +1562,67 @@ const worker = new Worker(
 
     switch (data.type) {
       case "generate_thumbnail":
-        await generateThumbnail(data.fileId!, data.r2Key!, data.mimeType!);
+        if (data.fileId && data.r2Key && data.mimeType && data.version !== undefined) {
+          await mediaWorker.generateThumbnail({
+            fileId: data.fileId,
+            r2Key: data.r2Key,
+            mimeType: data.mimeType,
+            version: data.version,
+          });
+        }
+        break;
+      case "inspect_media":
+        if (data.fileId && data.r2Key && data.mimeType && data.version !== undefined) {
+          await mediaWorker.inspectMedia({
+            fileId: data.fileId,
+            r2Key: data.r2Key,
+            mimeType: data.mimeType,
+            version: data.version,
+          });
+        }
         break;
       case "compress_image":
         await compressImage(data.fileId!, data.r2Key!, data.mimeType!);
         break;
       case "trim_media":
-        if (data.startSeconds !== undefined && data.endSeconds !== undefined) {
-          await trimMedia(data.fileId!, data.r2Key!, data.mimeType!, data.startSeconds, data.endSeconds);
-        }
-        break;
-      case "extract_audio":
-        // Every field is required: without an owner and a name there is nothing to file
-        // the new audio under, and guessing either would put it in the wrong account.
-        if (data.fileId && data.r2Key && data.mimeType && data.userId && data.name) {
-          await extractAudio({
+        if (
+          data.operationId &&
+          data.fileId &&
+          data.r2Key &&
+          data.mimeType &&
+          data.version !== undefined &&
+          data.startSeconds !== undefined &&
+          data.endSeconds !== undefined
+        ) {
+          await mediaWorker.trimMedia({
+            operationId: data.operationId,
             fileId: data.fileId,
             r2Key: data.r2Key,
             mimeType: data.mimeType,
+            version: data.version,
+            startSeconds: data.startSeconds,
+            endSeconds: data.endSeconds,
+          });
+        }
+        break;
+      case "extract_audio":
+        if (
+          data.operationId &&
+          data.outputFileId &&
+          data.fileId &&
+          data.r2Key &&
+          data.mimeType &&
+          data.version !== undefined &&
+          data.userId &&
+          data.name
+        ) {
+          await mediaWorker.extractAudio({
+            operationId: data.operationId,
+            outputFileId: data.outputFileId,
+            fileId: data.fileId,
+            r2Key: data.r2Key,
+            mimeType: data.mimeType,
+            version: data.version,
             userId: data.userId,
             folderId: data.folderId ?? null,
             name: data.name,

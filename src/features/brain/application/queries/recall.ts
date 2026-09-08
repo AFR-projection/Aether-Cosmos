@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/shared/infrastructure/db";
 import { brainEntities, brainRelationships, memories } from "@/shared/infrastructure/db/schema";
 import { ftsMatchOn, ftsRankOn } from "@/shared/lib/search/fts";
+import { listStandingInstructions, type DirectiveScope } from "./directives";
 
 /**
  * brain_recall — "what long-term context should I know before doing this task?"
@@ -18,11 +19,15 @@ import { ftsMatchOn, ftsRankOn } from "@/shared/lib/search/fts";
  *  3. important   — high-importance memories regardless of the query
  *  4. recent      — what changed lately
  *  5. entities    — graph nodes matching the query, with their edges
+ *
+ * Directives come from ./directives.ts, the same source the MCP handshake renders
+ * into its instructions payload. Two copies of "what counts as a standing rule" would
+ * drift, and then the rules an agent is told at connect time would differ from the
+ * rules it is told on recall — the worst possible failure for this feature.
  */
 
 export const RECALL_CHAR_BUDGET = 6000;
 const SNIPPET_CHARS = 400;
-const DIRECTIVE_LIMIT = 8;
 const RELEVANT_LIMIT = 8;
 const IMPORTANT_LIMIT = 5;
 const RECENT_LIMIT = 5;
@@ -39,6 +44,9 @@ export type RecalledMemory = {
   updatedAt: string;
 };
 
+/** A directive is a recalled memory plus where its authority comes from. */
+export type RecalledDirective = RecalledMemory & { scope: DirectiveScope };
+
 export type RecalledEntity = {
   id: string;
   name: string;
@@ -51,7 +59,7 @@ export type RecallPackage = {
   brainId: string;
   projectId: string | null;
   query: string | null;
-  directives: RecalledMemory[];
+  directives: RecalledDirective[];
   relevant: RecalledMemory[];
   important: RecalledMemory[];
   recent: RecalledMemory[];
@@ -122,12 +130,7 @@ export async function recallBrainContext(params: {
   const projectId = params.projectId ?? null;
 
   const [directiveRows, relevantRows, importantRows, recentRows] = await Promise.all([
-    db
-      .select(recallColumns)
-      .from(memories)
-      .where(and(liveMemories(brainId), inArray(memories.type, ["instruction", "preference"])))
-      .orderBy(desc(memories.importance), desc(memories.updatedAt))
-      .limit(DIRECTIVE_LIMIT),
+    listStandingInstructions({ brainId, projectId }),
 
     query
       ? db
@@ -164,7 +167,7 @@ export async function recallBrainContext(params: {
   // Deduplicate across sections: a memory already shown as a directive or a
   // relevant hit must not burn budget again under "important" or "recent".
   const seen = new Set<string>();
-  const take = (rows: typeof directiveRows): RecalledMemory[] => {
+  const take = (rows: typeof relevantRows): RecalledMemory[] => {
     const out: RecalledMemory[] = [];
     for (const row of rows) {
       if (seen.has(row.id)) continue;
@@ -174,7 +177,21 @@ export async function recallBrainContext(params: {
     return out;
   };
 
-  const directives = take(directiveRows);
+  const directives: RecalledDirective[] = [];
+  for (const row of directiveRows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    directives.push({
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      snippet: row.body,
+      importance: row.importance,
+      confidence: row.confidence,
+      updatedAt: row.updatedAt,
+      scope: row.scope,
+    });
+  }
   const relevant = take(relevantRows);
   const important = take(importantRows);
   const recent = take(recentRows);
@@ -282,7 +299,7 @@ async function recallEntities(brainId: string, query: string): Promise<RecalledE
 /** Compact plain-text rendering an agent can drop straight into a system prompt. */
 function renderContext(pkg: {
   query: string | null;
-  directives: RecalledMemory[];
+  directives: RecalledDirective[];
   relevant: RecalledMemory[];
   important: RecalledMemory[];
   recent: RecalledMemory[];
@@ -298,7 +315,15 @@ function renderContext(pkg: {
     }
   };
 
-  section("Standing instructions and preferences:", pkg.directives);
+  if (pkg.directives.length > 0) {
+    lines.push("", "Standing instructions and preferences (already in force):");
+    for (const item of pkg.directives) {
+      // Scope is marked only when it is a project rule: the common case needs no
+      // annotation, and a prefix on every line costs more than it explains.
+      const scope = item.scope === "project" ? "[project] " : "";
+      lines.push(`- ${scope}[${item.type}] ${item.title}: ${item.snippet}`);
+    }
+  }
   if (pkg.query) section(`Relevant to "${pkg.query}":`, pkg.relevant);
   section("Important long-term memories:", pkg.important);
   section("Recently updated:", pkg.recent);

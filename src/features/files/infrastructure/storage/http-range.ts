@@ -20,38 +20,53 @@ export type ParsedRange = {
   byteRange: string;
 };
 
+export type RangeParseResult =
+  | { kind: "none" }
+  | { kind: "malformed" }
+  | { kind: "unsatisfiable" }
+  | { kind: "range"; range: ParsedRange };
+
 /**
- * Parse a single-range `bytes=` header against a known object size.
- * Returns null for a syntactically invalid, multi-range or unsatisfiable header —
- * callers treat that as "no range", i.e. a full response.
+ * Parse one `bytes=` range against a known object size.
+ *
+ * Malformed syntax may be ignored as a normal whole-object request. An otherwise valid range that
+ * cannot select any byte is different: RFC 9110 expects a 416 with an unsatisfied
+ * `Content-Range`, so callers must not collapse it into "no range" and accidentally send—and bill—
+ * the whole file.
  */
 export function parseRangeHeader(
-  rangeHeader: string,
+  rangeHeader: string | null,
   totalSize: number
-): ParsedRange | null {
+): RangeParseResult {
+  if (rangeHeader === null) return { kind: "none" };
+
   const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
-  if (!match) return null;
-  if (!Number.isFinite(totalSize) || totalSize <= 0) return null;
+  if (!match) return { kind: "malformed" };
+  if (!Number.isFinite(totalSize) || totalSize <= 0) return { kind: "unsatisfiable" };
 
-  let start = match[1] ? parseInt(match[1], 10) : NaN;
-  let end = match[2] ? parseInt(match[2], 10) : NaN;
-
-  if (Number.isNaN(start) && Number.isNaN(end)) return null;
+  let start = match[1] ? Number.parseInt(match[1], 10) : Number.NaN;
+  let end = match[2] ? Number.parseInt(match[2], 10) : Number.NaN;
+  if (Number.isNaN(start) && Number.isNaN(end)) return { kind: "malformed" };
 
   if (Number.isNaN(start)) {
-    // suffix range: bytes=-500
     const suffixLength = end;
-    if (Number.isNaN(suffixLength) || suffixLength <= 0) return null;
+    if (Number.isNaN(suffixLength)) return { kind: "malformed" };
+    if (suffixLength <= 0) return { kind: "unsatisfiable" };
     start = Math.max(0, totalSize - suffixLength);
     end = totalSize - 1;
   } else if (Number.isNaN(end)) {
     end = totalSize - 1;
   }
 
-  if (start < 0 || end < start || start >= totalSize) return null;
+  if (start < 0 || end < start || start >= totalSize) {
+    return { kind: "unsatisfiable" };
+  }
   end = Math.min(end, totalSize - 1);
 
-  return { start, end, byteRange: `bytes=${start}-${end}` };
+  return {
+    kind: "range",
+    range: { start, end, byteRange: `bytes=${start}-${end}` },
+  };
 }
 
 /** Bytes a response for this range will actually carry. */

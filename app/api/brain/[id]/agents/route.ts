@@ -9,6 +9,7 @@ import { enforceBrainRateLimit, requireUuid } from "@brain/infrastructure/http";
 import { logBrainAudit } from "@brain/infrastructure/audit";
 import { createBrainAgent, listAgentsForBrain, MAX_AGENTS_PER_USER } from "@brain/application/commands/agent-service";
 import { BRAIN_API_SCOPES, DEFAULT_BRAIN_AGENT_SCOPES } from "@brain/domain/constants";
+import { buildBrainAgentInstallBundle } from "@brain/infrastructure/agent-templates";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!(await validateCsrf(request))) return apiError("Invalid CSRF token", 403);
 
     const brainId = requireUuid((await params).id, "id");
-    const { sessionUser, userId, principal } = await requireBrainOwnerContext(
+    const { sessionUser, userId, principal, brain } = await requireBrainOwnerContext(
       request,
       brainId,
       ["brain.write"],
@@ -57,6 +58,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const body = createSchema.parse(await request.json());
     const { agent, rawKey } = await createBrainAgent({ ...body, userId, brainId });
+    const origin = new URL(request.url).origin;
+    const install = buildBrainAgentInstallBundle({
+      origin,
+      brainId,
+      brainName: brain.name,
+      mcpUrl: `${origin}/api/brain/mcp`,
+      scopes: agent.scopes,
+    });
 
     await logBrainAudit({
       brainId,
@@ -74,7 +83,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       ip: getClientIp(request),
     });
 
-    return apiSuccess({ agent, rawKey }, 201);
+    return apiSuccess({ agent, rawKey, install }, 201);
   } catch (error) {
     return handleApiError(error);
   }

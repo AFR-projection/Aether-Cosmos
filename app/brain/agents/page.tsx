@@ -19,6 +19,11 @@ import {
   Users,
   Zap,
 } from "lucide-react";
+import { materializeAgentInstallText } from "@brain/domain/agent-install";
+import type {
+  BrainAgentInstallBundle,
+  BrainAgentInstallTargetId,
+} from "@brain/infrastructure/agent-templates";
 import { Button } from "@/ui/primitives/button";
 import { Input } from "@/ui/primitives/input";
 import { BrainShell } from "@brain/presentation/components/brain-shell";
@@ -64,6 +69,16 @@ const AUDIT_POLL_MS = 10_000;
 /** Fleet sparkline: 24 hourly buckets. */
 const FLEET_SPAN_MS = 24 * 60 * 60_000;
 const FLEET_BUCKETS = 24;
+
+const INSTALL_TARGET_LABELS = {
+  universal: "brain.agents.install.targetUniversal",
+  claudeCode: "brain.agents.install.targetClaudeCode",
+  claudeDesktop: "brain.agents.install.targetClaudeDesktop",
+  codex: "brain.agents.install.targetCodex",
+  openCode: "brain.agents.install.targetOpenCode",
+  hermes: "brain.agents.install.targetHermes",
+  other: "brain.agents.install.targetOther",
+} as const;
 
 /** Copy-to-clipboard that reports success inline rather than via a toast. */
 function CopyButton({
@@ -163,13 +178,25 @@ export default function BrainAgentsPage() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<string[]>([]);
-  const [issuedKey, setIssuedKey] = useState<{ agent: string; key: string } | null>(null);
+  const [issuedKey, setIssuedKey] = useState<{
+    agent: string;
+    key: string;
+    install: BrainAgentInstallBundle;
+  } | null>(null);
   const [keyRevealed, setKeyRevealed] = useState(false);
+  const [installTarget, setInstallTarget] = useState<BrainAgentInstallTargetId>("universal");
+  const [installArtifact, setInstallArtifact] = useState("mcp-config");
   const [connectTab, setConnectTab] = useState<"config" | "curl">("config");
 
   const availableScopes = agents.data?.availableScopes ?? [];
   const defaultScopes = agents.data?.defaultScopes ?? [];
   const effectiveScopes = scopes.length > 0 ? scopes : defaultScopes;
+  const selectedTarget =
+    issuedKey?.install.targets.find((target) => target.id === installTarget) ??
+    issuedKey?.install.targets[0];
+  const selectedArtifact =
+    selectedTarget?.artifacts.find((artifact) => artifact.id === installArtifact) ??
+    selectedTarget?.artifacts[0];
 
   // `?? []` would mint a fresh array every render and defeat every memo below.
   const roster = useMemo(() => agents.data?.agents ?? [], [agents.data]);
@@ -234,8 +261,14 @@ export default function BrainAgentsPage() {
       { name: name.trim(), scopes: effectiveScopes },
       {
         onSuccess: (data) => {
-          setIssuedKey({ agent: data.agent.name, key: data.rawKey });
+          setIssuedKey({
+            agent: data.agent.name,
+            key: data.rawKey,
+            install: data.install,
+          });
           setKeyRevealed(false);
+          setInstallTarget("universal");
+          setInstallArtifact("mcp-config");
           setName("");
           setScopes([]);
           setCreating(false);
@@ -362,11 +395,8 @@ export default function BrainAgentsPage() {
           </div>
         </section>
 
-        {/* ── Freshly issued key ──
-            Shown once and never again, so it gets its own warning-tinted panel.
-            Masked by default: the key is a bearer credential and this screen may
-            be on a shared monitor. Copy works without ever revealing it. */}
-        {issuedKey && (
+        {/* ── Freshly issued key + install bundle ── */}
+        {issuedKey && selectedTarget && selectedArtifact && (
           <BrainPanel
             icon={KeyRound}
             title={t("brain.agents.keyFor", { name: issuedKey.agent })}
@@ -374,7 +404,10 @@ export default function BrainAgentsPage() {
           >
             <p className="text-sm text-muted-foreground">{t("brain.agents.keyOnce")}</p>
             <code
-              className={cn("brain-code brain-code--secret mt-3 block", !keyRevealed && "brain-code--masked")}
+              className={cn(
+                "brain-code brain-code--secret mt-3 block",
+                !keyRevealed && "brain-code--masked"
+              )}
             >
               {issuedKey.key}
             </code>
@@ -393,6 +426,131 @@ export default function BrainAgentsPage() {
                 )}
                 {keyRevealed ? t("brain.agents.hide") : t("brain.agents.reveal")}
               </Button>
+            </div>
+
+            <div className="mt-6 border-t border-border/70 pt-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {t("brain.agents.install.title")}
+                  </h3>
+                  <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+                    {t("brain.agents.install.description")}
+                  </p>
+                </div>
+                <span className="brain-chip brain-chip--on">
+                  {issuedKey.install.capabilities.ingest
+                    ? t("brain.agents.install.ingestEnabled")
+                    : t("brain.agents.install.ingestDisabled")}
+                </span>
+              </div>
+
+              <div
+                className="brain-seg mt-4 flex-wrap"
+                role="group"
+                aria-label={t("brain.agents.install.targetLabel")}
+              >
+                {issuedKey.install.targets.map((target) => (
+                  <button
+                    key={target.id}
+                    type="button"
+                    className="brain-seg__btn"
+                    aria-pressed={installTarget === target.id}
+                    onClick={() => {
+                      setInstallTarget(target.id);
+                      setInstallArtifact(target.artifacts[0]?.id ?? "mcp-config");
+                    }}
+                  >
+                    {t(INSTALL_TARGET_LABELS[target.id])}
+                  </button>
+                ))}
+              </div>
+
+              <p className="mt-3 text-xs text-muted-foreground">{selectedTarget.description}</p>
+
+              {selectedTarget.artifacts.length > 1 && (
+                <div
+                  className="brain-seg mt-3 flex-wrap"
+                  role="group"
+                  aria-label={t("brain.agents.install.artifactLabel")}
+                >
+                  {selectedTarget.artifacts.map((artifact) => (
+                    <button
+                      key={artifact.id}
+                      type="button"
+                      className="brain-seg__btn"
+                      aria-pressed={selectedArtifact.id === artifact.id}
+                      onClick={() => setInstallArtifact(artifact.id)}
+                    >
+                      {artifact.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-3">
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    {selectedArtifact.label}
+                  </span>
+                  {selectedArtifact.file && (
+                    <code className="brain-chip brain-chip--mono">{selectedArtifact.file}</code>
+                  )}
+                </div>
+                <pre className="brain-code max-h-72">{selectedArtifact.content}</pre>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <CopyButton
+                    value={selectedArtifact.content}
+                    label={t("brain.agents.install.copySafe")}
+                  />
+                  <CopyButton
+                    value={materializeAgentInstallText(
+                      selectedArtifact.content,
+                      issuedKey.key
+                    )}
+                    label={t("brain.agents.install.copyReady")}
+                    variant="ghost"
+                  />
+                </div>
+                <p className="mt-2 text-[11px] text-warning-ink">
+                  {t("brain.agents.install.readyWarning")}
+                </p>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div>
+                  <h3 className="text-xs font-semibold text-foreground">
+                    {t("brain.agents.install.instructionTitle")}
+                  </h3>
+                  <pre className="brain-code mt-2 max-h-72 whitespace-pre-wrap">
+                    {selectedTarget.systemInstruction}
+                  </pre>
+                  <div className="mt-2">
+                    <CopyButton
+                      value={selectedTarget.systemInstruction}
+                      label={t("brain.agents.install.copyInstruction")}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-xs font-semibold text-foreground">
+                    {t("brain.agents.install.verifyTitle")}
+                  </h3>
+                  <ol className="mt-2 space-y-2 text-xs text-muted-foreground">
+                    {issuedKey.install.verification.map((step, index) => (
+                      <li key={step} className="flex gap-2">
+                        <span className="brain-chip brain-chip--mono shrink-0">
+                          {index + 1}
+                        </span>
+                        <span>{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end border-t border-border/70 pt-4">
               <Button
                 variant="ghost"
                 size="sm"

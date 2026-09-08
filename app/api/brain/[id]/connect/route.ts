@@ -9,6 +9,9 @@ import {
   BRAIN_MCP_SERVER_NAME,
   BRAIN_MCP_SERVER_VERSION,
 } from "@brain/infrastructure/mcp/server";
+import { BRAIN_MCP_PROMPTS } from "@brain/infrastructure/mcp/prompts";
+import { buildBrainAgentTemplates } from "@brain/infrastructure/agent-templates";
+import { countStandingInstructions } from "@brain/application/queries/directives";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -26,7 +29,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const origin = appPublicUrl() || request.nextUrl.origin;
     const mcpUrl = `${origin}/api/brain/mcp`;
-    const agents = await listAgentsForBrain(brainId, userId);
+    const templates = buildBrainAgentTemplates({
+      origin,
+      brainId,
+      brainName: brain.name,
+      mcpUrl,
+    });
+    const [agents, standingInstructions] = await Promise.all([
+      listAgentsForBrain(brainId, userId),
+      countStandingInstructions(brainId),
+    ]);
 
     return apiSuccess({
       brain: { id: brain.id, name: brain.name },
@@ -56,11 +68,40 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           },
         },
         exampleCurl: `curl -s -X POST "${mcpUrl}" -H "Authorization: Bearer sk_YOUR_AGENT_KEY" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`,
+        /**
+         * How context reaches an agent without it having to remember to ask.
+         *
+         * MCP has no server-initiated push into a conversation, so there are exactly
+         * two automatic paths and both are named here rather than left for the
+         * integrator to discover: the handshake `instructions` string, which clients
+         * place in the system prompt, and the prompts below, which clients surface as
+         * commands. Anything beyond that is client-side configuration.
+         */
+        autoContext: {
+          handshakeInstructions: {
+            carriesStandingInstructions: true,
+            standingInstructions,
+            note: standingInstructions
+              ? "The initialize result's `instructions` field already contains these rules; a connected agent has them before its first turn without calling a tool."
+              : "No instruction/preference memories yet, so the handshake carries the protocol only. Save one with brain_remember (type=instruction or type=preference) and it will ride along from the next connection.",
+            requiresScope: "brain.read",
+          },
+          prompts: BRAIN_MCP_PROMPTS.map((prompt) => ({
+            name: prompt.name,
+            title: prompt.title,
+            description: prompt.description,
+            arguments: prompt.arguments,
+            // How Claude Code names an MCP prompt in its command list.
+            claudeCodeCommand: `/mcp__${BRAIN_MCP_SERVER_NAME}__${prompt.name}`,
+          })),
+        },
       },
       rest: {
         baseUrl: `${origin}/api/brain/${brainId}`,
         authentication: { type: "bearer", format: "Bearer sk_<agent key>" },
+        lifecycle: templates.lifecycle.endpoints,
       },
+      templates,
       scopes: {
         available: BRAIN_API_SCOPES,
         default: DEFAULT_BRAIN_AGENT_SCOPES,

@@ -116,12 +116,13 @@ authenticated principal → authorized brain → authorized resource → operati
 | `brain.write` | create/update memories, upsert entities and relationships |
 | `brain.link` | create/delete explicit memory↔memory links |
 | `brain.delete` | soft-delete memories, delete entities/edges, delete a brain |
-| `brain.export` | bulk export to `.afrbrain.zip` |
-| `brain.import` | bulk import from `.afrbrain.zip` |
+| `brain.import` | owner-controlled import from a compatible Brain archive |
 | `brain.consolidate` | non-destructive consolidation (merge duplicate entities, reconcile conflicts) |
+| `brain.ingest` | unattended conversation harvesting through the conservative ingest pipeline |
 
-New agents default to `read + search + write + link` — never `delete`, never
-`export`, never `import`, never `consolidate`.
+New agents default to `read + search + write + link` — never `delete`, `import`,
+`consolidate`, or `ingest`. `brain.ingest` remains independently permissioned and is
+not implied by `brain.write`.
 
 `brain.write` implies `brain.link` — an agent that can create memories can link them.
 
@@ -191,23 +192,25 @@ into the data.
 | `/brain/graph` | the knowledge graph: interactive canvas, derived+explicit edges, local/global views, filters, groups, pop-out workspace |
 | `/brain/agents` | mint an agent (key shown once), revoke, MCP connection details |
 | `/brain/activity` | the audit trail, rendered as an agent timeline |
-| `/brain/settings` | rename, archive, export, add another brain |
+| `/brain/settings` | rename, archive, add another brain |
 
 The graph view pipeline (snapshot → model → query → view → groups → engine → canvas)
 is described in [Second Brain Graph](second-brain-graph.md). Nodes are capped at
 2500 (workspace) / 6000 (pop-out), edges at 6000 / 20000; the canvas renderer
 batches draws per colour to stay under 16 ms per frame.
 
-## Portability
+## Protected backup and recovery
 
-A brain must be recoverable outside the runtime that wrote it.
+Standalone Brain export is intentionally not exposed through the web UI, REST API, or
+MCP. Brain data is protected as part of the user's account, and the supported backup
+and recovery path is the encrypted AFR account backup. That backup traverses the Brain
+descriptors internally and includes the data required for account recovery without
+creating a separately downloadable Brain surface.
 
-- `GET /api/brain/{id}/export` returns the brain, its memories with tags and
-  versions, its projects, entities, relationships, memory links, and agents (no
-  secrets) as a dated `.afrbrain.zip` (manifest + JSONL per table), gated behind
-  `brain.export` and always audited.
-- `POST /api/brain/{id}/import` accepts the same format. Projects, entities, tags,
-  and relationships merge by natural key; memories, memory links, and versions are
-  additive. Gated behind `brain.import`.
+`POST /api/brain/{id}/import` remains an owner-only recovery/migration primitive for
+compatible archives. Projects, entities, tags, and relationships merge by natural key;
+memories, memory links, and versions are additive. It is gated behind `brain.import`.
+The internal archive builder and parser remain implementation primitives for account
+backup, restore, and import; they are not public export capabilities.
 
-Both paths are covered by 81 integration tests.
+These paths are covered by integration and isolation tests.

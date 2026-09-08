@@ -4,8 +4,15 @@ import { db } from "@/shared/infrastructure/db";
 import { shares, files } from "@/shared/infrastructure/db/schema";
 import { downloadFromR2Stream } from "@files/infrastructure/storage/r2";
 import { apiError, handleApiError } from "@/shared/api/response";
-import { getSafeMimeType, shouldForceDownload } from "@/shared/lib/security/mime";
-import { claimShareAccess, shareExpired, shareResumeIsFree } from "@shares/application/access";
+import {
+  getSafeMimeType,
+  shouldForceDownload,
+} from "@/shared/lib/security/mime";
+import {
+  reserveSharePlaybackAccess,
+  shareExpired,
+  shareResumeIsFree,
+} from "@shares/application/access";
 import { isPossibleShareToken } from "@shares/domain/token";
 import {
   isContinuationRange,
@@ -13,7 +20,7 @@ import {
   rangeLength,
   toReadableStream,
 } from "@files/infrastructure/storage/http-range";
-import { recordBandwidth, BandwidthQuotaError } from "@/shared/lib/billing/bandwidth";
+import { BandwidthQuotaError } from "@/shared/lib/billing/bandwidth";
 import { checkRateLimit } from "@/shared/lib/security";
 import { getClientIpFromRequest } from "@/shared/lib/access-tracking";
 
@@ -25,7 +32,7 @@ const PREVIEW_MAX_PER_MINUTE = 60;
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
+  { params }: { params: Promise<{ token: string }> },
 ) {
   try {
     const { token } = await params;
@@ -34,16 +41,30 @@ export async function GET(
     if (!isPossibleShareToken(token)) return apiError("Share not found", 404);
 
     const ip = getClientIpFromRequest(request);
-    const limit = await checkRateLimit(`share_preview:${ip}`, PREVIEW_MAX_PER_MINUTE, 60_000);
+    const limit = await checkRateLimit(
+      `share_preview:${ip}`,
+      PREVIEW_MAX_PER_MINUTE,
+      60_000,
+    );
     if (!limit.allowed) return apiError("Too many requests. Slow down.", 429);
 
-    const [share] = await db.select().from(shares).where(eq(shares.token, token)).limit(1);
+    const [share] = await db
+      .select()
+      .from(shares)
+      .where(eq(shares.token, token))
+      .limit(1);
     if (!share) return apiError("Share not found", 404);
 
     const [file] = await db
       .select()
       .from(files)
-      .where(and(eq(files.id, share.fileId), isNull(files.deletedAt), eq(files.status, "ready")))
+      .where(
+        and(
+          eq(files.id, share.fileId),
+          isNull(files.deletedAt),
+          eq(files.status, "ready"),
+        ),
+      )
       .limit(1);
 
     if (!file) return apiError("File not found", 404);
@@ -69,29 +90,33 @@ export async function GET(
      * requires a paid access to resume from, inside `SHARE_RESUME_WINDOW_MS`.
      */
     const totalSize = file.sizeBytes;
-    const rangeHeader = request.headers.get("range");
-    const parsedRange = rangeHeader ? parseRangeHeader(rangeHeader, totalSize) : null;
-    const freeContinuation = isContinuationRange(parsedRange) && shareResumeIsFree(share);
-
-    if (!freeContinuation) {
-      const claimed = await claimShareAccess(share.id);
-      if (!claimed) {
-        return apiError("Share link has reached maximum access limit", 403);
-      }
+    const parsed = parseRangeHeader(request.headers.get("range"), totalSize);
+    if (parsed.kind === "unsatisfiable") {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Content-Range": `bytes */${totalSize}`,
+          "Cache-Control": "private, no-store",
+        },
+      });
     }
+    const parsedRange = parsed.kind === "range" ? parsed.range : null;
+    const freeContinuation =
+      isContinuationRange(parsedRange) && shareResumeIsFree(share);
 
-    // Public egress is still the owner's egress. Every other byte-serving route
-    // meters it; this one did not, so a share link was an unmetered channel around
-    // the owner's bandwidth quota.
-    //
-    // Billed once per *access* rather than once per chunk, matching the authenticated
-    // preview route. `recordBandwidth` is a read-modify-write on one `users` row, so
-    // charging it per range request made concurrent chunks of the same video queue up
-    // behind each other's row lock — measured at seconds per response. A free
-    // continuation is free here too: it resumes an access that already paid.
     if (!freeContinuation) {
       try {
-        await recordBandwidth(file.userId, totalSize);
+        const reservation = await reserveSharePlaybackAccess(
+          share.id,
+          file.userId,
+          totalSize,
+        );
+        if (reservation !== "reserved") {
+          return reservation === "share-exhausted"
+            ? apiError("Share link has reached maximum access limit", 403)
+            : apiError("Share not found", 404);
+        }
       } catch (error) {
         if (error instanceof BandwidthQuotaError) {
           return apiError("BANDWIDTH_QUOTA_EXCEEDED", 429);
@@ -118,18 +143,22 @@ export async function GET(
     headers.set("Cache-Control", "private, max-age=300");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Accept-Ranges", "bytes");
+    if (r2.eTag) headers.set("ETag", r2.eTag);
+    if (r2.lastModified)
+      headers.set("Last-Modified", r2.lastModified.toUTCString());
     headers.set(
       "Content-Disposition",
       forceDownload
         ? `attachment; filename="${encodeURIComponent(file.name)}"`
-        : `inline; filename="${encodeURIComponent(file.name)}"`
+        : `inline; filename="${encodeURIComponent(file.name)}"`,
     );
 
     if (isPartial && parsedRange) {
       headers.set("Content-Length", String(rangeLength(parsedRange)));
       headers.set(
         "Content-Range",
-        r2.contentRange ?? `bytes ${parsedRange.start}-${parsedRange.end}/${totalSize}`
+        r2.contentRange ??
+          `bytes ${parsedRange.start}-${parsedRange.end}/${totalSize}`,
       );
       return new Response(stream, { status: 206, headers });
     }

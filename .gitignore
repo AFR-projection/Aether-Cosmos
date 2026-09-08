@@ -28,3 +28,4 @@ wa-sessions/
 
 # Local agent/editor settings
 .claude/settings.local.json
+.superpowers/

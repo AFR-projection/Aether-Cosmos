@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
-import { FolderOpen, Star, Share2, Menu, Plus } from "lucide-react";
+import { FolderOpen, Share2, Menu, Plus } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/shared/lib/utils";
 import { useT, type TranslationKey } from "@/shared/lib/i18n";
+import { SHARING_RECEIVED_HREF } from "@shares/domain/sharing-view";
+import { isNavigationPathActive } from "./navigation-route";
 import { QuickActionsSheet } from "./quick-actions-sheet";
 
 interface BottomNavProps {
@@ -17,8 +19,7 @@ interface BottomNavProps {
 /** `as const satisfies` keeps `href` a literal while checking every label key. */
 const TABS = [
   { href: "/files", labelKey: "nav.files", icon: FolderOpen },
-  { href: "/favorites", labelKey: "nav.favorites", icon: Star },
-  { href: "/shares", labelKey: "nav.shared", icon: Share2 },
+  { href: SHARING_RECEIVED_HREF, labelKey: "nav.sharing", icon: Share2 },
 ] as const satisfies readonly { href: string; labelKey: TranslationKey; icon: typeof FolderOpen }[];
 
 /**
@@ -34,7 +35,7 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
   const t = useT();
 
   const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
+    isNavigationPathActive(pathname, href);
 
   return (
     <>
@@ -43,8 +44,8 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
         aria-label={t("nav.mainNavigation")}
       >
         <div className="mx-auto flex h-[60px] max-w-md items-stretch justify-around px-2">
-          {/* First two tabs */}
-          {TABS.slice(0, 2).map((tab) => (
+          {/* Tabs before the FAB */}
+          {TABS.slice(0, 1).map((tab) => (
             <TabButton key={tab.href} {...tab} active={isActive(tab.href)} />
           ))}
 
@@ -64,8 +65,8 @@ export function BottomNav({ onOpenMenu }: BottomNavProps) {
             </span>
           </button>
 
-          {/* Last tab + menu */}
-          {TABS.slice(2).map((tab) => (
+          {/* Tabs after the FAB + menu */}
+          {TABS.slice(1).map((tab) => (
             <TabButton key={tab.href} {...tab} active={isActive(tab.href)} />
           ))}
           <button

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 /**
@@ -39,6 +39,7 @@ const store = vi.hoisted(() => ({
   claimSucceeds: true,
   claims: [] as string[],
   updates: [] as { table: string; values: Record<string, unknown> }[],
+  failShareWrite: false,
   inserts: [] as { table: string; values: Record<string, unknown> }[],
   /** Ranges handed to R2, in order. `undefined` means "whole object". */
   ranges: [] as (string | undefined)[],
@@ -88,18 +89,54 @@ vi.mock("@/shared/infrastructure/db", () => {
     const api: Record<string, unknown> = {
       set(v: Record<string, unknown>) {
         values = v;
-        (kind === "update" ? store.updates : store.inserts).push({ table, values });
         return api;
       },
       values(v: Record<string, unknown>) {
         values = v;
-        store.inserts.push({ table, values });
         return api;
       },
       where: () => api,
-      returning: async () => [{ id: "row" }],
-      then: (r: (v: Row[]) => unknown, j?: (e: unknown) => unknown) =>
-        Promise.resolve([{ id: "row" }]).then(r, j),
+      returning: async () => {
+        if (table === "shares" && store.failShareWrite) {
+          throw new Error("share write failed");
+        }
+        (kind === "update" ? store.updates : store.inserts).push({
+          table,
+          values,
+        });
+        return [{ id: "row" }];
+      },
+      then: (r: (v: Row[]) => unknown, j?: (e: unknown) => unknown) => {
+        const result =
+          table === "shares" && store.failShareWrite
+            ? Promise.reject(new Error("share write failed"))
+            : Promise.resolve([{ id: "row" }]);
+        if (!(table === "shares" && store.failShareWrite)) {
+          (kind === "update" ? store.updates : store.inserts).push({
+            table,
+            values,
+          });
+        }
+        return result.then(r, j);
+      },
+    };
+    return api;
+  }
+
+  function txSelectChain() {
+    let table = "unknown";
+    const api: Record<string, unknown> = {
+      from(t: unknown) {
+        table = tableOf(t);
+        return api;
+      },
+      where: () => api,
+      orderBy: () => api,
+      limit: () => api,
+      for: async (mode: string) => {
+        expect(mode).toBe("update");
+        return rowsFor(table);
+      },
     };
     return api;
   }
@@ -109,15 +146,41 @@ vi.mock("@/shared/infrastructure/db", () => {
       select: () => selectChain(),
       update: (t: unknown) => writeChain("update", tableOf(t)),
       insert: (t: unknown) => writeChain("insert", tableOf(t)),
+      transaction: async <T>(
+        body: (tx: {
+          select: () => Record<string, unknown>;
+          update: (table: unknown) => Record<string, unknown>;
+        }) => Promise<T>,
+      ) => {
+        const beforeUser = store.user ? { ...store.user } : null;
+        const beforeShare = store.share ? { ...store.share } : null;
+        const beforeUpdates = store.updates.length;
+        try {
+          const result = await body({
+            select: () => txSelectChain(),
+            update: (t: unknown) => writeChain("update", tableOf(t)),
+          });
+          for (const update of store.updates.slice(beforeUpdates)) {
+            const row = update.table === "users" ? store.user : store.share;
+            if (row) Object.assign(row, update.values);
+          }
+          return result;
+        } catch (error) {
+          store.user = beforeUser;
+          store.share = beforeShare;
+          store.updates.length = beforeUpdates;
+          throw error;
+        }
+      },
     },
   };
 });
 
-// The atomic claim itself is unit-tested in `src/features/shares/application/access.test.ts`. Here it is a
-// spy, so a test can say "this link is spent" without simulating SQL — but the two
-// read-only predicates stay real, because the routes' 410/403 wording depends on them.
+// Legacy content delivery and direct capability issuance both use the same transaction-backed
+// reservation. The resume predicates stay real because the routes' 410/403 wording depends on them.
 vi.mock("@shares/application/access", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@shares/application/access")>();
+  const actual =
+    await importOriginal<typeof import("@shares/application/access")>();
   return {
     ...actual,
     claimShareAccess: vi.fn(async (shareId: string) => {
@@ -128,6 +191,35 @@ vi.mock("@shares/application/access", async (importOriginal) => {
       share.lastAccessedAt = new Date();
       return share as never;
     }),
+    reserveSharePlaybackAccess: vi.fn(
+      async (shareId: string, ownerId: string, bytes: number) => {
+        store.claims.push(shareId);
+        if (!store.claimSucceeds) return "share-exhausted" as const;
+        const share = store.share;
+        const owner = store.user;
+        if (!share) return "share-unavailable" as const;
+        if (!owner || owner.id !== ownerId)
+          throw new Error("owner unavailable");
+        const used = owner.bandwidthUsedBytes as number;
+        const quota = owner.bandwidthQuotaBytes as number;
+        if (quota > 0 && used + bytes > quota) {
+          throw new (
+            await import("@/shared/lib/billing/bandwidth")
+          ).BandwidthQuotaError();
+        }
+        if (store.failShareWrite) throw new Error("share write failed");
+        if (quota > 0) {
+          owner.bandwidthUsedBytes = used + bytes;
+          store.updates.push({
+            table: "users",
+            values: { bandwidthUsedBytes: used + bytes },
+          });
+        }
+        share.accessCount = (share.accessCount as number) + 1;
+        share.lastAccessedAt = new Date();
+        return "reserved" as const;
+      },
+    ),
   };
 });
 
@@ -144,7 +236,11 @@ vi.mock("@files/infrastructure/storage/r2", () => ({
       contentLength: 5,
       // R2 answers 206 only when it was actually asked for a range.
       statusCode: byteRange ? 206 : 200,
-      contentRange: byteRange ? `${byteRange.replace("bytes=", "bytes ")}/4096` : undefined,
+      contentRange: byteRange
+        ? `${byteRange.replace("bytes=", "bytes ")}/4096`
+        : undefined,
+      eTag: '"r2-etag"',
+      lastModified: new Date("2026-09-01T12:00:00.000Z"),
     };
   }),
 }));
@@ -155,11 +251,15 @@ vi.mock("@/shared/lib/access-tracking", () => ({
   getIpLocation: async () => null,
 }));
 
-vi.mock("@/shared/infrastructure/realtime/events", () => ({ publishToUser: vi.fn(async () => {}) }));
+vi.mock("@/shared/infrastructure/realtime/events", () => ({
+  publishToUser: vi.fn(async () => {}),
+}));
 vi.mock("@/shared/lib/activity/activity-scope-server", () => ({
   getOrCreateActivityScope: vi.fn(async () => ({ id: "scope-1" })),
 }));
-vi.mock("@/shared/lib/search/tiptap-text", () => ({ tiptapToPlainText: () => "plain" }));
+vi.mock("@/shared/lib/search/tiptap-text", () => ({
+  tiptapToPlainText: () => "plain",
+}));
 vi.mock("@/shared/lib/security", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/shared/lib/security")>();
   return {
@@ -171,8 +271,10 @@ vi.mock("@/shared/lib/security", async (importOriginal) => {
   };
 });
 
-const { claimShareAccess, SHARE_RESUME_WINDOW_MS } = await import("@shares/application/access");
-const { downloadFromR2Stream } = await import("@files/infrastructure/storage/r2");
+const { claimShareAccess, SHARE_RESUME_WINDOW_MS } =
+  await import("@shares/application/access");
+const { downloadFromR2Stream } =
+  await import("@files/infrastructure/storage/r2");
 const infoRoute = await import("@/app/api/shared/[token]/route");
 const previewRoute = await import("@/app/api/shared/[token]/preview/route");
 
@@ -228,7 +330,9 @@ function billedBytes(): number[] {
 }
 
 function get(headers: Record<string, string> = {}) {
-  return new NextRequest(`http://localhost/api/shared/${TOKEN}/preview`, { headers });
+  return new NextRequest(`http://localhost/api/shared/${TOKEN}/preview`, {
+    headers,
+  });
 }
 
 function put(body: unknown) {
@@ -240,6 +344,7 @@ function put(body: unknown) {
 }
 
 beforeEach(() => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
   store.share = shareRow();
   store.file = fileRow();
   store.content = { contentJson: { type: "doc" } };
@@ -247,12 +352,17 @@ beforeEach(() => {
   store.claimSucceeds = true;
   store.claims = [];
   store.updates = [];
+  store.failShareWrite = false;
   store.inserts = [];
   store.ranges = [];
   store.rateAllowed = true;
   store.rateKeys = [];
   vi.mocked(claimShareAccess).mockClear();
   vi.mocked(downloadFromR2Stream).mockClear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("GET /api/shared/[token]/preview — the bytes path spends the unit", () => {
@@ -287,7 +397,11 @@ describe("GET /api/shared/[token]/preview — the bytes path spends the unit", (
     // The regression: `Range: bytes=1-` skipped the claim unconditionally and the
     // range was then dropped, so the response was the whole object, for free, as
     // many times as asked.
-    store.share = shareRow({ maxAccessCount: 1, accessCount: 0, lastAccessedAt: null });
+    store.share = shareRow({
+      maxAccessCount: 1,
+      accessCount: 0,
+      lastAccessedAt: null,
+    });
     store.file = fileRow({ sizeBytes: 4096 });
 
     const res = await previewRoute.GET(get({ range: "bytes=1-" }), { params });
@@ -297,7 +411,11 @@ describe("GET /api/shared/[token]/preview — the bytes path spends the unit", (
   });
 
   it("refuses that Range once the link is spent, instead of serving it free", async () => {
-    store.share = shareRow({ maxAccessCount: 1, accessCount: 1, lastAccessedAt: null });
+    store.share = shareRow({
+      maxAccessCount: 1,
+      accessCount: 1,
+      lastAccessedAt: null,
+    });
     store.file = fileRow({ sizeBytes: 4096 });
     store.claimSucceeds = false;
 
@@ -316,7 +434,9 @@ describe("GET /api/shared/[token]/preview — the bytes path spends the unit", (
     });
     store.file = fileRow({ sizeBytes: 4096 });
 
-    const res = await previewRoute.GET(get({ range: "bytes=1024-" }), { params });
+    const res = await previewRoute.GET(get({ range: "bytes=1024-" }), {
+      params,
+    });
 
     expect(res.status).toBe(206);
     expect(store.claims).toEqual([]);
@@ -331,7 +451,9 @@ describe("GET /api/shared/[token]/preview — the bytes path spends the unit", (
     store.file = fileRow({ sizeBytes: 4096 });
     store.claimSucceeds = false;
 
-    const res = await previewRoute.GET(get({ range: "bytes=1024-" }), { params });
+    const res = await previewRoute.GET(get({ range: "bytes=1024-" }), {
+      params,
+    });
 
     expect(res.status).toBe(403);
   });
@@ -340,28 +462,40 @@ describe("GET /api/shared/[token]/preview — the bytes path spends the unit", (
     store.share = shareRow({ maxAccessCount: null });
     store.file = fileRow({ sizeBytes: 4096 });
 
-    const res = await previewRoute.GET(get({ range: "bytes=100-199" }), { params });
+    const res = await previewRoute.GET(get({ range: "bytes=100-199" }), {
+      params,
+    });
 
     expect(res.status).toBe(206);
     expect(store.ranges).toEqual(["bytes=100-199"]);
     expect(res.headers.get("content-range")).toBe("bytes 100-199/4096");
     expect(res.headers.get("content-length")).toBe("100");
+    expect(res.headers.get("etag")).toBe('"r2-etag"');
+    expect(res.headers.get("last-modified")).toBe(
+      "Tue, 01 Sep 2026 12:00:00 GMT",
+    );
   });
 
-  it("treats an unsatisfiable range as a whole-object request and charges it", async () => {
+  it("returns 416 for an unsatisfiable range without spending or opening R2", async () => {
     store.share = shareRow({ maxAccessCount: null });
     store.file = fileRow({ sizeBytes: 4096 });
 
-    const res = await previewRoute.GET(get({ range: "bytes=99999-" }), { params });
+    const res = await previewRoute.GET(get({ range: "bytes=99999-" }), {
+      params,
+    });
 
-    expect(res.status).toBe(200);
-    expect(store.ranges).toEqual([undefined]);
-    expect(store.claims).toEqual(["share-1"]);
+    expect(res.status).toBe(416);
+    expect(res.headers.get("content-range")).toBe("bytes */4096");
+    expect(store.ranges).toEqual([]);
+    expect(store.claims).toEqual([]);
+    expect(billedBytes()).toEqual([]);
   });
 
   it("charges a Range that starts at the beginning — that is a fresh access", async () => {
     store.file = fileRow({ sizeBytes: 4096 });
-    const res = await previewRoute.GET(get({ range: "bytes=0-1023" }), { params });
+    const res = await previewRoute.GET(get({ range: "bytes=0-1023" }), {
+      params,
+    });
     expect(res.status).toBe(206);
     expect(store.claims).toEqual(["share-1"]);
   });
@@ -397,6 +531,18 @@ describe("GET /api/shared/[token]/preview — the bytes path spends the unit", (
 });
 
 describe("GET /api/shared/[token]/preview — public egress is metered", () => {
+  it("rolls back a charged legacy access when the share write fails", async () => {
+    store.file = fileRow({ sizeBytes: 4096 });
+    store.failShareWrite = true;
+
+    const res = await previewRoute.GET(get(), { params });
+
+    expect(res.status).toBe(500);
+    expect(store.user?.bandwidthUsedBytes).toBe(0);
+    expect(store.share?.accessCount).toBe(0);
+    expect(downloadFromR2Stream).not.toHaveBeenCalled();
+  });
+
   it("bills the owner for the whole object on a full request", async () => {
     store.file = fileRow({ sizeBytes: 4096 });
     const res = await previewRoute.GET(get(), { params });
@@ -421,7 +567,9 @@ describe("GET /api/shared/[token]/preview — public egress is metered", () => {
   it("bills the whole object once for an access, not per range", async () => {
     store.share = shareRow({ maxAccessCount: null });
     store.file = fileRow({ sizeBytes: 4096 });
-    const res = await previewRoute.GET(get({ range: "bytes=0-99" }), { params });
+    const res = await previewRoute.GET(get({ range: "bytes=0-99" }), {
+      params,
+    });
 
     expect(res.status).toBe(206);
     expect(billedBytes()).toEqual([4096]);
@@ -436,7 +584,9 @@ describe("GET /api/shared/[token]/preview — public egress is metered", () => {
       lastAccessedAt: new Date(),
     });
     store.file = fileRow({ sizeBytes: 4096 });
-    const res = await previewRoute.GET(get({ range: "bytes=100-199" }), { params });
+    const res = await previewRoute.GET(get({ range: "bytes=100-199" }), {
+      params,
+    });
 
     expect(res.status).toBe(206);
     expect(billedBytes()).toEqual([]);
@@ -444,12 +594,17 @@ describe("GET /api/shared/[token]/preview — public egress is metered", () => {
 
   it("stops the download when the owner is over quota, before opening the stream", async () => {
     store.file = fileRow({ sizeBytes: 4096 });
-    store.user = userRow({ bandwidthQuotaBytes: 1000, bandwidthUsedBytes: 999 });
+    store.user = userRow({
+      bandwidthQuotaBytes: 1000,
+      bandwidthUsedBytes: 999,
+    });
 
     const res = await previewRoute.GET(get(), { params });
 
     expect(res.status).toBe(429);
-    await expect(res.json()).resolves.toMatchObject({ error: "BANDWIDTH_QUOTA_EXCEEDED" });
+    await expect(res.json()).resolves.toMatchObject({
+      error: "BANDWIDTH_QUOTA_EXCEEDED",
+    });
     expect(downloadFromR2Stream).not.toHaveBeenCalled();
   });
 
@@ -482,7 +637,9 @@ describe("the token in the path is bounded before it is used", () => {
   });
 
   it("never builds a rate-limit key out of an unbounded token on PUT", async () => {
-    const res = await infoRoute.PUT(put({ content: { type: "doc" } }), { params: longParams });
+    const res = await infoRoute.PUT(put({ content: { type: "doc" } }), {
+      params: longParams,
+    });
 
     expect(res.status).toBe(404);
     // The old handler keyed `share_edit:${token}` before looking at anything.
@@ -524,7 +681,9 @@ describe("the anonymous endpoints are rate-limited", () => {
     store.share = shareRow({ permission: "edit", maxAccessCount: null });
     store.file = fileRow({ isNote: true, r2Key: null });
 
-    const res = await infoRoute.PUT(put({ content: { type: "doc" } }), { params });
+    const res = await infoRoute.PUT(put({ content: { type: "doc" } }), {
+      params,
+    });
 
     expect(res.status).toBe(429);
     expect(store.rateKeys[0]).toMatch(/^share_edit_ip:/);
@@ -541,6 +700,28 @@ describe("GET /api/shared/[token] — the metadata path", () => {
     const shareUpdates = store.updates.filter((u) => u.table === "shares");
     expect(shareUpdates).toHaveLength(1);
     expect(Object.keys(shareUpdates[0].values)).toEqual(["lastAccessedAt"]);
+  });
+
+  it("exposes only the encryption facts a shared reader needs to decrypt locally", async () => {
+    const encryptionMeta = {
+      version: 1,
+      salt: "public-salt",
+      iv: "public-iv",
+    };
+    store.file = fileRow({
+      name: "private.mp4",
+      mimeType: "video/mp4",
+      encrypted: true,
+      encryptionMeta,
+    });
+
+    const res = await infoRoute.GET(get(), { params });
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.file).toMatchObject({ encrypted: true, encryptionMeta });
+    expect(json.data.file).not.toHaveProperty("r2Key");
+    expect(json.data.file).not.toHaveProperty("userId");
   });
 
   it("reports the counter without letting a spent file link through", async () => {
@@ -588,7 +769,10 @@ describe("PUT /api/shared/[token] — the shared-note editor", () => {
     store.file = fileRow({ isNote: true, r2Key: null });
     const res = await infoRoute.PUT(put(doc), { params });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ success: true, data: { saved: true } });
+    expect(await res.json()).toMatchObject({
+      success: true,
+      data: { saved: true },
+    });
   });
 
   it("does not spend a unit on a save — autosave must not burn a view-limited link", async () => {
@@ -602,7 +786,9 @@ describe("PUT /api/shared/[token] — the shared-note editor", () => {
   it("rejects a body over the 2 MiB ceiling with 413 and writes nothing", async () => {
     store.share = shareRow({ permission: "edit", maxAccessCount: null });
     store.file = fileRow({ isNote: true, r2Key: null });
-    const huge = JSON.stringify({ content: { type: "doc", text: "x".repeat(3 * 1024 * 1024) } });
+    const huge = JSON.stringify({
+      content: { type: "doc", text: "x".repeat(3 * 1024 * 1024) },
+    });
 
     const res = await infoRoute.PUT(put(huge), { params });
     expect(res.status).toBe(413);
@@ -626,7 +812,10 @@ describe("PUT /api/shared/[token] — the shared-note editor", () => {
   });
 
   it("refuses an expired link even with edit permission", async () => {
-    store.share = shareRow({ permission: "edit", expiresAt: new Date(Date.now() - 1) });
+    store.share = shareRow({
+      permission: "edit",
+      expiresAt: new Date(Date.now() - 1),
+    });
     store.file = fileRow({ isNote: true, r2Key: null });
     const res = await infoRoute.PUT(put(doc), { params });
     expect(res.status).toBe(410);
@@ -634,7 +823,11 @@ describe("PUT /api/shared/[token] — the shared-note editor", () => {
   });
 
   it("refuses a spent link even with edit permission", async () => {
-    store.share = shareRow({ permission: "edit", accessCount: 3, maxAccessCount: 3 });
+    store.share = shareRow({
+      permission: "edit",
+      accessCount: 3,
+      maxAccessCount: 3,
+    });
     store.file = fileRow({ isNote: true, r2Key: null });
     const res = await infoRoute.PUT(put(doc), { params });
     expect(res.status).toBe(403);

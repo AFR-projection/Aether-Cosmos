@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logBrainAudit } from "@brain/infrastructure/audit";
-import { MEMORY_TYPES } from "@brain/domain/constants";
 import { BrainError } from "@brain/domain/errors";
 import { searchMemories, listMemories } from "@brain/application/commands/memory-service";
 import { buildBrainContext } from "@brain/application/queries/context-engine";
@@ -14,7 +13,6 @@ import { requireGrant, type McpPrincipal } from "./principal";
  * - Batch operations for efficiency
  * - Analytics and insights
  * - Query suggestions and memory recommendations
- * - Export/import for portability
  * - Semantic search status and controls
  *
  * Every tool respects the same authorization and audit trail as the core tools.
@@ -424,94 +422,6 @@ export function registerAdvancedBrainMcpTools(server: McpServer, principal: McpP
             : config.enabled
               ? "Semantic search is enabled but not available. Check API key and model configuration."
               : "Semantic search is disabled. Enable it from /brain/settings to get semantic retrieval.",
-        });
-      } catch (error) {
-        return fail(error);
-      }
-    }
-  );
-
-  // ── export and portability ────────────────────────────────────────────────
-
-  server.registerTool(
-    "brain_export_memories",
-    {
-      description:
-        "Export memories in a portable JSON format. Returns a snapshot of selected memories with all metadata, suitable for backup, migration, or external analysis. Does not include embeddings (those are provider-specific).",
-      inputSchema: z.object({
-        ...brainIdArg,
-        type: z.enum(MEMORY_TYPES).optional().describe("Export only memories of this type."),
-        projectId: z.string().uuid().optional().describe("Export only memories from this project."),
-        limit: z.number().int().min(1).max(500).optional().describe("Maximum memories to export."),
-        format: z.enum(["json", "markdown"]).optional().describe("Export format (default 'json')."),
-      }),
-    },
-    async ({ brainId, type, projectId, limit, format }) => {
-      try {
-        const grant = requireGrant(principal, brainId, "brain.read");
-
-        const memories = await listMemories({
-          brainId: grant.brainId,
-          type,
-          projectId,
-          limit: limit ?? 100,
-        });
-
-        const exportFormat = format ?? "json";
-
-        if (exportFormat === "markdown") {
-          // Export as markdown for readability
-          const markdown = memories.memories
-            .map((m) => {
-              return [
-                `# ${m.title}`,
-                `**Type:** ${m.type}`,
-                `**Importance:** ${m.importance} | **Confidence:** ${m.confidence}`,
-                `**Tags:** ${m.tags.join(", ")}`,
-                `**Updated:** ${m.updatedAt.toISOString()}`,
-                "",
-                m.summary || m.content,
-                "",
-                "---",
-                "",
-              ].join("\n");
-            })
-            .join("\n");
-
-          await audit(grant.brainId, "memory.export", {
-            count: memories.memories.length,
-            format: "markdown",
-          });
-
-          return ok({
-            format: "markdown",
-            count: memories.memories.length,
-            content: markdown,
-          });
-        }
-
-        // JSON export with full metadata
-        const exported = memories.memories.map((m) => ({
-          id: m.id,
-          type: m.type,
-          title: m.title,
-          content: m.content,
-          summary: m.summary,
-          importance: m.importance,
-          confidence: m.confidence,
-          tags: m.tags,
-          createdAt: m.createdAt.toISOString(),
-          updatedAt: m.updatedAt.toISOString(),
-        }));
-
-        await audit(grant.brainId, "memory.export", { count: exported.length, format: "json" });
-
-        return ok({
-          format: "json",
-          count: exported.length,
-          exportedAt: new Date().toISOString(),
-          brainId: grant.brainId,
-          memories: exported,
         });
       } catch (error) {
         return fail(error);

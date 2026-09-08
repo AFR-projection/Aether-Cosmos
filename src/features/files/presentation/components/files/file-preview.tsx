@@ -22,6 +22,11 @@ import { detectPreviewKind } from "@files/domain/services/detect-preview-type";
 import { mediaEditorKindFor } from "@files/domain/services/media-edit";
 import { requestDownload } from "@files/application/commands/download-actions";
 import { isTypingTarget } from "@files/presentation/components/media-viewers/viewer-chrome";
+import type { VideoPlaybackHandle } from "@files/presentation/components/media-viewers/video-viewer";
+import {
+  usePlaybackSource,
+  type PlaybackTarget,
+} from "@files/presentation/hooks/use-playback-source";
 import {
   previewKindKey, useFormat, useT, type TranslationKey,
 } from "@/shared/lib/i18n";
@@ -42,6 +47,9 @@ const ArchiveViewer = dynamic(() => import("@files/presentation/components/media
 const ImageEditPanel = dynamic(() => import("@files/presentation/components/editors/image-edit-panel"), { ssr: false, loading: () => <PreviewSkeleton labelKey="files.preview.loading.editor" /> });
 const MediaTrimPanel = dynamic(() => import("@files/presentation/components/editors/media-trim-panel"), { ssr: false, loading: () => <PreviewSkeleton labelKey="files.preview.loading.trimmer" /> });
 const SubtitleEditorPanel = dynamic(() => import("@files/presentation/components/editors/subtitle-editor-panel"), { ssr: false, loading: () => <PreviewSkeleton labelKey="files.preview.loading.editor" /> });
+
+/** An encrypted video plays from a Blob this browser built; there is no URL to re-issue. */
+const noopRefresh = () => {};
 
 interface FilePreviewProps {
   file: FileRecord;
@@ -150,6 +158,28 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
     const base = `/api/files/${file.id}/preview`;
     return reloadToken > 0 ? `${base}?v=${reloadToken}` : base;
   }, [file.id, file.isNote, isEncrypted, decryptedUrl, reloadToken]);
+
+  /**
+   * Video is the one kind that does not read its bytes through this app any more.
+   *
+   * `target` is non-null only for a plaintext video, and that is what switches the control plane
+   * on: one authenticated request returns a presigned R2 URL and the browser does every range
+   * request and every seek against R2 directly. Everything else — a PDF, an image, an encrypted
+   * file whose plaintext only exists in this browser — passes `null`, makes no request, and gets
+   * `streamUrl` back unchanged.
+   *
+   * `fallbackUrl` is that same proxy URL, which the hook falls back to if the new path returns a
+   * server error or the operator has pinned playback back onto the proxy.
+   */
+  const playbackTarget = useMemo<PlaybackTarget | null>(
+    () =>
+      previewKind === "video" && !isEncrypted && !file.isNote
+        ? { kind: "file", fileId: file.id }
+        : null,
+    [previewKind, isEncrypted, file.isNote, file.id]
+  );
+
+  const playback = usePlaybackSource({ target: playbackTarget, fallbackUrl: streamUrl });
 
   /**
    * Which editor this file can have, if any. The rule itself lives beside the geometry it
@@ -466,18 +496,48 @@ export function FilePreview({ file, onClose, canEdit = false, onSaved }: FilePre
         return streamUrl ? <ImageViewer src={streamUrl} fileName={file.name} mimeType={file.mimeType} /> : null;
       case "svg":
         return streamUrl ? <SvgViewer src={streamUrl} fileName={file.name} /> : null;
-      case "video":
-        return streamUrl ? (
+      case "video": {
+        if (!streamUrl) return null;
+        /**
+         * The player's half of the control plane.
+         *
+         * An encrypted video gets a handle too, with a source it can be measured under and no
+         * refresh: its bytes come from a Blob this browser decrypted, which is the known
+         * limitation from PHASE 15, and the point of reporting it separately is to have the
+         * numbers rather than an adjective for it.
+         */
+        const playbackHandle: VideoPlaybackHandle = isEncrypted
+          ? {
+              source: "encrypted_blob",
+              fileId: file.id,
+              telemetry: true,
+              errorCode: null,
+              urlLatencyMs: null,
+              refreshCount: 0,
+              refresh: noopRefresh,
+            }
+          : {
+              source: playback.delivery,
+              fileId: file.id,
+              telemetry: true,
+              errorCode: playback.errorCode,
+              urlLatencyMs: playback.urlLatencyMs,
+              refreshCount: playback.refreshCount,
+              refresh: playback.refresh,
+            };
+        return (
           <VideoViewer
             /* Keyed so a saved cue edit rebuilds the `<track>` elements rather than replaying the
                text the browser already parsed. */
             key={`${file.id}-${reloadToken}`}
-            src={streamUrl}
+            src={playback.url}
             fileName={file.name}
             subtitleSource={subtitleSource}
             onEditSubtitles={canEdit ? setSubtitleTrackId : undefined}
+            playback={playbackHandle}
           />
-        ) : null;
+        );
+      }
       case "audio":
         return streamUrl ? <AudioViewer src={streamUrl} fileName={file.name} /> : null;
       case "text":

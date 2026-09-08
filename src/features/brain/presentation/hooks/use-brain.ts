@@ -4,6 +4,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/shared/api/client";
 import type { BrainGraphSnapshot } from "@brain/presentation/canvas/types";
+import type { BrainAgentInstallBundle } from "@brain/infrastructure/agent-templates";
 import {
   getActiveBrainId,
   getServerActiveBrainId,
@@ -472,7 +473,7 @@ export function useCreateAgent(brainId: string | undefined) {
   const invalidate = useBrainInvalidator(brainId);
   return useMutation({
     mutationFn: (draft: { name: string; description?: string; scopes: string[] }) =>
-      send<{ agent: BrainAgent; rawKey: string }>(
+      send<{ agent: BrainAgent; rawKey: string; install: BrainAgentInstallBundle }>(
         `/api/brain/${brainId}/agents`,
         "POST",
         draft

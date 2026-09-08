@@ -331,7 +331,12 @@ export async function POST(request: NextRequest) {
         })
         .where(eq(files.id, created.id));
       await recalculateUsedBytes(file.userId);
-      await enqueueJob("generate_thumbnail", { fileId: created.id, r2Key: newKey, mimeType });
+      const version = created.version ?? 1;
+      await enqueueJob(
+        "generate_thumbnail",
+        { fileId: created.id, r2Key: newKey, mimeType, version },
+        { jobId: `thumb-${created.id}-v${version}` },
+      );
       await logActivity(sessionUser, "copy", {
         resourceType: "file",
         resourceId: created.id,
@@ -352,7 +357,8 @@ export async function POST(request: NextRequest) {
     if (refusal) return refusal;
 
     // Overwriting in place is only safe because the previous bytes stay reachable.
-    await snapshotFileVersion(file, getEffectiveUserId(sessionUser));
+    const snapshot = await snapshotFileVersion(file, getEffectiveUserId(sessionUser));
+    const version = snapshot?.newVersion ?? file.version;
 
     await putR2Object(file.r2Key, output, mimeType);
 
@@ -373,11 +379,16 @@ export async function POST(request: NextRequest) {
     // from. Without this an account slowly drifts away from what it actually stores.
     await recalculateUsedBytes(file.userId);
 
-    await enqueueJob("generate_thumbnail", {
-      fileId: body.fileId,
-      r2Key: file.r2Key,
-      mimeType,
-    });
+    await enqueueJob(
+      "generate_thumbnail",
+      {
+        fileId: body.fileId,
+        r2Key: file.r2Key,
+        mimeType,
+        version,
+      },
+      { jobId: `thumb-${body.fileId}-v${version}` },
+    );
 
     await logActivity(sessionUser, "edit", {
       resourceType: "file",
@@ -400,6 +411,7 @@ export async function POST(request: NextRequest) {
 const trimSchema = z
   .object({
     fileId: z.string().uuid(),
+    operationId: z.string().uuid(),
     startSeconds: z.number().min(0).max(TRIM_MAX_SECONDS),
     endSeconds: z.number().positive().max(TRIM_MAX_SECONDS),
   })
@@ -460,15 +472,22 @@ export async function PUT(request: NextRequest) {
 
     // The trim replaces the object in place, so keep a version to come back to —
     // the image path already does this and the media path silently did not.
-    await snapshotFileVersion(file, getEffectiveUserId(sessionUser));
+    const snapshot = await snapshotFileVersion(file, getEffectiveUserId(sessionUser));
+    const version = snapshot?.newVersion ?? file.version;
 
-    const queued = await enqueueJob("trim_media", {
-      fileId: body.fileId,
-      r2Key: file.r2Key,
-      mimeType: file.mimeType,
-      startSeconds: body.startSeconds,
-      endSeconds: body.endSeconds,
-    });
+    const queued = await enqueueJob(
+      "trim_media",
+      {
+        operationId: body.operationId,
+        fileId: body.fileId,
+        r2Key: file.r2Key,
+        mimeType: file.mimeType,
+        version,
+        startSeconds: body.startSeconds,
+        endSeconds: body.endSeconds,
+      },
+      { jobId: `trim-${body.operationId}` },
+    );
     if (!queued) {
       return apiError("Trimming is temporarily unavailable. Try again in a few minutes.", 503, {
         code: "TRIM_QUEUE_UNAVAILABLE",

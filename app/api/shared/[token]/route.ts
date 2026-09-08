@@ -1,14 +1,30 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
 import { db } from "@/shared/infrastructure/db";
-import { shares, files, activityLogs, fileContents } from "@/shared/infrastructure/db/schema";
+import {
+  shares,
+  files,
+  activityLogs,
+  fileContents,
+} from "@/shared/infrastructure/db/schema";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
-import { getClientIpFromRequest, parseUserAgent, getIpLocation } from "@/shared/lib/access-tracking";
-import { publishToAdmins, publishToUser } from "@/shared/infrastructure/realtime/events";
+import {
+  getClientIpFromRequest,
+  parseUserAgent,
+  getIpLocation,
+} from "@/shared/lib/access-tracking";
+import {
+  publishToAdmins,
+  publishToUser,
+} from "@/shared/infrastructure/realtime/events";
 import { tiptapToPlainText } from "@/shared/lib/search/tiptap-text";
 import { getOrCreateActivityScope } from "@/shared/lib/activity/activity-scope-server";
 import { checkRateLimit } from "@/shared/lib/security";
-import { claimShareAccess, shareBudgetExhausted, shareExpired } from "@shares/application/access";
+import {
+  claimShareAccess,
+  shareBudgetExhausted,
+  shareExpired,
+} from "@shares/application/access";
 import { isPossibleShareToken } from "@shares/domain/token";
 import { readBoundedJson, bodyErrorResponse } from "@/shared/api/body";
 
@@ -21,7 +37,7 @@ const EDIT_MAX_PER_MINUTE = 60;
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
+  { params }: { params: Promise<{ token: string }> },
 ) {
   try {
     const { token } = await params;
@@ -32,21 +48,39 @@ export async function GET(
     }
 
     const ip = getClientIpFromRequest(request);
-    const viewLimit = await checkRateLimit(`share_view:${ip}`, VIEW_MAX_PER_MINUTE, 60_000);
+    const viewLimit = await checkRateLimit(
+      `share_view:${ip}`,
+      VIEW_MAX_PER_MINUTE,
+      60_000,
+    );
     if (!viewLimit.allowed) {
-      return apiError("Too many requests. Slow down.", 429, { code: "SHARE_RATE_LIMITED" });
+      return apiError("Too many requests. Slow down.", 429, {
+        code: "SHARE_RATE_LIMITED",
+      });
     }
 
-    const [share] = await db.select().from(shares).where(eq(shares.token, token)).limit(1);
-    if (!share) return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
+    const [share] = await db
+      .select()
+      .from(shares)
+      .where(eq(shares.token, token))
+      .limit(1);
+    if (!share)
+      return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
 
     const [file] = await db
       .select()
       .from(files)
-      .where(and(eq(files.id, share.fileId), isNull(files.deletedAt), eq(files.status, "ready")))
+      .where(
+        and(
+          eq(files.id, share.fileId),
+          isNull(files.deletedAt),
+          eq(files.status, "ready"),
+        ),
+      )
       .limit(1);
 
-    if (!file) return apiError("File not found", 404, { code: "SHARE_FILE_MISSING" });
+    if (!file)
+      return apiError("File not found", 404, { code: "SHARE_FILE_MISSING" });
 
     // Duration Check
     if (shareExpired(share)) {
@@ -83,7 +117,6 @@ export async function GET(
       });
     }
 
-
     // Record the visit. For a note the claim above already moved the counter and
     // the timestamp; for a file only the timestamp belongs here.
     if (!file.isNote) {
@@ -98,34 +131,36 @@ export async function GET(
     const deviceInfo = parseUserAgent(userAgent);
 
     // Fire-and-forget geolocation (non-blocking)
-    getIpLocation(ip).then(async (location) => {
-      const scope = await getOrCreateActivityScope(share.sharedBy);
-      await db.insert(activityLogs).values({
-        userId: share.sharedBy,
-        activityScopeId: scope.id,
-        action: "download",
-        resourceType: "share",
-        resourceId: share.id,
-        metadata: {
-          token,
-          fileName: file.name,
-          accessCount: updatedShare.accessCount,
-          maxAccessCount: updatedShare.maxAccessCount,
-          userAgent,
-          device: deviceInfo.device,
-          browser: deviceInfo.browser,
-          os: deviceInfo.os,
-          location,
-        },
-        ip,
-      });
-      void publishToAdmins({
-        type: "activity_log_created",
-        userId: share.sharedBy,
-        action: "download",
-        at: Date.now(),
-      }).catch(() => {});
-    }).catch(() => {});
+    getIpLocation(ip)
+      .then(async (location) => {
+        const scope = await getOrCreateActivityScope(share.sharedBy);
+        await db.insert(activityLogs).values({
+          userId: share.sharedBy,
+          activityScopeId: scope.id,
+          action: "download",
+          resourceType: "share",
+          resourceId: share.id,
+          metadata: {
+            token,
+            fileName: file.name,
+            accessCount: updatedShare.accessCount,
+            maxAccessCount: updatedShare.maxAccessCount,
+            userAgent,
+            device: deviceInfo.device,
+            browser: deviceInfo.browser,
+            os: deviceInfo.os,
+            location,
+          },
+          ip,
+        });
+        void publishToAdmins({
+          type: "activity_log_created",
+          userId: share.sharedBy,
+          action: "download",
+          at: Date.now(),
+        }).catch(() => {});
+      })
+      .catch(() => {});
 
     void publishToUser(share.sharedBy, {
       type: "share_access",
@@ -142,6 +177,11 @@ export async function GET(
         mimeType: file.mimeType,
         sizeBytes: file.sizeBytes,
         isNote: file.isNote,
+        // AES-GCM salt/IV/KDF parameters are not secrets; the passphrase is. A
+        // shared reader needs these values to decrypt ciphertext locally, while
+        // the storage key and owner identity remain server-only.
+        encrypted: file.encrypted,
+        encryptionMeta: file.encrypted ? file.encryptionMeta : null,
       },
       note: file.isNote ? { content: noteContent } : null,
       permission: share.permission,
@@ -164,7 +204,7 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
+  { params }: { params: Promise<{ token: string }> },
 ) {
   try {
     const { token } = await params;
@@ -176,13 +216,21 @@ export async function PUT(
     // client spread writes across guessed tokens, and built the Redis key out of
     // whatever path segment arrived.
     const editorIp = getClientIpFromRequest(request);
-    const ipLimit = await checkRateLimit(`share_edit_ip:${editorIp}`, EDIT_MAX_PER_MINUTE, 60_000);
+    const ipLimit = await checkRateLimit(
+      `share_edit_ip:${editorIp}`,
+      EDIT_MAX_PER_MINUTE,
+      60_000,
+    );
     if (!ipLimit.allowed) {
       return apiError("Too many edit requests. Slow down.", 429, {
         code: "SHARE_EDIT_RATE_LIMITED",
       });
     }
-    const rateLimitCheck = await checkRateLimit(`share_edit:${token}`, EDIT_MAX_PER_MINUTE, 60_000);
+    const rateLimitCheck = await checkRateLimit(
+      `share_edit:${token}`,
+      EDIT_MAX_PER_MINUTE,
+      60_000,
+    );
     if (!rateLimitCheck.allowed) {
       return apiError("Too many edit requests. Slow down.", 429, {
         code: "SHARE_EDIT_RATE_LIMITED",
@@ -191,21 +239,33 @@ export async function PUT(
 
     let body: { content?: unknown };
     try {
-      body = await readBoundedJson<{ content?: unknown }>(request, MAX_NOTE_BODY_BYTES);
+      body = await readBoundedJson<{ content?: unknown }>(
+        request,
+        MAX_NOTE_BODY_BYTES,
+      );
     } catch (error) {
       const response = bodyErrorResponse(error);
       if (response) return response;
       throw error;
     }
     if (body.content == null || typeof body.content !== "object") {
-      return apiError("Missing note content", 400, { code: "SHARE_NOTE_CONTENT_MISSING" });
+      return apiError("Missing note content", 400, {
+        code: "SHARE_NOTE_CONTENT_MISSING",
+      });
     }
 
-    const [share] = await db.select().from(shares).where(eq(shares.token, token)).limit(1);
-    if (!share) return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
+    const [share] = await db
+      .select()
+      .from(shares)
+      .where(eq(shares.token, token))
+      .limit(1);
+    if (!share)
+      return apiError("Share not found", 404, { code: "SHARE_NOT_FOUND" });
 
     if (share.permission !== "edit") {
-      return apiError("This share is view-only", 403, { code: "SHARE_VIEW_ONLY" });
+      return apiError("This share is view-only", 403, {
+        code: "SHARE_VIEW_ONLY",
+      });
     }
 
     if (shareExpired(share)) {
@@ -220,18 +280,30 @@ export async function PUT(
     const [file] = await db
       .select()
       .from(files)
-      .where(and(eq(files.id, share.fileId), isNull(files.deletedAt), eq(files.status, "ready")))
+      .where(
+        and(
+          eq(files.id, share.fileId),
+          isNull(files.deletedAt),
+          eq(files.status, "ready"),
+        ),
+      )
       .limit(1);
 
-    if (!file) return apiError("File not found", 404, { code: "SHARE_FILE_MISSING" });
+    if (!file)
+      return apiError("File not found", 404, { code: "SHARE_FILE_MISSING" });
     if (!file.isNote) {
-      return apiError("Only notes can be edited via share", 400, { code: "SHARE_NOT_A_NOTE" });
+      return apiError("Only notes can be edited via share", 400, {
+        code: "SHARE_NOT_A_NOTE",
+      });
     }
 
     // Keep the searchable plaintext in sync with the note body.
     await db
       .update(files)
-      .set({ contentText: tiptapToPlainText(body.content), updatedAt: new Date() })
+      .set({
+        contentText: tiptapToPlainText(body.content),
+        updatedAt: new Date(),
+      })
       .where(eq(files.id, file.id));
 
     const [existing] = await db

@@ -1,4 +1,4 @@
-import type { DisplaySettings, GraphModel } from "./types";
+import type { GraphModel } from "./types";
 import type { GraphView } from "./view";
 
 /**

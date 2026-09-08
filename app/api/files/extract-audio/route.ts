@@ -32,7 +32,11 @@ import { canExtractAudioFrom } from "@files/domain/services/media-edit";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const extractSchema = z.object({ fileId: z.string().uuid() });
+const extractSchema = z.object({
+  fileId: z.string().uuid(),
+  operationId: z.string().uuid(),
+  outputFileId: z.string().uuid(),
+});
 
 /**
  * Refuse an account with no room left before spending a worker slot on it.
@@ -119,17 +123,24 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const queued = await enqueueJob("extract_audio", {
-      fileId: file.id,
-      r2Key: file.r2Key,
-      mimeType: file.mimeType,
-      // Passed rather than re-read in the worker: the destination is the answer to a
-      // permission question this request already asked, and the owner is who the new file
-      // belongs to regardless of who pressed the button.
-      userId: file.userId,
-      folderId: destination.folderId,
-      name: file.name,
-    });
+    const queued = await enqueueJob(
+      "extract_audio",
+      {
+        operationId: body.operationId,
+        outputFileId: body.outputFileId,
+        fileId: file.id,
+        r2Key: file.r2Key,
+        mimeType: file.mimeType,
+        version: file.version,
+        // Passed rather than re-read in the worker: the destination is the answer to a
+        // permission question this request already asked, and the owner is who the new file
+        // belongs to regardless of who pressed the button.
+        userId: file.userId,
+        folderId: destination.folderId,
+        name: file.name,
+      },
+      { jobId: `extract-audio-${body.operationId}` },
+    );
     if (!queued) {
       return apiError("Extracting audio is temporarily unavailable. Try again in a few minutes.", 503, {
         code: "EXTRACT_AUDIO_QUEUE_UNAVAILABLE",

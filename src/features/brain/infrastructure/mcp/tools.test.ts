@@ -65,6 +65,12 @@ vi.mock("@brain/infrastructure/audit", async (importOriginal) => ({
   logBrainAudit: (...args: unknown[]) => logBrainAudit(...args),
 }));
 
+/** The handshake reads standing instructions; nothing here is about that payload. */
+vi.mock("@brain/application/queries/directives", async (importOriginal) => ({
+  ...(await importOriginal<Original>()),
+  listStandingInstructions: async () => [],
+}));
+
 vi.mock("@/shared/infrastructure/realtime/events", async (importOriginal) => ({
   ...(await importOriginal<Original>()),
   publishToUser: (...args: unknown[]) => publishToUser(...args),
@@ -204,7 +210,7 @@ async function call(
   args: Record<string, unknown> = {},
   overrides: Partial<McpPrincipal> = {}
 ): Promise<{ isError: boolean; payload: Json }> {
-  const server = createBrainMcpServer({ ...principal, ...overrides });
+  const server = await createBrainMcpServer({ ...principal, ...overrides });
   const client = new Client({ name: "tools-test", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -565,7 +571,7 @@ async function invalidArguments(
   name: string,
   args: Record<string, unknown>
 ): Promise<string> {
-  const server = createBrainMcpServer(principal);
+  const server = await createBrainMcpServer(principal);
   const client = new Client({ name: "tools-test", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

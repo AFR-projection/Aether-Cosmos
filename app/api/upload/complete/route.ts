@@ -12,6 +12,7 @@ import { validateCsrf } from "@/shared/lib/security";
 import { validateFileMagicBytes } from "@/shared/lib/security/file-validation";
 import { checkSuspiciousActivity, logSuspiciousActivity } from "@/shared/lib/security/suspicious-activity";
 import { enqueueJob } from "@/shared/infrastructure/queue";
+import { enqueueMediaInspection } from "@files/application/jobs/media-inspection";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { recalculateUsedBytes } from "@/shared/infrastructure/db";
 import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
@@ -97,6 +98,8 @@ export async function POST(request: NextRequest) {
       // Keep original mime for client decrypt preview; ciphertext stays octet-stream on wire
       updates.mimeType = body.originalMimeType;
     }
+    const effectiveMimeType =
+      typeof updates.mimeType === "string" ? updates.mimeType : file.mimeType;
 
     await db.update(files).set(updates).where(eq(files.id, fileId));
 
@@ -117,23 +120,35 @@ export async function POST(request: NextRequest) {
 
     if (
       !isEncrypted &&
-      (file.mimeType.startsWith("image/") ||
-        file.mimeType.startsWith("video/") ||
-        file.mimeType === "application/pdf" ||
-        file.mimeType.startsWith("audio/"))
+      (effectiveMimeType.startsWith("image/") ||
+        effectiveMimeType.startsWith("video/") ||
+        effectiveMimeType === "application/pdf" ||
+        effectiveMimeType.startsWith("audio/"))
     ) {
-      await enqueueJob("generate_thumbnail", {
-        fileId,
-        r2Key: file.r2Key,
-        mimeType: file.mimeType,
-      });
+      await enqueueJob(
+        "generate_thumbnail",
+        {
+          fileId,
+          r2Key: file.r2Key,
+          mimeType: effectiveMimeType,
+          version: file.version,
+        },
+        { jobId: `thumb-${fileId}-v${file.version}` },
+      );
     }
+    await enqueueMediaInspection({
+      id: fileId,
+      r2Key: file.r2Key,
+      mimeType: effectiveMimeType,
+      encrypted: isEncrypted,
+      version: file.version,
+    });
 
     void dispatchWebhookEvent(file.userId, "upload", {
       fileId,
       name: file.name,
       sizeBytes: file.sizeBytes,
-      mimeType: body.originalMimeType ?? file.mimeType,
+      mimeType: effectiveMimeType,
       encrypted: isEncrypted,
     });
 

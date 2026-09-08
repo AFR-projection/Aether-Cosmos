@@ -3,6 +3,7 @@ import { requireAuth } from "@/shared/lib/auth/session";
 import { resolveFileAccess } from "@/shared/lib/auth/permissions";
 import { downloadFromR2Stream } from "@files/infrastructure/storage/r2";
 import { apiError } from "@/shared/api/response";
+import { thumbnailCandidates } from "@files/domain/services/thumbnail-keys";
 
 const THUMB_SIZES = [150, 300, 600, 1200] as const;
 type ThumbSize = (typeof THUMB_SIZES)[number];
@@ -14,14 +15,6 @@ function parseSize(val: string | null): ThumbSize {
   const n = parseInt(val ?? "300", 10);
   if (THUMB_SIZES.includes(n as ThumbSize)) return n as ThumbSize;
   return 300;
-}
-
-function getThumbKey(fileId: string, size: ThumbSize, ext: string = "webp"): string {
-  return `thumbnails/${fileId}_${size}.${ext}`;
-}
-
-function getLegacyThumbKey(fileId: string): string {
-  return `thumbnails/${fileId}.jpg`;
 }
 
 export async function GET(
@@ -41,18 +34,12 @@ export async function GET(
     }
     const file = accessible.file;
 
-    const thumbKey = getThumbKey(file.id, size);
-    const legacyKey = getLegacyThumbKey(file.id);
-
-    // Prefer the size-specific key, then whatever thumbnailKey points to
-    // (e.g. legacy .jpg or the default 300px).
-    const keysToTry = [thumbKey];
-    if (file.thumbnailKey && !keysToTry.includes(file.thumbnailKey)) {
-      keysToTry.push(file.thumbnailKey);
-    }
-    if (file.thumbnailKey === legacyKey && !keysToTry.includes(legacyKey)) {
-      keysToTry.push(legacyKey);
-    }
+    const keysToTry = thumbnailCandidates({
+      fileId: file.id,
+      version: file.version,
+      size,
+      thumbnailKey: file.thumbnailKey,
+    });
     // Falling back to the original is only safe when the original is already
     // thumbnail-sized. Streaming a multi-megabyte camera photo into a 170px
     // grid tile burns the user's data and stalls low-end devices, so anything

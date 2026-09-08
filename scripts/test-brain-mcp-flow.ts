@@ -197,12 +197,13 @@ async function main() {
     );
 
     const exportAttempt = await rpc(rawKey, "tools/call", {
-      name: "brain_export",
+      name: "brain_export_memories",
       arguments: {},
     });
     assert(
-      "no brain_export tool is exposed to an agent without the scope",
-      !!exportAttempt.body.error || !!(exportAttempt.body.result as { isError?: boolean })?.isError
+      "brain_export_memories is not registered",
+      !!exportAttempt.body.error,
+      JSON.stringify(exportAttempt.body)
     );
 
     const restCross = await fetch(`${BASE}/api/brain/${other.id}/memories`, {

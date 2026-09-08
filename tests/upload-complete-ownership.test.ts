@@ -11,8 +11,19 @@ import { NextRequest } from "next/server";
  * accounting from outside. These tests pin the 404 and that no UPDATE happens.
  */
 
-const dbCalls = vi.hoisted(() => ({ updates: 0, deletes: 0 }));
+const dbCalls = vi.hoisted(() => ({
+  updates: 0,
+  deletes: 0,
+  sets: [] as Record<string, unknown>[],
+}));
 const selectQueue = vi.hoisted(() => ({ rows: [] as unknown[][] }));
+const effects = vi.hoisted(() => ({
+  enqueueJob: vi.fn(),
+  enqueueMediaInspection: vi.fn(),
+  dispatchWebhookEvent: vi.fn(),
+  getUpload: vi.fn(),
+  completeUpload: vi.fn(),
+}));
 
 vi.mock("@/shared/infrastructure/db", () => {
   type Q = {
@@ -20,7 +31,10 @@ vi.mock("@/shared/infrastructure/db", () => {
     where: (...a: unknown[]) => Q;
     from: (...a: unknown[]) => Q;
     limit: (...a: unknown[]) => Promise<unknown[]>;
-    then: (r: (v: unknown[]) => unknown, j?: (e: unknown) => unknown) => Promise<unknown>;
+    then: (
+      r: (v: unknown[]) => unknown,
+      j?: (e: unknown) => unknown,
+    ) => Promise<unknown>;
   };
 
   function q(result: () => unknown[]): Q {
@@ -39,7 +53,12 @@ vi.mock("@/shared/infrastructure/db", () => {
       select: () => q(() => selectQueue.rows.shift() ?? []),
       update: () => {
         dbCalls.updates++;
-        return q(() => []);
+        const api = q(() => []);
+        api.set = (value: unknown) => {
+          dbCalls.sets.push(value as Record<string, unknown>);
+          return api;
+        };
+        return api;
       },
       delete: () => {
         dbCalls.deletes++;
@@ -56,8 +75,13 @@ vi.mock("@/shared/lib/security", async (importOriginal) => {
 });
 
 vi.mock("@/shared/lib/auth/session", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/shared/lib/auth/session")>();
-  return { ...actual, requireAuth: vi.fn(), getClientIp: vi.fn(() => "127.0.0.1") };
+  const actual =
+    await importOriginal<typeof import("@/shared/lib/auth/session")>();
+  return {
+    ...actual,
+    requireAuth: vi.fn(),
+    getClientIp: vi.fn(() => "127.0.0.1"),
+  };
 });
 
 vi.mock("@/shared/lib/auth/api-key", () => ({
@@ -65,7 +89,9 @@ vi.mock("@/shared/lib/auth/api-key", () => ({
   requireMasterOrApiKey: vi.fn(),
 }));
 
-vi.mock("@/shared/lib/auth/audit", () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/shared/lib/auth/audit", () => ({
+  logActivity: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@files/infrastructure/storage/r2", () => ({
   objectExists: vi.fn().mockResolvedValue(true),
   downloadFromR2Bytes: vi.fn().mockResolvedValue(new Uint8Array(16)),
@@ -79,11 +105,22 @@ vi.mock("@/shared/lib/security/suspicious-activity", () => ({
   checkSuspiciousActivity: vi.fn().mockResolvedValue({ suspicious: false }),
   logSuspiciousActivity: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/shared/infrastructure/queue", () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/shared/infrastructure/webhooks/dispatch", () => ({
-  dispatchWebhookEvent: vi.fn().mockResolvedValue(undefined),
+vi.mock("@/shared/infrastructure/queue", () => ({
+  enqueueJob: effects.enqueueJob,
 }));
-vi.mock("@/shared/infrastructure/realtime/events", () => ({ publishToUser: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@files/application/jobs/media-inspection", () => ({
+  enqueueMediaInspection: effects.enqueueMediaInspection,
+}));
+vi.mock("@files/infrastructure/storage/upload-service", () => ({
+  getUpload: effects.getUpload,
+  completeUpload: effects.completeUpload,
+}));
+vi.mock("@/shared/infrastructure/webhooks/dispatch", () => ({
+  dispatchWebhookEvent: effects.dispatchWebhookEvent,
+}));
+vi.mock("@/shared/infrastructure/realtime/events", () => ({
+  publishToUser: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/shared/lib/settings/admin-settings", () => ({
   getAdminSettings: vi.fn().mockResolvedValue({ rateLimitPerMinute: 1000 }),
 }));
@@ -93,10 +130,14 @@ const MASTER = "22222222-2222-4222-8222-222222222222";
 const FILE_ID = "44444444-4444-4444-8444-444444444444";
 const FILE_ID_2 = "55555555-5555-4555-8555-555555555555";
 
-const { validateCsrf, checkUserApiRateLimit } = await import("@/shared/lib/security");
+const { validateCsrf, checkUserApiRateLimit } =
+  await import("@/shared/lib/security");
 const { requireAuthOrApiKey } = await import("@/shared/lib/auth/api-key");
 const completeRoute = await import("@/app/api/upload/complete/route");
-const completeBatchRoute = await import("@/app/api/upload/complete-batch/route");
+const completeBatchRoute =
+  await import("@/app/api/upload/complete-batch/route");
+const completeSessionRoute =
+  await import("@/app/api/uploads/[id]/complete/route");
 
 /** A pending row created by `/upload/presign` for OWNER. */
 function pendingRow(over: Record<string, unknown> = {}) {
@@ -136,9 +177,17 @@ function asMaster() {
 beforeEach(() => {
   dbCalls.updates = 0;
   dbCalls.deletes = 0;
+  dbCalls.sets = [];
   selectQueue.rows = [];
+  effects.enqueueJob.mockReset().mockResolvedValue(true);
+  effects.enqueueMediaInspection.mockReset().mockResolvedValue(true);
+  effects.dispatchWebhookEvent.mockReset().mockResolvedValue(undefined);
+  effects.getUpload.mockReset();
+  effects.completeUpload.mockReset().mockResolvedValue({});
   vi.mocked(validateCsrf).mockReset().mockResolvedValue(true);
-  vi.mocked(checkUserApiRateLimit).mockReset().mockResolvedValue({ allowed: true } as never);
+  vi.mocked(checkUserApiRateLimit)
+    .mockReset()
+    .mockResolvedValue({ allowed: true } as never);
   vi.mocked(requireAuthOrApiKey)
     .mockReset()
     .mockResolvedValue({
@@ -154,23 +203,61 @@ describe("POST /api/upload/complete", () => {
   it("404s a master finalising someone else's pending row, and updates nothing", async () => {
     asMaster();
     selectQueue.rows = [[pendingRow()]];
-    const res = await completeRoute.POST(req({ fileId: FILE_ID }, "/api/upload/complete"));
+    const res = await completeRoute.POST(
+      req({ fileId: FILE_ID }, "/api/upload/complete"),
+    );
     expect(res.status).toBe(404);
     expect(dbCalls.updates).toBe(0);
   });
 
   it("lets the uploader finalise their own row", async () => {
     selectQueue.rows = [[pendingRow()]];
-    const res = await completeRoute.POST(req({ fileId: FILE_ID }, "/api/upload/complete"));
+    const res = await completeRoute.POST(
+      req({ fileId: FILE_ID }, "/api/upload/complete"),
+    );
     expect(res.status).toBe(200);
     expect(dbCalls.updates).toBe(1);
   });
 
   it("requires CSRF", async () => {
     vi.mocked(validateCsrf).mockResolvedValue(false);
-    const res = await completeRoute.POST(req({ fileId: FILE_ID }, "/api/upload/complete"));
+    const res = await completeRoute.POST(
+      req({ fileId: FILE_ID }, "/api/upload/complete"),
+    );
     expect(res.status).toBe(403);
     expect(dbCalls.updates).toBe(0);
+  });
+
+  it("uses the persisted MIME for plaintext side effects", async () => {
+    selectQueue.rows = [[pendingRow({ mimeType: "video/mp4", version: 4 })]];
+
+    const res = await completeRoute.POST(
+      req(
+        { fileId: FILE_ID, originalMimeType: "video/quicktime" },
+        "/api/upload/complete",
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(dbCalls.sets.at(-1)).not.toHaveProperty("mimeType");
+    expect(effects.enqueueJob).toHaveBeenCalledWith(
+      "generate_thumbnail",
+      {
+        fileId: FILE_ID,
+        r2Key: "u/owner/photo.png",
+        mimeType: "video/mp4",
+        version: 4,
+      },
+      { jobId: `thumb-${FILE_ID}-v4` },
+    );
+    expect(effects.enqueueMediaInspection).toHaveBeenCalledWith(
+      expect.objectContaining({ mimeType: "video/mp4", version: 4 }),
+    );
+    expect(effects.dispatchWebhookEvent).toHaveBeenCalledWith(
+      OWNER,
+      "upload",
+      expect.objectContaining({ mimeType: "video/mp4" }),
+    );
   });
 });
 
@@ -178,9 +265,14 @@ describe("POST /api/upload/complete-batch", () => {
   it("404s the whole batch when one row belongs to another account", async () => {
     // The first row is the caller's, the second is not: a partial finalise would leave the
     // batch half-committed.
-    selectQueue.rows = [[pendingRow(), pendingRow({ id: FILE_ID_2, userId: MASTER })]];
+    selectQueue.rows = [
+      [pendingRow(), pendingRow({ id: FILE_ID_2, userId: MASTER })],
+    ];
     const res = await completeBatchRoute.POST(
-      req({ files: [{ fileId: FILE_ID }, { fileId: FILE_ID_2 }] }, "/api/upload/complete-batch")
+      req(
+        { files: [{ fileId: FILE_ID }, { fileId: FILE_ID_2 }] },
+        "/api/upload/complete-batch",
+      ),
     );
     expect(res.status).toBe(404);
     expect(dbCalls.updates).toBe(0);
@@ -189,19 +281,94 @@ describe("POST /api/upload/complete-batch", () => {
   it("404s when a requested row does not exist at all", async () => {
     selectQueue.rows = [[]];
     const res = await completeBatchRoute.POST(
-      req({ files: [{ fileId: FILE_ID }] }, "/api/upload/complete-batch")
+      req({ files: [{ fileId: FILE_ID }] }, "/api/upload/complete-batch"),
     );
     expect(res.status).toBe(404);
     expect(dbCalls.updates).toBe(0);
   });
 
+  it("uses each row's persisted MIME for plaintext batch side effects", async () => {
+    selectQueue.rows = [[pendingRow({ mimeType: "video/mp4", version: 7 })]];
+
+    const res = await completeBatchRoute.POST(
+      req(
+        {
+          files: [{ fileId: FILE_ID, originalMimeType: "video/quicktime" }],
+        },
+        "/api/upload/complete-batch",
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(dbCalls.sets.at(-1)).not.toHaveProperty("mimeType");
+    expect(effects.enqueueJob).toHaveBeenCalledWith(
+      "generate_thumbnail",
+      {
+        fileId: FILE_ID,
+        r2Key: "u/owner/photo.png",
+        mimeType: "video/mp4",
+        version: 7,
+      },
+      { jobId: `thumb-${FILE_ID}-v7` },
+    );
+    expect(effects.enqueueMediaInspection).toHaveBeenCalledWith(
+      expect.objectContaining({ mimeType: "video/mp4", version: 7 }),
+    );
+    expect(effects.dispatchWebhookEvent).toHaveBeenCalledWith(
+      OWNER,
+      "upload",
+      expect.objectContaining({ mimeType: "video/mp4" }),
+    );
+  });
+
   it("requires CSRF before touching anything", async () => {
     vi.mocked(validateCsrf).mockResolvedValue(false);
     const res = await completeBatchRoute.POST(
-      req({ files: [{ fileId: FILE_ID }] }, "/api/upload/complete-batch")
+      req({ files: [{ fileId: FILE_ID }] }, "/api/upload/complete-batch"),
     );
     expect(res.status).toBe(403);
     expect(requireAuthOrApiKey).not.toHaveBeenCalled();
     expect(dbCalls.updates).toBe(0);
+  });
+});
+
+describe("POST /api/uploads/[id]/complete", () => {
+  it("uses the persisted completed-upload MIME for every side effect", async () => {
+    effects.getUpload
+      .mockResolvedValueOnce({ status: "uploading", fileStatus: "uploading" })
+      .mockResolvedValueOnce({
+        fileId: FILE_ID,
+        objectKey: "u/owner/video",
+        mimeType: "video/mp4",
+        encrypted: false,
+        version: 9,
+        name: "clip.mp4",
+        totalSizeBytes: 500,
+      });
+
+    const res = await completeSessionRoute.POST(
+      req({}, "/api/uploads/session-a/complete"),
+      { params: Promise.resolve({ id: "session-a" }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect(effects.enqueueJob).toHaveBeenCalledWith(
+      "generate_thumbnail",
+      {
+        fileId: FILE_ID,
+        r2Key: "u/owner/video",
+        mimeType: "video/mp4",
+        version: 9,
+      },
+      { jobId: `thumb-${FILE_ID}-v9` },
+    );
+    expect(effects.enqueueMediaInspection).toHaveBeenCalledWith(
+      expect.objectContaining({ mimeType: "video/mp4", version: 9 }),
+    );
+    expect(effects.dispatchWebhookEvent).toHaveBeenCalledWith(
+      OWNER,
+      "upload",
+      expect.objectContaining({ mimeType: "video/mp4" }),
+    );
   });
 });

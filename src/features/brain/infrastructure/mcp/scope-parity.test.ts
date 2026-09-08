@@ -182,6 +182,15 @@ describe("effectiveGrantScopes is an intersection, so narrowing either side narr
     }
   });
 
+  it("drops retired export scope strings from legacy grants", () => {
+    expect(
+      effectiveGrantScopes(
+        ["brain.read", "brain.export"],
+        ["brain.read", "brain.full"]
+      )
+    ).toEqual(["brain.read"]);
+  });
+
   it("drops unknown and mis-cased scope strings instead of trusting them", () => {
     expect(effectiveGrantScopes(["nonsense", "BRAIN.READ"], [...BRAIN_API_SCOPES])).toEqual([]);
   });

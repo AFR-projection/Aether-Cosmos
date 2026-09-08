@@ -58,7 +58,7 @@ scope check in the system.
 ### Second Brain scopes
 
 A separate namespace: `brain.read`, `brain.search`, `brain.write`, `brain.link`,
-`brain.delete`, `brain.export`, `brain.import`, `brain.consolidate`.
+`brain.delete`, `brain.import`, `brain.consolidate`, `brain.ingest`.
 
 Two rules the code enforces rather than documents:
 
@@ -190,7 +190,7 @@ not a configuration flag.
 | `/api/brain/[id]/projects`, `/entities`, `/relationships`, `/tags` | Structure around memories |
 | `/api/brain/[id]/agents` | Agent registrations and their scopes |
 | `/api/brain/[id]/audit` | Audit log |
-| `/api/brain/[id]/export`, `/import` | `.afrbrain` archive round-trip |
+| `/api/brain/[id]/import` | Owner-controlled import of a compatible Brain archive |
 | `/api/brain/[id]/consolidate` | Non-destructive consolidation pass |
 | `/api/brain/mcp` | The MCP endpoint agents connect to |
 

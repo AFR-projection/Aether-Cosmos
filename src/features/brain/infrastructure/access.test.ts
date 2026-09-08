@@ -376,7 +376,7 @@ describe("agent scope algebra", () => {
       "brain.read",
       "brain.write",
       "brain.delete",
-      "brain.export",
+      "brain.import",
     ]);
 
     expect(context.principal.type).toBe("agent");
@@ -427,20 +427,20 @@ describe("non-agent key sessions", () => {
 
 describe("requireBrainOwnerContext", () => {
   it("lets the owner through with the same context", async () => {
-    const context = await requireBrainOwnerContext(request, BRAIN, ["brain.export"]);
+    const context = await requireBrainOwnerContext(request, BRAIN, ["brain.import"]);
 
     expect(context.principal.type).toBe("user");
     expect(context.brain.id).toBe(BRAIN);
   });
 
   it("refuses an agent even when its grant covers the scope", async () => {
-    // The audit trail, agent management and export are owner-only: a valid grant is
+    // The audit trail, agent management and bulk import are owner-only: a valid grant is
     // not the question, the caller's *kind* is.
     requireAuthOrApiKey.mockResolvedValue(keySession());
     rows.set(AGENT_TABLE, [agentRow()]);
     rows.set(ACCESS_TABLE, [{ scopes: ["brain.full"] }]);
 
-    const error = await requireBrainOwnerContext(request, BRAIN, ["brain.export"]).catch(
+    const error = await requireBrainOwnerContext(request, BRAIN, ["brain.import"]).catch(
       (caught: unknown) => caught
     );
 

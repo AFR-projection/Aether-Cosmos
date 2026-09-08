@@ -80,8 +80,18 @@ export async function GET(
       path entirely.
     */
     const totalSize = file.sizeBytes;
-    const rangeHeader = request.headers.get("range");
-    const parsedRange = rangeHeader ? parseRangeHeader(rangeHeader, totalSize) : null;
+    const parsed = parseRangeHeader(request.headers.get("range"), totalSize);
+    if (parsed.kind === "unsatisfiable") {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Content-Range": `bytes */${totalSize}`,
+          "Cache-Control": "private, no-store",
+        },
+      });
+    }
+    const parsedRange = parsed.kind === "range" ? parsed.range : null;
 
     if (!isContinuationRange(parsedRange)) {
       try {
@@ -121,6 +131,8 @@ export async function GET(
     headers.set("Cache-Control", "private, max-age=300");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Accept-Ranges", "bytes");
+    if (r2.eTag) headers.set("ETag", r2.eTag);
+    if (r2.lastModified) headers.set("Last-Modified", r2.lastModified.toUTCString());
     headers.set(
       "Content-Disposition",
       forceDownload

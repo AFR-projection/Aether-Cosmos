@@ -701,6 +701,41 @@ export function buildTrimArgs(input: {
   ];
 }
 
+/** Add progressive-download layout only for ISO BMFF containers that understand it. */
+export function buildVideoTrimArgs(input: {
+  inputPath: string;
+  outputPath: string;
+  startSeconds: number;
+  endSeconds: number;
+  mimeType: string;
+}): string[] {
+  const args = buildTrimArgs(input);
+  const mimeType = input.mimeType.toLowerCase().split(";")[0].trim();
+  if (mimeType !== "video/mp4" && mimeType !== "video/quicktime") return args;
+  return [...args.slice(0, -2), "-movflags", "+faststart", ...args.slice(-2)];
+}
+
+/** Decode one poster frame; Sharp creates every output size from this single image. */
+export function buildVideoThumbnailArgs(inputPath: string, outputPath: string): string[] {
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-nostdin",
+    "-ss",
+    "1.000",
+    "-i",
+    inputPath,
+    "-frames:v",
+    "1",
+    "-an",
+    "-sn",
+    "-dn",
+    "-y",
+    outputPath,
+  ];
+}
+
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
 }

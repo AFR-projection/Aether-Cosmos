@@ -13,7 +13,8 @@ import {
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { maxUploadBytes, isUploadAllowed, uploadUrlExpirySeconds, downloadUrlExpirySeconds } from "@/shared/lib/settings/admin-settings";
+import { maxUploadBytes, isUploadAllowed, uploadUrlExpirySeconds, downloadUrlExpirySeconds, playbackUrlExpirySeconds } from "@/shared/lib/settings/admin-settings";
+import { clampPlaybackExpirySeconds } from "@/shared/lib/media/playback-policy";
 import { r2Bucket, r2Client } from "@/shared/infrastructure/storage/r2-client";
 import { encodeContentDispositionFilename } from "@/shared/infrastructure/storage/content-disposition";
 import { MULTIPART_PART_SIZE_BYTES } from "@files/infrastructure/storage/upload-constants";
@@ -123,6 +124,56 @@ export async function getPresignedDownloadUrl(
  * backups name their downloads the same way. Re-exported for existing importers.
  */
 export { encodeContentDispositionFilename };
+
+/**
+ * Presigned GET URL for PLAYING a media object, as opposed to downloading one.
+ *
+ * Separate from `getPresignedDownloadUrl` because the two want opposite things from every
+ * knob. A download wants `attachment`, the real filename, and the shortest possible life. A
+ * playback URL wants `inline`, no filename at all, and a life that covers the whole viewing —
+ * every buffer segment and every seek is a fresh range request signed by this one URL, so a
+ * 60-second download expiry would stop a film one minute in.
+ *
+ * Three response overrides ride along, and each earns its place:
+ *
+ *   - `ResponseContentType` pins the type R2 serves, so the browser is not left sniffing and
+ *     an object stored with a wrong `ContentType` still plays.
+ *   - `ResponseContentDisposition: inline` with NO filename: the URL may end up in a network
+ *     log, and there is no reason for the original filename to be in it.
+ *   - `ResponseCacheControl: private, max-age=<lifetime>` is the one that makes seeking
+ *     backwards cheap. R2 objects carry no cache headers of their own, so without this the
+ *     browser re-fetches bytes it already has. `private` keeps it out of shared caches, and
+ *     tying max-age to the signature's lifetime means a cached range can never outlive the
+ *     capability that authorized it.
+ *
+ * Returns the deadline too: the caller hands it to the player, which uses it to re-issue
+ * before the signature dies instead of discovering it through a stall.
+ */
+export async function getPresignedPlaybackUrl(
+  r2Key: string,
+  opts: { contentType: string; expirySeconds?: number }
+): Promise<{ url: string; expiresAt: Date; expiresInSeconds: number }> {
+  const client = getR2Client();
+  const expiry = clampPlaybackExpirySeconds(opts.expirySeconds ?? playbackUrlExpirySeconds());
+
+  const url = await getSignedUrl(
+    client,
+    new GetObjectCommand({
+      Bucket: getBucket(),
+      Key: r2Key,
+      ResponseContentType: opts.contentType,
+      ResponseContentDisposition: "inline",
+      ResponseCacheControl: `private, max-age=${expiry}`,
+    }),
+    { expiresIn: expiry }
+  );
+
+  return {
+    url,
+    expiresAt: new Date(Date.now() + expiry * 1000),
+    expiresInSeconds: expiry,
+  };
+}
 
 export async function deleteR2Object(r2Key: string): Promise<void> {
   if (!r2Key || r2Key === "pending" || r2Key.startsWith("notes/")) return;
@@ -309,6 +360,7 @@ export async function downloadFromR2Stream(r2Key: string, byteRange?: string) {
     contentLength: response.ContentLength,
     contentRange: response.ContentRange,
     eTag: response.ETag,
+    lastModified: response.LastModified,
     statusCode: response.$metadata.httpStatusCode,
   };
 }
