@@ -117,7 +117,7 @@ const PROSE_TITLE_CASE_RATIO = 0.9;
  * Curated vocabulary. Additive by design: an unknown technology simply falls
  * through to the proper-noun rules as `other` rather than being mistyped.
  */
-const LEXICON: ReadonlyArray<readonly [string, BrainEntityType]> = [
+const LEXICON: ReadonlyArray<VocabEntry> = ([
   ["PostgreSQL", "technology"], ["Postgres", "technology"], ["pgvector", "technology"],
   ["Redis", "technology"], ["BullMQ", "technology"], ["Docker", "technology"],
   ["Kubernetes", "technology"], ["Next.js", "technology"], ["React", "technology"],
@@ -132,7 +132,14 @@ const LEXICON: ReadonlyArray<readonly [string, BrainEntityType]> = [
   ["Model Context Protocol", "technology"], ["MCP", "technology"],
   ["Second Brain", "concept"], ["Aether Cosmos ByAFR", "product"],
   ["Aether Cosmos", "product"],
-];
+] satisfies ReadonlyArray<readonly [string, BrainEntityType]>).map(([term, type]) => ({
+  term,
+  foldedTerm: term.toLowerCase(),
+  name: term,
+  type,
+  rule: "lexicon",
+  confidence: EXTRACTION_CONFIDENCE.lexicon,
+}));
 
 /** Words that mark the next proper noun as a person. */
 const PERSON_TITLES = new Set([
@@ -181,8 +188,12 @@ type Candidate = {
   mentions: ExtractedMention[];
 };
 
+function cleanName(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 function normalizeName(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
+  return cleanName(value).toLowerCase();
 }
 
 function isWordChar(ch: string | undefined): boolean {
@@ -236,23 +247,29 @@ function splitWords(text: string): Word[] {
  * names, which is exactly the paragraph worth extracting from.
  */
 function isTitleCased(words: readonly Word[], ratio: number): boolean {
-  const cased = words.filter((word) => /\p{L}/u.test(word.text));
-  if (cased.length < 3) return false;
-  const caps = cased.filter((word) => isCapitalized(word.text)).length;
-  return caps / cased.length >= ratio;
+  let cased = 0;
+  let caps = 0;
+  for (const word of words) {
+    if (!/\p{L}/u.test(word.text)) continue;
+    cased += 1;
+    if (isCapitalized(word.text)) caps += 1;
+  }
+  return cased >= 3 && caps / cased >= ratio;
 }
 
-/** Every whole-word, case-insensitive occurrence of `needle` in `haystack`. */
-function occurrences(haystack: string, needle: string): number[] {
+/** Every whole-word occurrence of a pre-folded `needle` in `foldedHaystack`. */
+function occurrences(
+  haystack: string,
+  foldedHaystack: string,
+  foldedNeedle: string
+): number[] {
   const found: number[] = [];
-  if (!needle) return found;
-  const hay = haystack.toLowerCase();
-  const target = needle.toLowerCase();
+  if (!foldedNeedle) return found;
   let from = 0;
   for (;;) {
-    const at = hay.indexOf(target, from);
+    const at = foldedHaystack.indexOf(foldedNeedle, from);
     if (at < 0) return found;
-    if (!isWordChar(haystack[at - 1]) && !isWordChar(haystack[at + target.length])) {
+    if (!isWordChar(haystack[at - 1]) && !isWordChar(haystack[at + foldedNeedle.length])) {
       found.push(at);
     }
     from = at + 1;
@@ -270,8 +287,8 @@ function addCandidate(
     mention: ExtractedMention;
   }
 ): void {
-  const name = params.name.trim().replace(/\s+/g, " ");
-  const key = normalizeName(name);
+  const name = cleanName(params.name);
+  const key = name.toLowerCase();
   if (!key) return;
 
   let candidate = into.get(key);
@@ -318,6 +335,7 @@ function addCandidate(
  */
 type VocabEntry = {
   term: string;
+  foldedTerm: string;
   name: string;
   type: BrainEntityType;
   rule: string;
@@ -330,10 +348,11 @@ function matchVocabulary(
   into: Map<string, Candidate>,
   field: ExtractionField,
   text: string,
+  foldedText: string,
   vocabulary: readonly VocabEntry[]
 ): void {
   for (const entry of vocabulary) {
-    for (const at of occurrences(text, entry.term)) {
+    for (const at of occurrences(text, foldedText, entry.foldedTerm)) {
       addCandidate(into, {
         name: entry.name,
         type: entry.type,
@@ -526,6 +545,7 @@ function buildVocabulary(known: readonly KnownEntity[] | undefined): VocabEntry[
     if (!name) continue;
     vocabulary.push({
       term: name,
+      foldedTerm: name.toLowerCase(),
       name,
       type: entity.type,
       rule: "known",
@@ -536,6 +556,7 @@ function buildVocabulary(known: readonly KnownEntity[] | undefined): VocabEntry[
       if (!trimmed) continue;
       vocabulary.push({
         term: trimmed,
+        foldedTerm: trimmed.toLowerCase(),
         name,
         type: entity.type,
         rule: "known-alias",
@@ -545,15 +566,7 @@ function buildVocabulary(known: readonly KnownEntity[] | undefined): VocabEntry[
     }
   }
 
-  for (const [term, type] of LEXICON) {
-    vocabulary.push({
-      term,
-      name: term,
-      type,
-      rule: "lexicon",
-      confidence: EXTRACTION_CONFIDENCE.lexicon,
-    });
-  }
+  vocabulary.push(...LEXICON);
 
   // Longest term first so "Cloudflare R2" is claimed before "Cloudflare".
   return vocabulary.sort((a, b) => b.term.length - a.term.length || a.term.localeCompare(b.term));
@@ -567,22 +580,24 @@ function buildVocabulary(known: readonly KnownEntity[] | undefined): VocabEntry[
  * entities so every edge stays traceable.
  */
 export function extractEntities(input: ExtractionInput): ExtractionResult {
-  const fields: Array<[ExtractionField, string]> = [
+  const fields = ([
     ["title", (input.title ?? "").slice(0, MAX_FIELD_CHARS)],
     ["summary", (input.summary ?? "").slice(0, MAX_FIELD_CHARS)],
     ["content", (input.content ?? "").slice(0, MAX_FIELD_CHARS)],
-  ];
+  ] satisfies ReadonlyArray<readonly [ExtractionField, string]>).map(([field, text]) => ({
+    field,
+    text,
+    words: splitWords(text),
+    foldedText: text.toLowerCase(),
+  }));
 
   const vocabulary = buildVocabulary(input.known);
-  const wordsByField = new Map<ExtractionField, Word[]>();
 
   // A single capitalized word only counts when it also appears capitalized away
   // from a sentence boundary somewhere in this memory.
   const confirmedCaps = new Set<string>();
-  for (const [field, text] of fields) {
-    const words = splitWords(text);
-    wordsByField.set(field, words);
-    for (const word of words) {
+  for (const item of fields) {
+    for (const word of item.words) {
       if (!word.sentenceStart && isCapitalized(word.text)) {
         confirmedCaps.add(word.text.toLowerCase());
       }
@@ -591,11 +606,10 @@ export function extractEntities(input: ExtractionInput): ExtractionResult {
 
   const candidates = new Map<string, Candidate>();
 
-  for (const [field, text] of fields) {
+  for (const { field, text, words, foldedText } of fields) {
     if (!text) continue;
-    const words = wordsByField.get(field) ?? [];
 
-    matchVocabulary(candidates, field, text, vocabulary);
+    matchVocabulary(candidates, field, text, foldedText, vocabulary);
     matchAliasDefinitions(candidates, field, text);
 
     for (const word of words) {

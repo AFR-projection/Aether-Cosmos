@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   EXTRACTION_CONFIDENCE,
   EXTRACTOR_VERSION,
@@ -26,6 +26,10 @@ function fieldText(
   if (field === "summary") return input.summary ?? "";
   return input.content;
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("extractEntities", () => {
   it("returns nothing for empty input", () => {
@@ -236,6 +240,26 @@ describe("extractEntities", () => {
     const result = extractEntities({ title: "large", content });
     expect(result.entities.length).toBeLessThanOrEqual(MAX_ENTITIES_PER_MEMORY);
     expect(result.dropped).toBeGreaterThan(0);
+  });
+
+  it("case-folds each field once instead of once per vocabulary term", () => {
+    const content = "PostgreSQL and Redis run beside Cloudflare R2.";
+    const originalToLowerCase = String.prototype.toLowerCase;
+    let contentCaseFolds = 0;
+    vi.spyOn(String.prototype, "toLowerCase").mockImplementation(function toLowerCase(
+      this: string
+    ) {
+      if (String(this) === content) contentCaseFolds += 1;
+      return originalToLowerCase.call(this);
+    });
+
+    const result = extractEntities({ title: "infrastructure", content });
+    expect(result.entities.map((entity) => entity.name)).toEqual([
+      "Cloudflare R2",
+      "PostgreSQL",
+      "Redis",
+    ]);
+    expect(contentCaseFolds).toBe(1);
   });
 
   it("caps mentions per entity", () => {
