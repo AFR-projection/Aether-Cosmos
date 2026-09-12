@@ -1,3 +1,5 @@
+import { retryAfterFromResponse } from "./provider-retry";
+
 /**
  * The chat-completions client the translation passes go through.
  *
@@ -37,6 +39,10 @@ export type TranslatorOptions = {
   /** Everything before `/chat/completions`. A trailing slash is tolerated. */
   baseUrl: string;
   model: string;
+  /** Stable work identity forwarded when an OpenAI-compatible host supports idempotency. */
+  requestId?: string;
+  /** Additional deterministic headers; Authorization and Content-Type cannot be replaced. */
+  headers?: Readonly<Record<string, string>>;
   timeoutMs?: number;
   /** Overridable for tests. Defaults to the global fetch. */
   fetchImpl?: typeof fetch;
@@ -57,13 +63,6 @@ function friendlyError(error: unknown): string {
     return "Could not reach the translation provider — check the server's outbound network access";
   }
   return message.slice(0, 300);
-}
-
-function retryAfterMs(response: Response): number | undefined {
-  const header = response.headers.get("retry-after");
-  if (!header) return undefined;
-  const seconds = Number(header);
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * 1000) : undefined;
 }
 
 /**
@@ -94,6 +93,7 @@ export class ChatCompletionTranslator {
   private readonly isOpenRouter: boolean;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly requestHeaders: Readonly<Record<string, string>>;
 
   constructor(options: TranslatorOptions) {
     this.apiKey = options.apiKey;
@@ -103,6 +103,17 @@ export class ChatCompletionTranslator {
     this.isOpenRouter = /(^|\/\/)([a-z0-9-]+\.)*openrouter\.ai(\/|$)/i.test(base);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    const headers = Object.fromEntries(
+      Object.entries(options.headers ?? {})
+        .filter(([key]) => !["authorization", "content-type"].includes(key.toLowerCase()))
+        .map(([key, value]) => [key.toLowerCase(), value])
+    );
+    this.requestHeaders = {
+      ...headers,
+      ...(options.requestId
+        ? { "Idempotency-Key": options.requestId, "X-Request-Id": options.requestId }
+        : {}),
+    };
   }
 
   /** Cheap and never-throwing: a key must be present. No network call. */
@@ -136,6 +147,7 @@ export class ChatCompletionTranslator {
       response = await this.fetchImpl(this.endpoint, {
         method: "POST",
         headers: {
+          ...this.requestHeaders,
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
         },
@@ -158,7 +170,7 @@ export class ChatCompletionTranslator {
       }
       throw new SubtitleTranslationError(
         `Translation failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`,
-        { status: response.status, retryAfterMs: retryAfterMs(response) }
+        { status: response.status, retryAfterMs: retryAfterFromResponse(response) }
       );
     }
 

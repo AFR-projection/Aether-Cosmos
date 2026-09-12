@@ -162,7 +162,10 @@ export function SystemToastViewport() {
 
   return (
     <div
-      className="pointer-events-none fixed bottom-4 right-4 z-[120] flex flex-col-reverse gap-2 sm:bottom-6 sm:right-6"
+      /* Below lg the mobile bottom tab bar owns the screen edge; clear its full
+         height plus the safe-area inset (the file browser's downloads widget
+         uses the same offset, so the two stack instead of overlapping). */
+      className="pointer-events-none fixed bottom-[calc(var(--bottom-nav-h)+var(--safe-bottom)+0.75rem)] right-4 z-[120] flex flex-col-reverse gap-2 lg:bottom-6 lg:right-6"
       aria-live="polite"
     >
       <AnimatePresence mode="popLayout">

@@ -91,7 +91,9 @@ function useNow(intervalMs = 30_000): number {
 function Val({ tone, children }: { tone?: Tone; children: React.ReactNode }) {
   return (
     <span
-      className={cn("font-medium", !tone && "text-foreground")}
+      // break-all: these are wire values (file names, emails, user names), and
+      // one long token must wrap rather than push the row wider than the panel.
+      className={cn("break-all font-medium", !tone && "text-foreground")}
       data-tone={tone}
       style={tone ? { color: "var(--tone)" } : undefined}
     >
@@ -634,11 +636,11 @@ function AdminLogsContent() {
       <div key={log.id} className="adm-row adm-row--flat" data-open={open || undefined}>
         <button
           type="button"
-          className="flex w-full items-start gap-3 text-left"
+          className="flex w-full items-start gap-3 px-3 py-2.5 text-left"
           onClick={() => setExpandedId(open ? null : log.id)}
           aria-expanded={open}
         >
-          <Chip icon={meta.icon} tone={meta.tone} className="mt-px shrink-0">
+          <Chip icon={meta.icon} tone={meta.tone} className="mt-px max-w-[45%]">
             {auditActionLabel(log.action, t)}
           </Chip>
 
@@ -691,7 +693,7 @@ function AdminLogsContent() {
                   </div>
                   <div className="flex gap-2">
                     <dt className="adm-sub w-20 shrink-0">{t("admin.logs.account")}</dt>
-                    <dd>
+                    <dd className="min-w-0 break-all">
                       <Link
                         href={`/admin/users/${log.userId}`}
                         className="font-medium text-accent-ink hover:underline"

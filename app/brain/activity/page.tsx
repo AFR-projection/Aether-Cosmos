@@ -115,7 +115,12 @@ export default function BrainActivityPage() {
                                 {brainOperationLabel(entry.operation, t)}
                               </span>
                               {agentName && (
-                                <span className="brain-chip brain-chip--on">{agentName}</span>
+                                // Bounded: names run to 100 chars and the chip
+                                // cannot wrap, so without a cap it pushes the
+                                // timestamp off the row on narrow phones.
+                                <span className="brain-chip brain-chip--on max-w-[12rem] truncate">
+                                  {agentName}
+                                </span>
                               )}
                               {viaMcp && (
                                 <span className="brain-chip brain-chip--mono">mcp</span>

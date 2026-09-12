@@ -165,7 +165,9 @@ export function Chip({
   return (
     <span className={cn("adm-chip", mono && "adm-chip--mono", className)} data-tone={tone}>
       {Icon && <Icon aria-hidden="true" />}
-      {children}
+      {/* The label sits in its own box so a width-capped chip (long MIME type,
+          email) ellipsizes here instead of clipping mid-glyph at the border. */}
+      <span className="adm-chip__label">{children}</span>
     </span>
   );
 }

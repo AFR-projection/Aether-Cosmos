@@ -192,11 +192,11 @@ export default function MemoryDetailPage() {
                 }
               >
                 {memory.summary && (
-                  <p className="mb-3 rounded-xl border border-border/40 bg-background-secondary/40 p-3 text-sm text-muted-foreground">
+                  <p className="mb-3 rounded-xl border border-border/40 bg-background-secondary/40 p-3 text-sm break-words text-muted-foreground">
                     {memory.summary}
                   </p>
                 )}
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
                   {memory.content}
                 </p>
               </BrainPanel>
@@ -210,8 +210,8 @@ export default function MemoryDetailPage() {
                       key={version.id}
                       className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/40 px-3 py-2"
                     >
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium text-foreground">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-foreground">
                           v{version.versionNumber} · {version.title}
                         </span>
                         <span className="block text-[11px] text-muted-foreground">
@@ -342,9 +342,12 @@ export default function MemoryDetailPage() {
 
 function Detail({ label, children }: { label: string; children: React.ReactNode }) {
   return (
+    // The value side must be able to shrink: sourceType and tag lists come
+    // off the wire and their min-content width otherwise pushes the label —
+    // and the panel — out past the viewport on phones.
     <div className="flex items-start justify-between gap-3">
-      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="text-right text-sm">{children}</dd>
+      <dt className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 flex-1 break-words text-right text-sm">{children}</dd>
     </div>
   );
 }

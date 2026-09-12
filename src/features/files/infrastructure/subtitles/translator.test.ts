@@ -34,12 +34,20 @@ const reply = (content: string) => ({ choices: [{ message: { role: "assistant", 
 
 function make(
   fetchImpl: StubFetch,
-  over?: Partial<{ apiKey: string; baseUrl: string; model: string }>
+  over?: Partial<{
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    requestId: string;
+    headers: Readonly<Record<string, string>>;
+  }>
 ) {
   return new ChatCompletionTranslator({
     apiKey: over?.apiKey ?? "sk-test",
     baseUrl: over?.baseUrl ?? "https://openrouter.ai/api/v1",
     model: over?.model ?? "google/gemini-2.5-flash",
+    requestId: over?.requestId,
+    headers: over?.headers,
     fetchImpl: fetchImpl as unknown as typeof fetch,
   });
 }
@@ -77,6 +85,21 @@ describe("ChatCompletionTranslator request", () => {
     const fetchImpl = stubFetch(reply("done"));
     await make(fetchImpl).complete({ system: "s", user: "u" });
     expect(authOf(fetchImpl)).toBe("Bearer sk-test");
+  });
+
+  it("forwards deterministic request and idempotency headers when supplied", async () => {
+    const fetchImpl = stubFetch(reply("done"));
+    await make(fetchImpl, {
+      requestId: "run-1:translate:4",
+      headers: { "X-Pipeline": "v2", Authorization: "Bearer stolen" },
+    }).complete({ system: "s", user: "u" });
+    expect(callOf(fetchImpl).init.headers).toMatchObject({
+      "Idempotency-Key": "run-1:translate:4",
+      "X-Request-Id": "run-1:translate:4",
+      "x-pipeline": "v2",
+      Authorization: "Bearer sk-test",
+      "Content-Type": "application/json",
+    });
   });
 
   it("sends the two messages in the order a chat model expects", async () => {
@@ -151,6 +174,23 @@ describe("ChatCompletionTranslator failures", () => {
       .complete({ system: "s", user: "u" })
       .catch((e: unknown) => e);
     expect((error as SubtitleTranslationError).retryAfterMs).toBe(5_000);
+  });
+
+  it("reads an HTTP-date Retry-After value", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("Wed, 21 Oct 2015 07:27:00 GMT"));
+    try {
+      const fetchImpl = stubFetch({}, {
+        status: 503,
+        headers: { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" },
+      });
+      const error = await make(fetchImpl)
+        .complete({ system: "s", user: "u" })
+        .catch((e: unknown) => e);
+      expect((error as SubtitleTranslationError).retryAfterMs).toBe(60_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says so plainly when the reply is not JSON", async () => {

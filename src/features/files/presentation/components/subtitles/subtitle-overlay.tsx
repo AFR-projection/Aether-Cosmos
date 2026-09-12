@@ -2,12 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/shared/lib/utils";
-import { wrapCueText } from "@files/domain/services/subtitles/cues";
+import { activeCueIndex, wrapCueText } from "@files/domain/services/subtitles/cues";
 import { isRtlLanguage } from "@files/domain/services/subtitles/languages";
+import type { SubtitleCue } from "@files/domain/services/subtitles/vtt";
 import {
   SUBTITLE_SIZE_SCALE,
   type SubtitlePrefs,
 } from "@files/domain/services/subtitles/view-prefs";
+import {
+  cueWindowKey,
+  fetchSubtitleCueWindow,
+  SUBTITLE_WINDOW_AHEAD_MS,
+  SUBTITLE_WINDOW_BEHIND_MS,
+  SubtitleCueWindowCache,
+  type SubtitleSource,
+  type SubtitleTrack,
+} from "@files/presentation/hooks/use-subtitle-tracks";
 
 /**
  * The subtitle text, drawn over the picture.
@@ -29,18 +39,33 @@ import {
  *    mistake.
  *  - **`pointer-events: none`.** The overlay sits above the video, and the video's click target is
  *    play/pause. A transparent box that swallowed that would be a bug nobody could describe.
+ *
+ * **Segmented delivery.** A whole-file track is fed to the browser as a `<track src>` and read from
+ * the element's `activeCues`. A *segmented* track — anything past the whole-file cue cap — would
+ * make the browser request a body the server refuses with 413, so it is never given a `<track>` at
+ * all. Instead the cues for a sliding window around the playhead are fetched here, paged and cached,
+ * and the same drawn text is fed by the window's active cue. The whole-file path and this path share
+ * exactly one render function, so they cannot drift apart.
  */
 
 export type SubtitleOverlayProps = {
-  /** The element whose text tracks are read. */
+  /** The element whose text tracks are read (whole-file tracks only). */
   videoRef: React.RefObject<HTMLVideoElement | null>;
   /**
    * `id` of the `<track>` to display, or `null` for off.
    *
    * Every other track is set to `disabled` so no second set of cues can arrive, and so the browser
-   * stops fetching tracks nobody is watching.
+   * stops fetching tracks nobody is watching. Ignored for segmented active tracks, which have no
+   * `<track>` element to switch.
    */
   activeTrackId: string | null;
+  /**
+   * The track object for the active track, when known. `deliveryMode: "segmented"` sends the
+   * overlay down the fetch-a-window path instead of reading a `<track>`.
+   */
+  activeTrack?: SubtitleTrack | null;
+  /** Where to read cue windows from, when the active track is segmented. */
+  subtitleSource?: SubtitleSource | null;
   /** Language of the active track, for `dir` and `lang`. */
   language: string | null;
   prefs: SubtitlePrefs;
@@ -54,9 +79,25 @@ const BACKDROP_CLASS = {
   solid: "bg-black/80",
 } as const;
 
+/** The cues in `window` that are on screen at `atMs`, flattened to lines. */
+function linesFor(cues: SubtitleCue[], atMs: number): string {
+  const index = activeCueIndex(cues, atMs);
+  if (index < 0) return "";
+  const lines: string[] = [];
+  for (let i = index; i < cues.length; i += 1) {
+    const cue = cues[i];
+    // `activeCueIndex` returns the first cue the time is inside; walk forward while still inside.
+    if (atMs < cue.startMs || atMs >= cue.endMs) break;
+    if (cue.text.length > 0) lines.push(cue.text);
+  }
+  return lines.join("\n");
+}
+
 export function SubtitleOverlay({
   videoRef,
   activeTrackId,
+  activeTrack,
+  subtitleSource,
   language,
   prefs,
 }: SubtitleOverlayProps) {
@@ -64,17 +105,36 @@ export function SubtitleOverlay({
   const [text, setText] = useState("");
   const [fontSize, setFontSize] = useState(0);
 
+  const segmented =
+    activeTrack?.deliveryMode === "segmented" && Boolean(subtitleSource);
+
   /**
-   * Follow the active track's cues.
+   * Segmented cues: the window around the playhead, fetched and paged lazily.
    *
-   * Re-runs when the chosen track changes, which is also what switches every other track off. The
-   * first read is deferred to an animation frame rather than done in the effect body: setting
-   * `mode` is what makes the browser parse the file, so there is nothing to read yet, and a
-   * synchronous state write here is what the React Compiler rules forbid anyway.
+   * One controller per active segmented track; seeking aborts the in-flight fetch so a jump does not
+   * show stale cues from before the jump. The cache holds a few windows keyed by (track, revision,
+   * startMs), so scrubbing back reuses the earlier fetch instead of re-requesting.
    */
+  const cacheRef = useRef<SubtitleCueWindowCache | null>(null);
+  if (cacheRef.current === null) cacheRef.current = new SubtitleCueWindowCache();
+
+  const windowState = useSegmentedCues(
+    segmented ? activeTrack : null,
+    subtitleSource ?? null,
+    videoRef,
+    cacheRef.current
+  );
+
+  // The whole-file path reads from the element's parsed `<track>`.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || segmented) {
+      if (segmented) return;
+      // No segmented track active: the segmented path owns no cues and the whole-file path
+      // has none to read, so whatever was on screen is stale the moment either switches.
+      const clear = requestAnimationFrame(() => setText(""));
+      return () => cancelAnimationFrame(clear);
+    }
 
     const tracks = video.textTracks;
     let active: TextTrack | null = null;
@@ -111,7 +171,13 @@ export function SubtitleOverlay({
       cancelAnimationFrame(frame);
       active?.removeEventListener("cuechange", read);
     };
-  }, [videoRef, activeTrackId]);
+  }, [videoRef, activeTrackId, segmented]);
+
+  // Feed whichever path is active into `text`.
+  useEffect(() => {
+    if (!segmented) return;
+    setText((previous) => (previous === windowState.text ? previous : windowState.text));
+  }, [segmented, windowState.text]);
 
   /** Scale with the picture, so fullscreen does not leave the text at preview size. */
   useEffect(() => {
@@ -169,4 +235,91 @@ export function SubtitleOverlay({
       </p>
     </div>
   );
+}
+
+/**
+ * Drive an overlay from cue-window fetches around the playhead.
+ *
+ * Returns the flattened text for the cue currently on screen. The window is `BEHIND … AHEAD` around
+ * the playhead where it was built; while the playhead stays inside it, time is served from the
+ * fetched cues with no request at all. Once it leaves, a new window is fetched (paged to completion)
+ * — from cache if that window was held before — and an in-flight fetch is aborted so a seek never
+ * lands stale cues. `atMs` is sampled on `timeupdate` plus `seeked`, which covers a paused seek.
+ *
+ * The held window lives in a ref, not state: the only reader is the next `pull`, which runs from a
+ * listener attached once per track and must see the latest cues, not the ones this closure was
+ * created with.
+ */
+function useSegmentedCues(
+  track: SubtitleTrack | null,
+  source: SubtitleSource | null,
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  cache: SubtitleCueWindowCache
+) {
+  const [text, setText] = useState("");
+  const heldRef = useRef<{ builtAtMs: number; cues: SubtitleCue[] } | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    heldRef.current = null;
+    setText("");
+    if (!track || !source) return;
+
+    const pull = () => {
+      const video = videoRef.current;
+      if (!video) return;
+      const atMs = Math.round(video.currentTime * 1000);
+      const held = heldRef.current;
+      // An empty window is still held: a stretch of film with no dialogue must not refetch
+      // on every tick, and `linesFor` already returns "" for a window with no active cue.
+      if (
+        held &&
+        atMs >= held.builtAtMs - SUBTITLE_WINDOW_BEHIND_MS &&
+        atMs <= held.builtAtMs + SUBTITLE_WINDOW_AHEAD_MS
+      ) {
+        setText(linesFor(held.cues, atMs));
+        return;
+      }
+      controllerRef.current?.abort();
+      const next = new AbortController();
+      controllerRef.current = next;
+      const signal = next.signal;
+      const startMs = Math.max(0, atMs - SUBTITLE_WINDOW_BEHIND_MS);
+      const endMs = atMs + SUBTITLE_WINDOW_AHEAD_MS;
+      const key = cueWindowKey(track, startMs);
+      const done = (cues: SubtitleCue[]) => {
+        if (signal.aborted) return;
+        cache.set(key, cues);
+        heldRef.current = { builtAtMs: atMs, cues };
+        // The playhead can drift past the boundary that triggered this fetch while it is in
+        // flight; drawing at the *current* time keeps a late window correct, and a playhead that
+        // left the window entirely simply makes the next `timeupdate` refetch.
+        const nowMs = Math.round((videoRef.current?.currentTime ?? atMs) * 1000);
+        setText(linesFor(cues, nowMs));
+      };
+      const cached = cache.get(key);
+      if (cached) {
+        done(cached);
+      } else {
+        void fetchSubtitleCueWindow(source, track, startMs, endMs, signal)
+          .then(done)
+          .catch(() => {
+            /* aborted on seek or superseded window; the next `timeupdate` retries. */
+          });
+      }
+    };
+
+    pull();
+    const video = videoRef.current;
+    video?.addEventListener("timeupdate", pull);
+    // A paused seek (e.g. clicking the scrubber without playing) still moves the playhead.
+    video?.addEventListener("seeked", pull);
+    return () => {
+      video?.removeEventListener("timeupdate", pull);
+      video?.removeEventListener("seeked", pull);
+      controllerRef.current?.abort();
+    };
+  }, [track, source, cache, videoRef]);
+
+  return { text };
 }

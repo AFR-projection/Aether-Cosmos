@@ -318,7 +318,7 @@ export function GraphControls({
             <button
               type="button"
               onClick={() => onQueryChange("")}
-              className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+              className="rounded-md px-1.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
             >
               {t("brain.graph.clear")}
             </button>
@@ -357,7 +357,7 @@ export function GraphControls({
             <button
               type="button"
               onClick={onRestoreHidden}
-              className="shrink-0 text-[11px] font-medium text-accent-ink transition-colors hover:text-foreground"
+              className="shrink-0 rounded-md px-1.5 py-1.5 text-[11px] font-medium text-accent-ink transition-colors hover:text-foreground"
             >
               {t("brain.graph.restore")}
             </button>
@@ -406,7 +406,7 @@ export function GraphControls({
                   showContextEdges: true,
                 })
               }
-              className="shrink-0 font-medium underline decoration-warning/40 underline-offset-2 transition-colors hover:text-foreground"
+              className="shrink-0 rounded-md px-1 py-1 font-medium underline decoration-warning/40 underline-offset-2 transition-colors hover:text-foreground"
             >
               {t("brain.graph.showAll")}
             </button>
@@ -437,7 +437,11 @@ export function GraphControls({
           <ul className="space-y-2">
             {groups.map((rule, index) => (
               <li key={rule.id} className="flex items-center gap-2">
-                <label className="relative h-6 w-6 shrink-0 cursor-pointer overflow-hidden rounded-full border border-border/60">
+                {/* The swatch is a 24px circle, but the hit area reaches 40px via
+                    the label's ::after — a fingertip lands on the ring, not just
+                    the dot. overflow-hidden is gone because it clipped the hit
+                    area down with it. */}
+                <label className="relative h-6 w-6 shrink-0 cursor-pointer rounded-full border border-border/60 after:absolute after:-inset-2 after:rounded-full after:content-['']">
                   <span className="sr-only">
                     {t("brain.graph.groupColour", { index: index + 1 })}
                   </span>
@@ -451,7 +455,7 @@ export function GraphControls({
                         )
                       )
                     }
-                    className="absolute -inset-2 h-10 w-10 cursor-pointer border-0 bg-transparent p-0"
+                    className="absolute inset-0 h-6 w-6 cursor-pointer appearance-none rounded-full border-0 bg-transparent p-0"
                   />
                 </label>
                 <Input
@@ -467,7 +471,7 @@ export function GraphControls({
                   aria-label={t("brain.graph.groupQuery", { index: index + 1 })}
                   className="h-8 flex-1 text-xs"
                 />
-                <span className="w-8 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+                <span className="w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
                   {formatNumber(resolved.counts[index] ?? 0)}
                 </span>
                 <button
@@ -496,7 +500,7 @@ export function GraphControls({
           <button
             type="button"
             onClick={() => onForceChange(DEFAULT_FORCE_SETTINGS)}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
           >
             <RotateCcw className="h-3 w-3" aria-hidden="true" />
             {t("brain.graph.reset")}
@@ -556,7 +560,7 @@ export function GraphControls({
           <button
             type="button"
             onClick={() => onDisplayChange(DEFAULT_DISPLAY_SETTINGS)}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
           >
             <RotateCcw className="h-3 w-3" aria-hidden="true" />
             {t("brain.graph.reset")}

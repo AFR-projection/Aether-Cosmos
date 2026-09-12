@@ -611,23 +611,28 @@ export function VideoViewer({
           onError={handleMediaError}
         >
           {/*
-            One `<track>` per ready track, and the overlay decides which is showing. `default` is
-            deliberately absent: the browser would then draw its own captions under its own black
-            box, which is the rendering `SubtitleOverlay` exists to replace.
+            One `<track>` per ready, whole-file track, and the overlay decides which is showing.
+            `default` is deliberately absent: the browser would then draw its own captions under its
+            own black box, which is the rendering `SubtitleOverlay` exists to replace.
 
             `key` includes the cue count so a track re-fetches after an edit — the element caches
             the parsed file, and a saved correction would otherwise keep playing the old text.
+
+            Segmented tracks are excluded: their whole-file body is refused with 413, so they have no
+            `<track>` and are driven by `SubtitleOverlay` fetching cue windows around the playhead.
           */}
-          {selection.ready.map((track) => (
-            <track
-              key={`${track.id}-${track.cueCount}`}
-              id={track.id}
-              kind="subtitles"
-              src={subtitles.vttUrl(track.id)}
-              srcLang={track.language}
-              label={subtitleLanguageLabel(track.language)}
-            />
-          ))}
+          {selection.ready
+            .filter((track) => track.deliveryMode !== "segmented")
+            .map((track) => (
+              <track
+                key={`${track.id}-${track.cueCount}`}
+                id={track.id}
+                kind="subtitles"
+                src={subtitles.vttUrl(track.id)}
+                srcLang={track.language}
+                label={subtitleLanguageLabel(track.language)}
+              />
+            ))}
         </video>
       </div>
 
@@ -635,6 +640,8 @@ export function VideoViewer({
         <SubtitleOverlay
           videoRef={videoRef}
           activeTrackId={selection.activeTrackId}
+          activeTrack={selection.activeTrack}
+          subtitleSource={subtitleSource}
           language={selection.activeTrack?.language ?? null}
           prefs={selection.prefs}
         />

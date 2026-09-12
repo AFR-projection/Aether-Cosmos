@@ -30,6 +30,25 @@ const CACHE_TTL_MS = 30_000;
 
 type SubtitleDb = PostgresJsDatabase<typeof schema>;
 
+export type SubtitleProviderPolicy = {
+  timeoutMs?: number;
+  concurrency?: number;
+  ratePerMinute?: number;
+  burst?: number;
+};
+
+/** Schema-neutral profile shape for orchestration while profile tables remain optional. */
+export type ResolvedSubtitleProviderProfile = SubtitleProviderPolicy & {
+  id: string;
+  capability: "asr" | "translation";
+  role: "primary" | "fallback";
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string | null;
+  local?: boolean;
+};
+
 /** Fully resolved config, keys decrypted. Server-side only — never serialise this. */
 export type SubtitleConfig = {
   provider: string;
@@ -155,6 +174,32 @@ export function subtitleCapability(config: SubtitleConfig): {
 } {
   const canTranscribe = config.enabled && Boolean(config.apiKey);
   return { canTranscribe, canTranslate: canTranscribe && Boolean(config.translateApiKey) };
+}
+
+/** Map legacy single-row settings into primary profiles without exposing or importing schema rows. */
+export function legacySubtitleProviderProfiles(
+  config: SubtitleConfig
+): ResolvedSubtitleProviderProfile[] {
+  return [
+    {
+      id: "legacy-asr-primary",
+      capability: "asr",
+      role: "primary",
+      provider: config.provider,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      apiKey: config.apiKey,
+    },
+    {
+      id: "legacy-translation-primary",
+      capability: "translation",
+      role: "primary",
+      provider: "openai-compatible",
+      baseUrl: config.translateBaseUrl,
+      model: config.translateModel,
+      apiKey: config.translateApiKey,
+    },
+  ];
 }
 
 export type SubtitleConfigUpdate = {

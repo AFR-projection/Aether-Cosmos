@@ -94,7 +94,9 @@ export function GraphDetail({
   return (
     <aside
       aria-label={t("brain.graph.selectedNode")}
-      className="pointer-events-auto w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-border/60 bg-surface/95 shadow-lg backdrop-blur"
+      // Measured against the canvas column, not the viewport: 100vw ignored the
+      // app-shell padding and clipped the close button off-screen at 320px.
+      className="pointer-events-auto w-72 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-2xl border border-border/60 bg-surface/95 shadow-lg backdrop-blur"
     >
       <header className="flex items-start gap-2 border-b border-border/40 px-3 py-2.5">
         <span

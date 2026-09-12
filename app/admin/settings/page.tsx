@@ -463,11 +463,13 @@ function TagsInput({
         <div className="flex flex-wrap gap-1.5">
           {value.map((tag) => (
             <span key={tag} className="adm-chip adm-chip--mono" data-tone="accent">
-              {tag}
+              {/* MIME types are single unbreakable tokens; the label box
+                  ellipsizes while the remove button stays whole. */}
+              <span className="adm-chip__label">{tag}</span>
               <button
                 type="button"
                 onClick={() => onChange(value.filter((t) => t !== tag))}
-                className="-mr-0.5 ml-0.5 opacity-60 transition-opacity hover:opacity-100"
+                className="-mr-0.5 ml-0.5 shrink-0 opacity-60 transition-opacity hover:opacity-100"
                 aria-label={t("admin.settings.tagRemove", { tag })}
               >
                 <X className="h-3 w-3" aria-hidden="true" />
@@ -548,7 +550,9 @@ function SettingsField({
               max={field.max}
               step={field.step}
               onChange={(e) => onChange(Number(e.target.value))}
-              className={cn("h-9 text-sm", field.unit && "pr-16")}
+              {/* pr-24: the unit suffix is translated ("surel/hari" runs wider
+                  than "emails/day") and pr-16 let it overlap typed digits. */}
+              className={cn("h-9 text-sm", field.unit && "pr-24")}
             />
             {field.unit && (
               <span className="adm-sub absolute right-3 top-1/2 -translate-y-1/2">{field.unit}</span>

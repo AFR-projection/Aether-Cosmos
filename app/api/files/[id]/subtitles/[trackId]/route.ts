@@ -11,8 +11,12 @@ import { cuesToVtt } from "@files/domain/services/subtitles/vtt";
 import {
   deleteTrack,
   getTrackForFile,
+  getWholeVttSize,
   listCues,
-  replaceCues,
+  replaceCuesAtRevision,
+  wholeVttRequiresSegmentation,
+  WHOLE_VTT_MAX_CUES,
+  WHOLE_VTT_MAX_ESTIMATED_BYTES,
 } from "@files/infrastructure/subtitles/tracks";
 import { vttResponse } from "@files/application/subtitles/vtt-response";
 
@@ -30,13 +34,20 @@ import { vttResponse } from "@files/application/subtitles/vtt-response";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const cueSchema = z.object({
-  startMs: z.number().int().min(0).max(24 * 60 * 60 * 1000),
-  endMs: z.number().int().min(0).max(24 * 60 * 60 * 1000),
-  text: z.string().max(2_000),
-});
+const cueSchema = z
+  .object({
+    startMs: z.number().nonnegative().safe(),
+    endMs: z.number().nonnegative().safe(),
+    text: z.string().max(2_000),
+  })
+  .refine((cue) => cue.endMs > cue.startMs, {
+    message: "endMs must be greater than startMs",
+    path: ["endMs"],
+  });
 
 const patchSchema = z.object({
+  /** Optimistic lock read from this track's cue/track response. */
+  expectedRevision: z.number().int().positive().safe(),
   /**
    * The track's lines, in order. `idx` is not accepted from the client: `normalizeCues` assigns
    * it, so a request cannot produce a track with a gap or a repeat in its numbering.
@@ -67,7 +78,19 @@ export async function GET(
       });
     }
 
-    return vttResponse(cuesToVtt(await listCues(trackId)), {
+    const wholeSize = await getWholeVttSize(trackId);
+    if (wholeVttRequiresSegmentation(wholeSize)) {
+      return apiError("This subtitle track must be read in cue windows", 413, {
+        code: "SEGMENTED_SUBTITLE_REQUIRED",
+        cueCount: wholeSize.cueCount,
+        estimatedBytes: wholeSize.estimatedBytes,
+        maxCues: WHOLE_VTT_MAX_CUES,
+        maxEstimatedBytes: WHOLE_VTT_MAX_ESTIMATED_BYTES,
+        cuesUrl: `/api/files/${id}/subtitles/${trackId}/cues`,
+      });
+    }
+
+    const response = vttResponse(cuesToVtt(await listCues(trackId)), {
       language: track.language,
       // `?download` turns the same body into a file the user keeps. This is the escape hatch for
       // the one thing an account backup cannot carry — see EXCLUDED_ACCOUNT_TABLES.
@@ -75,6 +98,8 @@ export async function GET(
         ? `${accessible.file.name}.${track.language}.vtt`
         : null,
     });
+    response.headers.set("X-Subtitle-Revision", String(track.revision));
+    return response;
   } catch (error) {
     return handleApiError(error);
   }
@@ -110,16 +135,29 @@ export async function PATCH(
     // contiguous numbering. A hand edit gets the same treatment as a generated one, so a line
     // typed longer than its slot is given the time it needs instead of flashing past.
     const cues = normalizeCues(body.cues.map((cue, idx) => ({ idx, ...cue })));
-    await replaceCues(trackId, cues);
+    const replaced = await replaceCuesAtRevision(trackId, body.expectedRevision, cues);
+    if (!replaced.ok) {
+      if (replaced.reason === "missing") return apiError("Subtitle track not found", 404);
+      return apiError("These subtitles changed since you opened them", 409, {
+        code: "SUBTITLE_REVISION_CONFLICT",
+        expectedRevision: body.expectedRevision,
+        currentRevision: track.revision,
+      });
+    }
 
     await logActivity(sessionUser, "edit", {
       resourceType: "file",
       resourceId: id,
-      metadata: { action: "edit_subtitles", trackId, cues: cues.length },
+      metadata: {
+        action: "edit_subtitles",
+        trackId,
+        cues: cues.length,
+        revision: replaced.revision,
+      },
       ip,
     });
 
-    return apiSuccess({ cueCount: cues.length, cues });
+    return apiSuccess({ cueCount: cues.length, cues, revision: replaced.revision });
   } catch (error) {
     return handleApiError(error);
   }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 import {
   Boxes,
   Brain as BrainIcon,
@@ -55,6 +56,17 @@ export function BrainShell({
   const pathname = usePathname();
   const { brain, brains, select } = useActiveBrain();
   const t = useT();
+  const navRef = useRef<HTMLElement | null>(null);
+
+  // The tab strip scrolls invisibly (no-scrollbar) on phones, so the current
+  // tab can sit entirely off-screen — e.g. /brain/settings at 320px shows only
+  // the first two tabs. Centre it on every route change so "you are here" is
+  // always visible; scrollIntoView with "nearest" is a no-op when it fits.
+  useEffect(() => {
+    navRef.current
+      ?.querySelector('[aria-current="page"]')
+      ?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [pathname]);
 
   return (
     <div className="brain-page mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
@@ -75,6 +87,7 @@ export function BrainShell({
         </div>
 
         <nav
+          ref={navRef}
           aria-label={t("brain.nav.label")}
           className="-mx-1 overflow-x-auto no-scrollbar"
         >

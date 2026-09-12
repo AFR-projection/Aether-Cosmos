@@ -860,6 +860,109 @@ export const subtitleStatusEnum = pgEnum("subtitle_status", [
   "failed",
 ]);
 
+export const subtitleTrackStateEnum = pgEnum("subtitle_track_state", [
+  "candidate",
+  "current",
+  "superseded",
+]);
+export const subtitlePipelineRunStatusEnum = pgEnum("subtitle_pipeline_run_status", [
+  "queued",
+  "running",
+  "blocked",
+  "unsupported",
+  "completed",
+  "failed",
+  "cancelled",
+  "stale",
+]);
+export const subtitlePipelineStageEnum = pgEnum("subtitle_pipeline_stage", [
+  "ensure",
+  "planning",
+  "preparing",
+  "transcribing",
+  "materializing_source",
+  "translating",
+  "publishing",
+  "cleanup",
+  "completed",
+]);
+export const subtitlePipelineTargetKindEnum = pgEnum("subtitle_pipeline_target_kind", [
+  "automatic",
+  "manual",
+]);
+export const subtitlePipelineTargetStatusEnum = pgEnum("subtitle_pipeline_target_status", [
+  "pending",
+  "queued",
+  "processing",
+  "satisfied",
+  "ready",
+  "blocked",
+  "failed",
+  "cancelled",
+  "skipped",
+  "stale",
+]);
+
+export const subtitleWorkItemKindEnum = pgEnum("subtitle_work_item_kind", [
+  "control",
+  "prepare",
+  "asr",
+  "translate",
+  "materialize",
+  "publish",
+  "cleanup",
+]);
+export const subtitleWorkItemStatusEnum = pgEnum("subtitle_work_item_status", [
+  "pending",
+  "leased",
+  "succeeded",
+  "retry",
+  "blocked",
+  "failed",
+  "cancelled",
+]);
+export const subtitleCuePartitionKindEnum = pgEnum("subtitle_cue_partition_kind", [
+  "source",
+  "translation",
+]);
+export const subtitlePartitionMaterializationStateEnum = pgEnum(
+  "subtitle_partition_materialization_state",
+  ["pending", "materialized", "failed", "expired"]
+);
+export const subtitleProviderCapabilityEnum = pgEnum("subtitle_provider_capability", [
+  "asr",
+  "translation",
+]);
+export const subtitleProviderRoleEnum = pgEnum("subtitle_provider_role", [
+  "primary",
+  "fallback",
+]);
+export const subtitleProviderHealthEnum = pgEnum("subtitle_provider_health", [
+  "unknown",
+  "healthy",
+  "degraded",
+  "unhealthy",
+]);
+export const subtitleProviderAttemptStatusEnum = pgEnum("subtitle_provider_attempt_status", [
+  "started",
+  "succeeded",
+  "retryable_failure",
+  "terminal_failure",
+  "ambiguous",
+]);
+export const subtitleReconciliationKindEnum = pgEnum("subtitle_reconciliation_kind", [
+  "library_backfill",
+  "locale_reconciliation",
+  "lease_repair",
+  "r2_cleanup",
+]);
+export const subtitleReconciliationStatusEnum = pgEnum("subtitle_reconciliation_status", [
+  "idle",
+  "running",
+  "blocked",
+  "failed",
+]);
+
 /**
  * Global (single-row) configuration for the subtitle providers.
  *
@@ -897,6 +1000,104 @@ export const subtitleSettings = pgTable("subtitle_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const subtitleProviderProfiles = pgTable(
+  "subtitle_provider_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    capability: subtitleProviderCapabilityEnum("capability").notNull(),
+    role: subtitleProviderRoleEnum("role").notNull(),
+    name: text("name").notNull(),
+    provider: text("provider").notNull(),
+    baseUrl: text("base_url").notNull(),
+    model: text("model").notNull(),
+    apiKeyEncrypted: text("api_key_encrypted"),
+    enabled: boolean("enabled").notNull().default(false),
+    timeoutMs: integer("timeout_ms").notNull().default(120000),
+    concurrencyLimit: integer("concurrency_limit").notNull().default(1),
+    rateLimit: integer("rate_limit").notNull().default(0),
+    burstLimit: integer("burst_limit").notNull().default(0),
+    circuitFailureThreshold: integer("circuit_failure_threshold").notNull().default(5),
+    circuitWindowSeconds: integer("circuit_window_seconds").notNull().default(120),
+    circuitCooldownSeconds: integer("circuit_cooldown_seconds").notNull().default(60),
+    circuitMaxCooldownSeconds: integer("circuit_max_cooldown_seconds").notNull().default(900),
+    circuitOpenUntil: timestamp("circuit_open_until", { withTimezone: true }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    health: subtitleProviderHealthEnum("health").notNull().default("unknown"),
+    lastHealthAt: timestamp("last_health_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subtitle_provider_profiles_capability_role_unique").on(
+      table.capability,
+      table.role
+    ),
+    index("subtitle_provider_profiles_health_idx").on(table.capability, table.health),
+    check("subtitle_provider_profiles_timeout_chk", sql`"timeout_ms" > 0`),
+    check(
+      "subtitle_provider_profiles_limits_chk",
+      sql`"concurrency_limit" > 0 AND "rate_limit" >= 0 AND "burst_limit" >= 0`
+    ),
+  ]
+);
+
+export const subtitlePipelineRuns = pgTable(
+  "subtitle_pipeline_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceVersion: integer("source_version").notNull(),
+    sourceR2Key: text("source_r2_key").notNull(),
+    sourceMimeType: text("source_mime_type").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    requestKey: text("request_key").notNull(),
+    localeSetHash: text("locale_set_hash").notNull(),
+    status: subtitlePipelineRunStatusEnum("status").notNull().default("queued"),
+    stage: subtitlePipelineStageEnum("stage").notNull().default("ensure"),
+    durationMs: bigint("duration_ms", { mode: "number" }),
+    plannerCursorMs: bigint("planner_cursor_ms", { mode: "number" }).notNull().default(0),
+    plannedThroughMs: bigint("planned_through_ms", { mode: "number" }).notNull().default(0),
+    totalWorkItems: bigint("total_work_items", { mode: "number" }).notNull().default(0),
+    completedWorkItems: bigint("completed_work_items", { mode: "number" }).notNull().default(0),
+    progress: integer("progress").notNull().default(0),
+    cancellationRequestedAt: timestamp("cancellation_requested_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    unsupportedCode: text("unsupported_code"),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subtitle_pipeline_runs_request_key_unique").on(table.requestKey),
+    uniqueIndex("subtitle_pipeline_runs_source_policy_unique").on(
+      table.fileId,
+      table.sourceVersion,
+      table.sourceR2Key,
+      table.sourceMimeType,
+      table.policyVersion,
+      table.localeSetHash
+    ),
+    index("subtitle_pipeline_runs_user_status_idx").on(table.userId, table.status, table.updatedAt),
+    index("subtitle_pipeline_runs_file_idx").on(table.fileId, table.sourceVersion),
+    check("subtitle_pipeline_runs_source_version_chk", sql`"source_version" > 0`),
+    check("subtitle_pipeline_runs_policy_version_chk", sql`"policy_version" > 0`),
+    check("subtitle_pipeline_runs_duration_chk", sql`"duration_ms" IS NULL OR "duration_ms" >= 0`),
+    check(
+      "subtitle_pipeline_runs_progress_chk",
+      sql`"progress" >= 0 AND "progress" <= 100 AND "completed_work_items" <= "total_work_items"`
+    ),
+  ]
+);
+
 /**
  * One subtitle track of one file.
  *
@@ -924,11 +1125,26 @@ export const subtitleTracks = pgTable(
       (): AnyPgColumn => subtitleTracks.id,
       { onDelete: "set null" }
     ),
+    pipelineRunId: uuid("pipeline_run_id").references(() => subtitlePipelineRuns.id, {
+      onDelete: "set null",
+    }),
+    sourceVersion: integer("source_version"),
+    sourceR2Key: text("source_r2_key"),
+    sourceMimeType: text("source_mime_type"),
+    /** Revision of the source track used to produce this translation. */
+    sourceTrackRevision: bigint("source_track_revision", { mode: "number" }),
+    revision: bigint("revision", { mode: "number" }).notNull().default(1),
+    trackState: subtitleTrackStateEnum("track_state").notNull().default("current"),
+    supersededById: uuid("superseded_by_id").references(
+      (): AnyPgColumn => subtitleTracks.id,
+      { onDelete: "set null" }
+    ),
+    userEditedAt: timestamp("user_edited_at", { withTimezone: true }),
     /** 0–100. Only meaningful while `status` is `queued` or `processing`. */
     progress: integer("progress").notNull().default(0),
-    cueCount: integer("cue_count").notNull().default(0),
+    cueCount: bigint("cue_count", { mode: "number" }).notNull().default(0),
     /** Audio length this track was billed for, so a retry does not bill twice. */
-    durationSeconds: integer("duration_seconds").notNull().default(0),
+    durationSeconds: bigint("duration_seconds", { mode: "number" }).notNull().default(0),
     /** What produced it, kept for audit and for "this was made by the old model". */
     provider: text("provider"),
     model: text("model"),
@@ -948,15 +1164,21 @@ export const subtitleTracks = pgTable(
      * `origin` is part of the key on purpose — a Japanese film may legitimately have both an
      * `asr` Japanese track and an `uploaded` Japanese one somebody attached.
      */
-    uniqueIndex("subtitle_tracks_unique").on(table.fileId, table.language, table.origin),
-    /**
-     * No separate index on `file_id` alone: it is the leading column of the unique above, which
-     * Postgres already uses for "every track of this file" — the read this table exists for. A
-     * prefix index would be dead weight the audit script flags.
-     */
+    uniqueIndex("subtitle_tracks_current_unique")
+      .on(table.fileId, table.language, table.origin)
+      .where(sql`track_state = 'current'`),
+    uniqueIndex("subtitle_tracks_run_unique")
+      .on(table.pipelineRunId, table.language, table.origin)
+      .where(sql`pipeline_run_id is not null`),
+    index("subtitle_tracks_file_state_idx").on(table.fileId, table.trackState, table.status),
     index("subtitle_tracks_status_idx").on(table.status),
     index("subtitle_tracks_created_by_idx").on(table.createdBy),
     index("subtitle_tracks_translated_from_idx").on(table.translatedFromId),
+    index("subtitle_tracks_pipeline_run_idx").on(table.pipelineRunId),
+    index("subtitle_tracks_superseded_by_idx").on(table.supersededById),
+    check("subtitle_tracks_revision_chk", sql`"revision" > 0`),
+    check("subtitle_tracks_source_revision_chk", sql`"source_track_revision" IS NULL OR "source_track_revision" > 0`),
+    check("subtitle_tracks_counts_chk", sql`"cue_count" >= 0 AND "duration_seconds" >= 0`),
   ]
 );
 
@@ -975,15 +1197,279 @@ export const subtitleCues = pgTable(
     trackId: uuid("track_id")
       .notNull()
       .references(() => subtitleTracks.id, { onDelete: "cascade" }),
-    /** Position in the track, zero-based and contiguous. Never the source file's own numbering. */
-    idx: integer("idx").notNull(),
-    startMs: integer("start_ms").notNull(),
-    endMs: integer("end_ms").notNull(),
+    /** Stable sequence in the track, zero-based and contiguous. */
+    idx: bigint("idx", { mode: "number" }).notNull(),
+    startMs: bigint("start_ms", { mode: "number" }).notNull(),
+    endMs: bigint("end_ms", { mode: "number" }).notNull(),
     text: text("text").notNull(),
   },
   (table) => [
     uniqueIndex("subtitle_cues_unique").on(table.trackId, table.idx),
-    index("subtitle_cues_track_time_idx").on(table.trackId, table.startMs),
+    index("subtitle_cues_track_time_idx").on(
+      table.trackId,
+      table.startMs,
+      table.endMs,
+      table.idx,
+      table.id
+    ),
+    check("subtitle_cues_time_chk", sql`"start_ms" >= 0 AND "end_ms" >= "start_ms"`),
+  ]
+);
+
+export const subtitlePipelineTargets = pgTable(
+  "subtitle_pipeline_targets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => subtitlePipelineRuns.id, { onDelete: "cascade" }),
+    language: text("language").notNull(),
+    kind: subtitlePipelineTargetKindEnum("kind").notNull(),
+    status: subtitlePipelineTargetStatusEnum("status").notNull().default("pending"),
+    sourceTrackId: uuid("source_track_id").references(() => subtitleTracks.id, {
+      onDelete: "set null",
+    }),
+    sourceRevision: bigint("source_revision", { mode: "number" }),
+    candidateTrackId: uuid("candidate_track_id").references(() => subtitleTracks.id, {
+      onDelete: "set null",
+    }),
+    progress: integer("progress").notNull().default(0),
+    terminalCode: text("terminal_code"),
+    terminalMessage: text("terminal_message"),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subtitle_pipeline_targets_run_language_unique").on(table.runId, table.language),
+    index("subtitle_pipeline_targets_status_idx").on(table.status, table.updatedAt),
+    index("subtitle_pipeline_targets_source_track_idx").on(table.sourceTrackId),
+    index("subtitle_pipeline_targets_candidate_track_idx").on(table.candidateTrackId),
+    check("subtitle_pipeline_targets_progress_chk", sql`"progress" >= 0 AND "progress" <= 100`),
+    check("subtitle_pipeline_targets_source_revision_chk", sql`"source_revision" IS NULL OR "source_revision" > 0`),
+  ]
+);
+
+export const subtitlePipelineWorkItems = pgTable(
+  "subtitle_pipeline_work_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => subtitlePipelineRuns.id, { onDelete: "cascade" }),
+    targetId: uuid("target_id").references(() => subtitlePipelineTargets.id, {
+      onDelete: "cascade",
+    }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: subtitleWorkItemKindEnum("kind").notNull(),
+    status: subtitleWorkItemStatusEnum("status").notNull().default("pending"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    ordinal: bigint("ordinal", { mode: "number" }),
+    cursorStartMs: bigint("cursor_start_ms", { mode: "number" }),
+    cursorEndMs: bigint("cursor_end_ms", { mode: "number" }),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(8),
+    deliverySequence: bigint("delivery_sequence", { mode: "number" }).notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fencingToken: bigint("fencing_token", { mode: "number" }).notNull().default(0),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    outputCheckpoint: jsonb("output_checkpoint").$type<Record<string, unknown>>(),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subtitle_pipeline_work_items_idempotency_unique").on(table.idempotencyKey),
+    index("subtitle_pipeline_work_items_due_idx")
+      .on(table.status, table.availableAt, table.userId, table.createdAt)
+      .where(sql`status IN ('pending', 'retry')`),
+    index("subtitle_pipeline_work_items_lease_idx")
+      .on(table.leaseExpiresAt)
+      .where(sql`status = 'leased'`),
+    index("subtitle_pipeline_work_items_run_idx").on(table.runId, table.kind, table.status),
+    index("subtitle_pipeline_work_items_target_idx").on(table.targetId),
+    index("subtitle_pipeline_work_items_user_idx").on(table.userId, table.status),
+    check(
+      "subtitle_pipeline_work_items_attempt_chk",
+      sql`"attempt_count" >= 0 AND "max_attempts" > 0 AND "attempt_count" <= "max_attempts"`
+    ),
+    check(
+      "subtitle_pipeline_work_items_cursor_chk",
+      sql`("cursor_start_ms" IS NULL AND "cursor_end_ms" IS NULL) OR ("cursor_start_ms" >= 0 AND "cursor_end_ms" > "cursor_start_ms")`
+    ),
+  ]
+);
+
+export const subtitleAudioChunks = pgTable(
+  "subtitle_audio_chunks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => subtitlePipelineRuns.id, { onDelete: "cascade" }),
+    workItemId: uuid("work_item_id").references(() => subtitlePipelineWorkItems.id, {
+      onDelete: "set null",
+    }),
+    ordinal: bigint("ordinal", { mode: "number" }).notNull(),
+    startMs: bigint("start_ms", { mode: "number" }).notNull(),
+    endMs: bigint("end_ms", { mode: "number" }).notNull(),
+    overlapBeforeMs: bigint("overlap_before_ms", { mode: "number" }).notNull().default(0),
+    overlapAfterMs: bigint("overlap_after_ms", { mode: "number" }).notNull().default(0),
+    objectKey: text("object_key").notNull(),
+    checksumSha256: text("checksum_sha256").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    format: text("format").notNull(),
+    providerResultKey: text("provider_result_key"),
+    providerResultChecksum: text("provider_result_checksum"),
+    detectedLanguage: text("detected_language"),
+    languageEvidence: jsonb("language_evidence").$type<Record<string, unknown>>(),
+    asrCompletedAt: timestamp("asr_completed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subtitle_audio_chunks_run_ordinal_unique").on(table.runId, table.ordinal),
+    uniqueIndex("subtitle_audio_chunks_object_key_unique").on(table.objectKey),
+    index("subtitle_audio_chunks_work_item_idx").on(table.workItemId),
+    index("subtitle_audio_chunks_expiry_idx").on(table.expiresAt),
+    check("subtitle_audio_chunks_range_chk", sql`"start_ms" >= 0 AND "end_ms" > "start_ms"`),
+    check(
+      "subtitle_audio_chunks_size_overlap_chk",
+      sql`"size_bytes" > 0 AND "overlap_before_ms" >= 0 AND "overlap_after_ms" >= 0`
+    ),
+  ]
+);
+
+export const subtitleCuePartitions = pgTable(
+  "subtitle_cue_partitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => subtitlePipelineRuns.id, { onDelete: "cascade" }),
+    targetId: uuid("target_id").references(() => subtitlePipelineTargets.id, {
+      onDelete: "cascade",
+    }),
+    trackId: uuid("track_id").references(() => subtitleTracks.id, { onDelete: "set null" }),
+    kind: subtitleCuePartitionKindEnum("kind").notNull(),
+    ordinal: bigint("ordinal", { mode: "number" }).notNull(),
+    startMs: bigint("start_ms", { mode: "number" }).notNull(),
+    endMs: bigint("end_ms", { mode: "number" }).notNull(),
+    firstCueSequence: bigint("first_cue_sequence", { mode: "number" }),
+    lastCueSequence: bigint("last_cue_sequence", { mode: "number" }),
+    cueCount: bigint("cue_count", { mode: "number" }).notNull().default(0),
+    inputHash: text("input_hash").notNull(),
+    objectKey: text("object_key").notNull(),
+    checksumSha256: text("checksum_sha256").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    materializationState: subtitlePartitionMaterializationStateEnum("materialization_state")
+      .notNull()
+      .default("pending"),
+    materializedAt: timestamp("materialized_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subtitle_cue_partitions_identity_unique").on(
+      table.runId,
+      table.targetId,
+      table.kind,
+      table.ordinal,
+      table.inputHash
+    ),
+    uniqueIndex("subtitle_cue_partitions_object_key_unique").on(table.objectKey),
+    index("subtitle_cue_partitions_materialize_idx").on(
+      table.runId,
+      table.targetId,
+      table.materializationState,
+      table.ordinal
+    ),
+    index("subtitle_cue_partitions_track_idx").on(table.trackId),
+    index("subtitle_cue_partitions_expiry_idx").on(table.expiresAt),
+    check("subtitle_cue_partitions_range_chk", sql`"start_ms" >= 0 AND "end_ms" >= "start_ms"`),
+    check("subtitle_cue_partitions_schema_chk", sql`"schema_version" > 0 AND "cue_count" >= 0`),
+    check(
+      "subtitle_cue_partitions_sequence_chk",
+      sql`("first_cue_sequence" IS NULL AND "last_cue_sequence" IS NULL) OR ("first_cue_sequence" >= 0 AND "last_cue_sequence" >= "first_cue_sequence")`
+    ),
+  ]
+);
+
+export const subtitleProviderAttempts = pgTable(
+  "subtitle_provider_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workItemId: uuid("work_item_id")
+      .notNull()
+      .references(() => subtitlePipelineWorkItems.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => subtitleProviderProfiles.id, { onDelete: "restrict" }),
+    requestKey: text("request_key").notNull(),
+    attemptNumber: integer("attempt_number").notNull(),
+    status: subtitleProviderAttemptStatusEnum("status").notNull().default("started"),
+    usedFallback: boolean("used_fallback").notNull().default(false),
+    httpStatus: integer("http_status"),
+    latencyMs: bigint("latency_ms", { mode: "number" }),
+    retryAfterMs: bigint("retry_after_ms", { mode: "number" }),
+    inputUnits: bigint("input_units", { mode: "number" }),
+    outputUnits: bigint("output_units", { mode: "number" }),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("subtitle_provider_attempts_request_unique").on(
+      table.requestKey,
+      table.attemptNumber
+    ),
+    index("subtitle_provider_attempts_work_item_idx").on(table.workItemId, table.attemptNumber),
+    index("subtitle_provider_attempts_profile_time_idx").on(table.profileId, table.startedAt),
+    index("subtitle_provider_attempts_status_idx").on(table.status, table.startedAt),
+    check("subtitle_provider_attempts_number_chk", sql`"attempt_number" > 0`),
+    check(
+      "subtitle_provider_attempts_metrics_chk",
+      sql`("latency_ms" IS NULL OR "latency_ms" >= 0) AND ("retry_after_ms" IS NULL OR "retry_after_ms" >= 0) AND ("input_units" IS NULL OR "input_units" >= 0) AND ("output_units" IS NULL OR "output_units" >= 0)`
+    ),
+  ]
+);
+
+export const subtitleReconciliationState = pgTable(
+  "subtitle_reconciliation_state",
+  {
+    kind: subtitleReconciliationKindEnum("kind").primaryKey(),
+    status: subtitleReconciliationStatusEnum("status").notNull().default("idle"),
+    cursorCreatedAt: timestamp("cursor_created_at", { withTimezone: true }),
+    cursorId: uuid("cursor_id"),
+    cursorData: jsonb("cursor_data").$type<Record<string, unknown>>(),
+    scannedCount: bigint("scanned_count", { mode: "number" }).notNull().default(0),
+    processedCount: bigint("processed_count", { mode: "number" }).notNull().default(0),
+    failedCount: bigint("failed_count", { mode: "number" }).notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fencingToken: bigint("fencing_token", { mode: "number" }).notNull().default(0),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    lastCompletedAt: timestamp("last_completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("subtitle_reconciliation_state_due_idx").on(table.status, table.updatedAt),
+    index("subtitle_reconciliation_state_lease_idx").on(table.leaseExpiresAt),
+    check(
+      "subtitle_reconciliation_state_counts_chk",
+      sql`"scanned_count" >= 0 AND "processed_count" >= 0 AND "failed_count" >= 0`
+    ),
   ]
 );
 

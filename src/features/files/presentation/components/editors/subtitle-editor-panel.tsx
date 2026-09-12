@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, Plus, Scissors, Trash2, Undo2, ArrowDownUp, Play } from "lucide-react";
+import { Check, Plus, Scissors, Trash2, Undo2, ArrowDownUp, Play } from "lucide-react";
 import { Button } from "@/ui/primitives/button";
 import { Spinner } from "@/ui/feedback/spinner";
 import { apiFetch } from "@/shared/api/client";
@@ -9,7 +9,11 @@ import { cn } from "@/shared/lib/utils";
 import { useT } from "@/shared/lib/i18n";
 import { notify } from "@/shared/lib/system/notify-store";
 import { activeCueIndex, normalizeCues, shiftCues } from "@files/domain/services/subtitles/cues";
-import { formatVttTimestamp, parseVtt, type SubtitleCue } from "@files/domain/services/subtitles/vtt";
+import {
+  formatVttTimestamp,
+  parseTimestamp,
+  parseVtt,
+} from "@files/domain/services/subtitles/vtt";
 
 /**
  * Correcting a subtitle track by hand.
@@ -31,6 +35,10 @@ import { formatVttTimestamp, parseVtt, type SubtitleCue } from "@files/domain/se
  *  - **The server normalises what it receives.** A line typed longer than its slot is given the
  *    time it needs, exactly as a generated one is (`normalizeCues` runs on both sides). The panel
  *    shows the result rather than pretending the raw numbers survived.
+ *  - **Saves carry the revision they were read at.** The whole-VTT response carries it in a
+ *    header; the save echoes it back and the server rejects a mismatch with 409 rather than
+ *    letting two open editors overwrite each other. On the next save after a successful one, the
+ *    server's new revision is used.
  */
 
 export type SubtitleEditorPanelProps = {
@@ -50,16 +58,6 @@ type Draft = { startMs: number; endMs: number; text: string };
 
 const CELL = "w-full rounded-md border border-border bg-surface px-1.5 py-1 text-xs tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40";
 
-/** `"00:01:23.456"` → ms, for the two time cells. `null` when it is not a timestamp yet. */
-function readClock(value: string): number | null {
-  const match = /^(\d{1,2}):([0-5]?\d):([0-5]?\d)(?:[.,](\d{1,3}))?$/.exec(value.trim());
-  if (!match) return null;
-  const [, h, m, s, frac] = match;
-  return (
-    Number(h) * 3_600_000 + Number(m) * 60_000 + Number(s) * 1_000 + (frac ? Number(frac.padEnd(3, "0")) : 0)
-  );
-}
-
 export default function SubtitleEditorPanel({
   src,
   fileId,
@@ -73,6 +71,11 @@ export default function SubtitleEditorPanel({
   const [cues, setCues] = useState<Draft[]>([]);
   /** The last saved state, for Undo and for deciding whether anything changed. */
   const [baseline, setBaseline] = useState<Draft[]>([]);
+  /**
+   * The revision the drafts were read at, for optimistic locking. Kept in a ref rather than state:
+   * only the save path reads it, and a stale render must not send a stale revision.
+   */
+  const revisionRef = useRef<number>(1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
@@ -94,6 +97,11 @@ export default function SubtitleEditorPanel({
           ({ startMs, endMs, text }): Draft => ({ startMs, endMs, text })
         );
         if (cancelled) return;
+        const header = response.headers.get("X-Subtitle-Revision");
+        revisionRef.current =
+          header && Number.isSafeInteger(Number(header)) && Number(header) > 0
+            ? Number(header)
+            : 1;
         setCues(parsed);
         setBaseline(parsed);
         setLoading(false);
@@ -146,19 +154,24 @@ export default function SubtitleEditorPanel({
     // applies the same pass, and showing them disagree would look like a failed save.
     const normalised = normalizeCues(cues.map((cue, idx) => ({ idx, ...cue })));
     const payload = normalised.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }));
-    const result = await apiFetch<{ cueCount: number }>(
+    const result = await apiFetch<{ cueCount: number; revision: number }>(
       `/api/files/${fileId}/subtitles/${trackId}`,
-      { method: "PATCH", body: JSON.stringify({ cues: payload }) }
+      {
+        method: "PATCH",
+        body: JSON.stringify({ cues: payload, expectedRevision: revisionRef.current }),
+      }
     );
     setSaving(false);
     if (!result.success) {
       setError(
-        result.code === "SUBTITLE_BUSY"
+        result.code === "SUBTITLE_BUSY" || result.code === "SUBTITLE_REVISION_CONFLICT"
           ? t("files.subtitles.editor.conflict")
           : (result.error ?? t("common.somethingWentWrong"))
       );
       return;
     }
+    // The server's revision is the one the next save must expect, not the one it read.
+    revisionRef.current = result.data?.revision ?? revisionRef.current + 1;
     setCues(payload);
     setBaseline(payload);
     setSavedAt(Date.now());
@@ -264,7 +277,9 @@ export default function SubtitleEditorPanel({
                 aria-label={t("files.subtitles.editor.start")}
                 className={CELL}
                 onBlur={(event) => {
-                  const ms = readClock(event.target.value);
+                  // `parseTimestamp` takes any number of hour digits and either decimal
+                  // separator, so a 30-hour edit session isn't blocked by a two-digit field.
+                  const ms = parseTimestamp(event.target.value);
                   if (ms === null) event.target.value = formatVttTimestamp(cue.startMs);
                   else patch(index, { startMs: ms });
                 }}
@@ -274,7 +289,7 @@ export default function SubtitleEditorPanel({
                 aria-label={t("files.subtitles.editor.end")}
                 className={CELL}
                 onBlur={(event) => {
-                  const ms = readClock(event.target.value);
+                  const ms = parseTimestamp(event.target.value);
                   if (ms === null) event.target.value = formatVttTimestamp(cue.endMs);
                   else patch(index, { endMs: ms });
                 }}

@@ -189,23 +189,23 @@ export default function UserDetailPage({
       <motion.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center gap-4"
+        className="flex flex-wrap items-center gap-4"
       >
         <Button
           variant="ghost"
           size="icon"
           onClick={() => router.back()}
-          className="h-9 w-9"
+          className="h-9 w-9 shrink-0"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{user.username}</h1>
-          <p className="mt-1 text-sm text-muted-foreground/70">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-2xl sm:text-3xl font-bold tracking-tight">{user.username}</h1>
+          <p className="mt-1 truncate text-sm text-muted-foreground/70">
             {user.email ?? t("admin.userDetail.noEmail")}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <span
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold",
@@ -336,9 +336,11 @@ export default function UserDetailPage({
                   {t("admin.userDetail.byFileType")}
                 </p>
                 {storageByType.map((item, idx) => (
-                  <div key={item.mimeType} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{item.mimeType}</span>
-                    <div className="flex items-center gap-3">
+                  <div key={item.mimeType} className="flex items-center justify-between gap-3 text-sm">
+                    {/* MIME strings are single unbreakable tokens; the type
+                        yields, the numbers never do. */}
+                    <span className="min-w-0 truncate text-muted-foreground">{item.mimeType}</span>
+                    <div className="flex shrink-0 items-center gap-3">
                       <span className="text-xs text-muted-foreground/60">
                         {t("admin.userDetail.typeFiles", { count: item.count })}
                       </span>
@@ -435,9 +437,9 @@ export default function UserDetailPage({
         transition={{ delay: 0.4 }}
       >
         <Card className="border-border/50">
-          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-muted-foreground" />
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+            <CardTitle className="flex min-w-0 items-center gap-2">
+              <Shield className="h-4 w-4 shrink-0 text-muted-foreground" />
               {t("admin.userDetail.sessionsTitle", { count: sessions.length })}
             </CardTitle>
             {sessions.length > 0 && (

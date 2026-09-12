@@ -31,6 +31,8 @@ import {
 } from "@files/domain/services/subtitles/view-prefs";
 import type { SubtitleTrack } from "@files/presentation/hooks/use-subtitle-tracks";
 
+const DOWNLOADABLE: SubtitleTrack["deliveryMode"][] = ["whole", undefined];
+
 /**
  * The CC menu: one list, one press.
  *
@@ -300,21 +302,35 @@ export function SubtitleMenu(props: SubtitleMenuProps) {
                   stay visible.
                 */}
                 <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-                  <a
-                    href={`${props.vttUrl(track.id)}?download`}
-                    download
-                    aria-label={t("files.subtitles.actions.download")}
-                    title={t("files.subtitles.actions.download")}
-                    className="rounded-md p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
-                  >
-                    <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                  </a>
+                  {/*
+                    A segmented track has no whole-file VTT to download — it is too large to serve in
+                    one response — so the download affordance is suppressed for it rather than offered
+                    and answered with 413.
+                  */}
+                  {DOWNLOADABLE.includes(track.deliveryMode) && (
+                    <a
+                      href={`${props.vttUrl(track.id)}?download`}
+                      download
+                      aria-label={t("files.subtitles.actions.download")}
+                      title={t("files.subtitles.actions.download")}
+                      className="rounded-md p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                    </a>
+                  )}
+                  {/*
+                    The current editor opens the whole-file VTT, so a segmented track cannot use it
+                    without a virtualised time-window editor behind it. Keep the affordance until the
+                    window editor exists, but disable it with a clear label.
+                  */}
                   {props.onEdit && (
                     <Button
                       variant="ghost"
                       size="icon-sm"
                       className="text-white/45 hover:bg-white/10 hover:text-white"
                       aria-label={t("files.subtitles.actions.edit")}
+                      disabled={track.deliveryMode === "segmented"}
+                      title={track.deliveryMode === "segmented" ? t("files.subtitles.actions.editSegmented") : undefined}
                       onClick={() => props.onEdit?.(track.id)}
                     >
                       <Pencil className="h-3.5 w-3.5" aria-hidden="true" />

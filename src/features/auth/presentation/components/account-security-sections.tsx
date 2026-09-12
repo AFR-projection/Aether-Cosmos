@@ -118,13 +118,13 @@ export function PasswordSection() {
             placeholder={t("settings.password.current")}
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
-            className="pr-10"
+            className="pr-12"
             required
           />
           <button
             type="button"
             onClick={() => setShowCurrent(!showCurrent)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+            className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-muted-foreground/60 hover:text-foreground"
             aria-label={t(
               showCurrent ? "settings.password.hideCurrent" : "settings.password.showCurrent"
             )}
@@ -138,14 +138,14 @@ export function PasswordSection() {
             placeholder={t("auth.changePassword.new")}
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            className="pr-10"
+            className="pr-12"
             required
             minLength={PASSWORD_MIN_LENGTH}
           />
           <button
             type="button"
             onClick={() => setShowNew(!showNew)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+            className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-muted-foreground/60 hover:text-foreground"
             aria-label={t(showNew ? "settings.password.hideNew" : "settings.password.showNew")}
           >
             {showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -157,14 +157,14 @@ export function PasswordSection() {
             placeholder={t("auth.changePassword.confirm")}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            className="pr-10"
+            className="pr-12"
             required
             minLength={PASSWORD_MIN_LENGTH}
           />
           <button
             type="button"
             onClick={() => setShowConfirm(!showConfirm)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+            className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-muted-foreground/60 hover:text-foreground"
             aria-label={t(
               showConfirm ? "settings.password.hideConfirm" : "settings.password.showConfirm"
             )}
@@ -410,12 +410,12 @@ function CodeInput({
         // Strip non-digits on the way in so the field can never hold a value
         // the server will reject.
         onChange={(e) => onChange(e.target.value.replace(/\D/g, ""))}
-        className="pr-10 font-mono tracking-[0.3em]"
+        className="pr-12 font-mono tracking-[0.3em]"
       />
       <button
         type="button"
         onClick={() => setReveal(!reveal)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+        className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-muted-foreground/60 hover:text-foreground"
         aria-label={t(reveal ? "settings.stepCode.hideCode" : "settings.stepCode.showCode")}
       >
         {reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

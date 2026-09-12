@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { apiSuccess, handleApiError } from "@/shared/api/response";
 import { resolveSharedFile } from "@shares/application/shared-subtitles";
+import { SUBTITLE_WHOLE_TRACK_MAX_CUES } from "@files/domain/services/subtitles/limits";
 import { listTracks } from "@files/infrastructure/subtitles/tracks";
 
 /**
@@ -42,6 +43,14 @@ export async function GET(
         failureMessage: null,
         createdAt: track.createdAt,
         readyAt: track.readyAt,
+        // Same derivation as the authenticated catalog: the overlay must know before it points a
+        // `<track src>` at a body the whole-file route would answer 413 for.
+        deliveryMode:
+          track.cueCount > SUBTITLE_WHOLE_TRACK_MAX_CUES
+            ? ("segmented" as const)
+            : ("whole" as const),
+        revision: track.revision,
+        durationSeconds: track.durationSeconds,
       }));
 
     return apiSuccess({ tracks });

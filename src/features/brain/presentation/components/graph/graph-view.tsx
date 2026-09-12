@@ -91,7 +91,13 @@ export function GraphView({
   const { query, groups, force, display, localMode, localDepth, localFocalId, hiddenIds } =
     settings;
 
-  const [panelOpen, setPanelOpen] = useState(true);
+  // Below lg the panel overlays the whole canvas, so it must start closed —
+  // an overlay that opens covering its own only close button is a dead end.
+  // The initializer runs before first paint on the client; on the server the
+  // component renders the loading state, so the value is never seen there.
+  const [panelOpen, setPanelOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 1024
+  );
   const [fullscreen, setFullscreen] = useState(false);
 
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -405,7 +411,10 @@ export function GraphView({
         "relative flex overflow-hidden bg-surface",
         isPopup
           ? "h-full w-full"
-          : "h-[calc(100vh-14rem)] min-h-[520px] rounded-2xl border border-border/50 shadow-md",
+        // 100dvh, not 100vh, so the mobile URL bar cannot crop the canvas; the
+        // 520px floor is a desktop luxury — on a phone it pushed the canvas
+        // past the fold and forced a page scroll the touch-none canvas eats.
+          : "h-[calc(100dvh-14rem)] min-h-[22rem] rounded-2xl border border-border/50 shadow-md lg:min-h-[520px]",
         // Fullscreen paints the whole screen: the rounded card would show its
         // corners against black.
         fullscreen && "h-screen w-screen rounded-none border-0"
@@ -430,7 +439,9 @@ export function GraphView({
           onClick={() => setPanelOpen((open) => !open)}
           aria-expanded={panelOpen}
           aria-label={panelOpen ? t("brain.graph.hideControls") : t("brain.graph.showControls")}
-          className="absolute left-3 top-3 rounded-lg border border-border/50 bg-surface/90 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
+          // z-30 keeps the toggle above the panel (z-20) when the panel overlays
+          // the canvas below lg — it is the only close button on a phone.
+          className="absolute left-3 top-3 z-30 rounded-lg border border-border/50 bg-surface/90 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
         >
           {panelOpen ? (
             <PanelRightClose className="h-4 w-4" aria-hidden="true" />

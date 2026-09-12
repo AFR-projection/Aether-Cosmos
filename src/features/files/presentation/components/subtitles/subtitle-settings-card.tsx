@@ -1,29 +1,64 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Captions, Eye, EyeOff, KeyRound, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  Captions,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  PauseCircle,
+  ShieldAlert,
+  TriangleAlert,
+} from "lucide-react";
 import { Button } from "@/ui/primitives/button";
 import { Input } from "@/ui/primitives/input";
+import { Badge } from "@/ui/primitives/badge";
 import { apiFetch } from "@/shared/api/client";
 import { useT } from "@/shared/lib/i18n";
 import { notify } from "@/shared/lib/system/notify-store";
 
-/**
- * The subtitle provider configuration, for the master console.
- *
- * Two provider blocks, because transcription and translation are bought separately — the cheapest
- * speech recogniser and the best translator are rarely the same company. Each is a base URL, a model
- * and a key, which is the whole contract "OpenAI-compatible" gives us.
- *
- * The key fields never show a stored value, only whether one exists. An input that displayed a
- * decrypted secret would put it in the DOM, in a screenshot, and in whatever the browser autofills
- * next — so the control is write-only: type to replace, a button to clear, blank to keep.
- *
- * The two warnings are not decoration. One says where the audio goes, which is the operator's to
- * know before they turn this on for their users. The other says what happens if `SESSION_SECRET`
- * changes, because the symptom — every track suddenly failing with "not configured" — looks nothing
- * like the cause.
- */
+type Capability = "asr" | "translation";
+type Role = "primary" | "fallback";
+type ProfileKey = `${Capability}:${Role}`;
+type Health = "unknown" | "healthy" | "degraded" | "unhealthy";
+
+type PublicProfile = {
+  id: string;
+  capability: Capability;
+  role: Role;
+  name: string;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+  timeoutMs: number;
+  concurrencyLimit: number;
+  rateLimit: number;
+  burstLimit: number;
+  health: Health;
+  lastHealthAt: string | null;
+  lastErrorCode: string | null;
+  hasApiKey: boolean;
+};
+
+type OperationalStatus = {
+  available: boolean;
+  activeRuns: number;
+  pendingWorkItems: number;
+  leasedWorkItems: number;
+  failedRuns: number;
+  backfill: {
+    status: "idle" | "running" | "blocked" | "failed";
+    scannedCount: number;
+    processedCount: number;
+    failedCount: number;
+    heartbeatAt: string | null;
+    lastCompletedAt: string | null;
+    lastErrorCode: string | null;
+  } | null;
+};
 
 type PublicConfig = {
   provider: string;
@@ -34,21 +69,47 @@ type PublicConfig = {
   translateModel: string;
   hasTranslateApiKey: boolean;
   enabled: boolean;
+  advanced?: {
+    available: boolean;
+    profiles: PublicProfile[];
+    operational: OperationalStatus;
+  };
 };
 
-type TestResult = { ok: boolean; model: string; message?: string; status?: number };
+type TestResult = {
+  ok: boolean;
+  model: string;
+  message?: string;
+  status?: number;
+  latencyMs?: number;
+};
 
-/** A key field: never shows what is stored, only offers to replace or clear it. */
+type ProfileDraft = Partial<Pick<PublicProfile,
+  "name" | "provider" | "baseUrl" | "model" | "enabled" | "timeoutMs" |
+  "concurrencyLimit" | "rateLimit" | "burstLimit"
+>>;
+
+type SecretDraft = { value: string; clear: boolean };
+
+const PROFILE_KEYS: ProfileKey[] = [
+  "asr:primary",
+  "asr:fallback",
+  "translation:primary",
+  "translation:fallback",
+];
+
+function keyOf(profile: Pick<PublicProfile, "capability" | "role">): ProfileKey {
+  return `${profile.capability}:${profile.role}`;
+}
+
 function KeyField({
   id,
-  label,
   stored,
   value,
   onChange,
   onClear,
 }: {
   id: string;
-  label: string;
   stored: boolean;
   value: string;
   onChange: (next: string) => void;
@@ -56,17 +117,16 @@ function KeyField({
 }) {
   const t = useT();
   const [visible, setVisible] = useState(false);
-
   return (
     <div>
       <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted-foreground">
-        {label}
+        {t("admin.subtitles.transcription.apiKey")}
       </label>
       <div className="relative">
         <Input
           id={id}
           type={visible ? "text" : "password"}
-          autoComplete="off"
+          autoComplete="new-password"
           spellCheck={false}
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -86,24 +146,44 @@ function KeyField({
         </Button>
       </div>
       <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-        {stored ? (
-          <>
-            <KeyRound className="h-3.5 w-3.5 shrink-0 text-success-ink" aria-hidden="true" />
-            <span>
-              {t("admin.subtitles.keyStored")} {t("admin.subtitles.keyRotate")}
-            </span>
-            <button
-              type="button"
-              className="shrink-0 text-danger-ink underline underline-offset-2"
-              onClick={onClear}
-            >
-              {t("admin.subtitles.keyClear")}
-            </button>
-          </>
-        ) : (
-          <span>{t("admin.subtitles.keyRotate")}</span>
+        {stored && <KeyRound className="h-3.5 w-3.5 shrink-0 text-success-ink" aria-hidden="true" />}
+        <span>{stored ? t("admin.subtitles.keyStored") : t("admin.subtitles.keyRotate")}</span>
+        {stored && (
+          <button type="button" className="text-danger-ink underline underline-offset-2" onClick={onClear}>
+            {t("admin.subtitles.keyClear")}
+          </button>
         )}
       </p>
+    </div>
+  );
+}
+
+function NumberField({
+  id,
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>
+      <Input
+        id={id}
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
     </div>
   );
 }
@@ -111,267 +191,201 @@ function KeyField({
 export function SubtitleSettingsCard() {
   const t = useT();
   const [config, setConfig] = useState<PublicConfig | null>(null);
-  const [draft, setDraft] = useState<Partial<PublicConfig>>({});
-  /** Typed keys, kept apart from the draft so an empty string never means "clear". */
-  const [keys, setKeys] = useState<{ apiKey: string; translateApiKey: string }>({
-    apiKey: "",
-    translateApiKey: "",
-  });
-  /** Keys the operator explicitly asked to remove. */
-  const [cleared, setCleared] = useState<{ apiKey: boolean; translateApiKey: boolean }>({
-    apiKey: false,
-    translateApiKey: false,
-  });
+  const [enabled, setEnabled] = useState(false);
+  const [drafts, setDrafts] = useState<Partial<Record<ProfileKey, ProfileDraft>>>({});
+  const [secrets, setSecrets] = useState<Partial<Record<ProfileKey, SecretDraft>>>({});
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState<"transcribe" | "translate" | null>(null);
-  const [results, setResults] = useState<Partial<Record<"transcribe" | "translate", TestResult>>>({});
+  const [testing, setTesting] = useState<ProfileKey | null>(null);
+  const [results, setResults] = useState<Partial<Record<ProfileKey, TestResult>>>({});
 
   const load = useCallback(async () => {
     const result = await apiFetch<PublicConfig>("/api/admin/subtitle-settings");
-    if (result.success && result.data) setConfig(result.data);
+    if (result.success && result.data) {
+      setConfig(result.data);
+      setEnabled(result.data.enabled);
+    }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  const value = <K extends keyof PublicConfig>(field: K): PublicConfig[K] | undefined =>
-    (draft[field] ?? config?.[field]) as PublicConfig[K] | undefined;
+  const profiles = useMemo(() => {
+    const available = config?.advanced?.profiles ?? [];
+    return new Map(available.map((profile) => [keyOf(profile), profile]));
+  }, [config]);
 
-  const set = <K extends keyof PublicConfig>(field: K, next: PublicConfig[K]) =>
-    setDraft((current) => ({ ...current, [field]: next }));
+  function profileValue<K extends keyof ProfileDraft>(key: ProfileKey, field: K): ProfileDraft[K] {
+    return drafts[key]?.[field] ?? profiles.get(key)?.[field];
+  }
+
+  function setProfile<K extends keyof ProfileDraft>(key: ProfileKey, field: K, value: ProfileDraft[K]) {
+    setDrafts((current) => ({ ...current, [key]: { ...current[key], [field]: value } }));
+  }
+
+  const dirty = enabled !== config?.enabled || Object.keys(drafts).length > 0 || Object.keys(secrets).length > 0;
 
   async function save() {
+    if (!config) return;
     setSaving(true);
-    const body: Record<string, unknown> = { ...draft };
-    // A blank field means "leave the stored key alone"; `null` is the explicit clear. Conflating
-    // the two would wipe a working key every time somebody toggled the switch.
-    if (keys.apiKey.trim().length > 0) body.apiKey = keys.apiKey.trim();
-    else if (cleared.apiKey) body.apiKey = null;
-    if (keys.translateApiKey.trim().length > 0) body.translateApiKey = keys.translateApiKey.trim();
-    else if (cleared.translateApiKey) body.translateApiKey = null;
-
+    const updates = PROFILE_KEYS.filter((key) => profiles.has(key)).map((key) => {
+      const [capability, role] = key.split(":") as [Capability, Role];
+      const secret = secrets[key];
+      return {
+        capability,
+        role,
+        ...drafts[key],
+        ...(secret?.value.trim() ? { apiKey: secret.value.trim() } : secret?.clear ? { apiKey: null } : {}),
+      };
+    });
     const result = await apiFetch<PublicConfig>("/api/admin/subtitle-settings", {
       method: "PUT",
-      body: JSON.stringify(body),
+      body: JSON.stringify({ enabled, profiles: updates }),
     });
     setSaving(false);
     if (!result.success || !result.data) {
-      notify({
-        title: t("admin.subtitles.saveFailed", { reason: result.error ?? "" }),
-        tone: "error",
-      });
+      notify({ title: t("admin.subtitles.saveFailed", { reason: result.error ?? "" }), tone: "error" });
       return;
     }
     setConfig(result.data);
-    setDraft({});
-    setKeys({ apiKey: "", translateApiKey: "" });
-    setCleared({ apiKey: false, translateApiKey: false });
+    setDrafts({});
+    setSecrets({});
     setResults({});
     notify({ title: t("admin.subtitles.saved"), tone: "success" });
   }
 
-  async function test(target: "transcribe" | "translate") {
-    setTesting(target);
+  async function testProfile(profile: PublicProfile) {
+    const key = keyOf(profile);
+    setTesting(key);
     const result = await apiFetch<TestResult>("/api/admin/subtitle-settings/test", {
       method: "POST",
-      body: JSON.stringify({ target }),
+      body: JSON.stringify({
+        target: profile.capability === "asr" ? "transcribe" : "translate",
+        role: profile.role,
+      }),
     });
     setTesting(null);
-    if (!result.success || !result.data) {
-      setResults((current) => ({
-        ...current,
-        [target]: { ok: false, model: "", message: result.error ?? t("admin.subtitles.testNoKey") },
-      }));
-      return;
-    }
-    setResults((current) => ({ ...current, [target]: result.data as TestResult }));
+    setResults((current) => ({
+      ...current,
+      [key]: result.success && result.data
+        ? result.data
+        : { ok: false, model: profile.model, message: result.error ?? t("admin.subtitles.testNoKey") },
+    }));
+    void load();
   }
 
   if (!config) {
-    return (
-      <div className="adm-panel">
-        <div className="adm-panel__body flex items-center justify-center py-10">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" />
-        </div>
-      </div>
-    );
+    return <div className="adm-panel"><div className="adm-panel__body flex items-center justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" /></div></div>;
   }
 
-  const dirty = Object.keys(draft).length > 0 || keys.apiKey !== "" || keys.translateApiKey !== "" || cleared.apiKey || cleared.translateApiKey;
-
+  const advanced = config.advanced;
   return (
     <div className="space-y-4">
       <div className="adm-panel">
         <div className="adm-panel__head">
-          <span className="adm-panel__badge">
-            <Captions aria-hidden="true" />
-          </span>
+          <span className="adm-panel__badge"><Captions aria-hidden="true" /></span>
           <div className="min-w-0">
             <h2 className="adm-panel__title">{t("admin.subtitles.title")}</h2>
             <p className="adm-panel__sub">{t("admin.subtitles.lede")}</p>
           </div>
+          <div className="adm-panel__tools">
+            <Badge tone={enabled ? "success" : "danger"}>
+              {enabled ? t("admin.subtitles.operational.accepting") : t("admin.subtitles.operational.paused")}
+            </Badge>
+          </div>
         </div>
         <div className="adm-panel__body space-y-4">
-          <label className="flex items-start gap-3">
+          <label className="flex items-start gap-3 rounded-lg border border-border/60 p-3">
             <input
               type="checkbox"
-              checked={Boolean(value("enabled"))}
-              onChange={(event) => set("enabled", event.target.checked)}
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
               className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
             />
+            <PauseCircle className="h-4 w-4 shrink-0 text-warning-ink" aria-hidden="true" />
             <span>
-              <span className="block text-sm font-medium text-foreground">
-                {t("admin.subtitles.enabled")}
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                {t("admin.subtitles.enabledHint")}
-              </span>
+              <span className="block text-sm font-medium text-foreground">{t("admin.subtitles.emergencyPause")}</span>
+              <span className="block text-xs text-muted-foreground">{t("admin.subtitles.emergencyPauseHint")}</span>
             </span>
           </label>
-
-          <p className="flex gap-2 rounded-lg bg-warning/10 p-2.5 text-xs leading-relaxed text-warning-ink ring-1 ring-warning/20">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            {t("admin.subtitles.privacyWarning")}
-          </p>
-          <p className="flex gap-2 rounded-lg bg-muted p-2.5 text-xs leading-relaxed text-muted-foreground">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            {t("admin.subtitles.secretWarning")}
-          </p>
+          <p className="flex gap-2 rounded-lg bg-warning/10 p-2.5 text-xs leading-relaxed text-warning-ink ring-1 ring-warning/20"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{t("admin.subtitles.privacyWarning")}</p>
+          <p className="flex gap-2 rounded-lg bg-muted p-2.5 text-xs leading-relaxed text-muted-foreground"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{t("admin.subtitles.secretWarning")}</p>
         </div>
       </div>
 
-      {(
-        [
-          {
-            key: "transcribe" as const,
-            heading: t("admin.subtitles.transcription.heading"),
-            lede: t("admin.subtitles.transcription.lede"),
-            baseUrlField: "baseUrl" as const,
-            modelField: "model" as const,
-            keyField: "apiKey" as const,
-            stored: config.hasApiKey,
-            baseUrlHint: t("admin.subtitles.transcription.baseUrlHint"),
-            okKey: "admin.subtitles.testOkTranscribe" as const,
-            extraHint: null,
-          },
-          {
-            key: "translate" as const,
-            heading: t("admin.subtitles.translation.heading"),
-            lede: t("admin.subtitles.translation.lede"),
-            baseUrlField: "translateBaseUrl" as const,
-            modelField: "translateModel" as const,
-            keyField: "translateApiKey" as const,
-            stored: config.hasTranslateApiKey,
-            baseUrlHint: t("admin.subtitles.translation.baseUrlHint"),
-            okKey: "admin.subtitles.testOkTranslate" as const,
-            extraHint: t("admin.subtitles.translation.sameKeyHint"),
-          },
-        ]
-      ).map((block) => {
-        const result = results[block.key];
+      {advanced?.available ? PROFILE_KEYS.map((key) => {
+        const profile = profiles.get(key);
+        if (!profile) return null;
+        const result = results[key];
+        const health = profile.health;
+        const healthTone = health === "healthy" ? "success" : health === "degraded" ? "warning" : health === "unhealthy" ? "danger" : "neutral";
         return (
-          <div key={block.key} className="adm-panel">
+          <div key={key} className="adm-panel">
             <div className="adm-panel__head">
               <div className="min-w-0">
-                <h3 className="adm-panel__title">{block.heading}</h3>
-                <p className="adm-panel__sub">{block.lede}</p>
+                <h3 className="adm-panel__title">{t(`admin.subtitles.profiles.${profile.capability}.${profile.role}`)}</h3>
+                <p className="adm-panel__sub">{profile.name}</p>
               </div>
               <div className="adm-panel__tools">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void test(block.key)}
-                  disabled={testing !== null || !block.stored}
-                >
-                  {testing === block.key && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-                  {testing === block.key ? t("admin.subtitles.testing") : t("admin.subtitles.test")}
+                <Badge tone={healthTone}>{t(`admin.subtitles.health.${health}`)}</Badge>
+                <Button variant="secondary" size="sm" onClick={() => void testProfile(profile)} disabled={testing !== null || !profile.hasApiKey}>
+                  {testing === key && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                  {testing === key ? t("admin.subtitles.testing") : t("admin.subtitles.test")}
                 </Button>
               </div>
             </div>
             <div className="adm-panel__body space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor={`${block.key}-base-url`}
-                    className="mb-1 block text-xs font-medium text-muted-foreground"
-                  >
-                    {t("admin.subtitles.transcription.baseUrl")}
-                  </label>
-                  <Input
-                    id={`${block.key}-base-url`}
-                    value={String(value(block.baseUrlField) ?? "")}
-                    onChange={(event) => set(block.baseUrlField, event.target.value)}
-                    spellCheck={false}
-                    className="font-mono"
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">{block.baseUrlHint}</p>
-                </div>
-                <div>
-                  <label
-                    htmlFor={`${block.key}-model`}
-                    className="mb-1 block text-xs font-medium text-muted-foreground"
-                  >
-                    {t("admin.subtitles.transcription.model")}
-                  </label>
-                  <Input
-                    id={`${block.key}-model`}
-                    value={String(value(block.modelField) ?? "")}
-                    onChange={(event) => set(block.modelField, event.target.value)}
-                    spellCheck={false}
-                    className="font-mono"
-                  />
-                </div>
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <input type="checkbox" checked={Boolean(profileValue(key, "enabled"))} onChange={(event) => setProfile(key, "enabled", event.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+                {t("admin.subtitles.profileEnabled")}
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div><label htmlFor={`${key}-name`} className="mb-1 block text-xs font-medium text-muted-foreground">{t("admin.subtitles.profileName")}</label><Input id={`${key}-name`} value={String(profileValue(key, "name") ?? "")} onChange={(event) => setProfile(key, "name", event.target.value)} /></div>
+                <div><label htmlFor={`${key}-provider`} className="mb-1 block text-xs font-medium text-muted-foreground">{t("admin.subtitles.provider")}</label><Input id={`${key}-provider`} value={String(profileValue(key, "provider") ?? "")} onChange={(event) => setProfile(key, "provider", event.target.value)} /></div>
+                <div><label htmlFor={`${key}-model`} className="mb-1 block text-xs font-medium text-muted-foreground">{t("admin.subtitles.transcription.model")}</label><Input id={`${key}-model`} value={String(profileValue(key, "model") ?? "")} onChange={(event) => setProfile(key, "model", event.target.value)} className="font-mono" /></div>
               </div>
-
+              <div><label htmlFor={`${key}-url`} className="mb-1 block text-xs font-medium text-muted-foreground">{t("admin.subtitles.transcription.baseUrl")}</label><Input id={`${key}-url`} value={String(profileValue(key, "baseUrl") ?? "")} onChange={(event) => setProfile(key, "baseUrl", event.target.value)} spellCheck={false} className="font-mono" /></div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <NumberField id={`${key}-timeout`} label={t("admin.subtitles.controls.timeout")} min={1000} max={600000} value={Number(profileValue(key, "timeoutMs") ?? 120000)} onChange={(value) => setProfile(key, "timeoutMs", value)} />
+                <NumberField id={`${key}-concurrency`} label={t("admin.subtitles.controls.concurrency")} min={1} max={100} value={Number(profileValue(key, "concurrencyLimit") ?? 1)} onChange={(value) => setProfile(key, "concurrencyLimit", value)} />
+                <NumberField id={`${key}-rate`} label={t("admin.subtitles.controls.rate")} min={0} max={100000} value={Number(profileValue(key, "rateLimit") ?? 0)} onChange={(value) => setProfile(key, "rateLimit", value)} />
+                <NumberField id={`${key}-burst`} label={t("admin.subtitles.controls.burst")} min={0} max={100000} value={Number(profileValue(key, "burstLimit") ?? 0)} onChange={(value) => setProfile(key, "burstLimit", value)} />
+              </div>
               <KeyField
-                id={`${block.key}-key`}
-                label={t("admin.subtitles.transcription.apiKey")}
-                stored={block.stored}
-                value={keys[block.keyField]}
-                onChange={(next) => {
-                  setKeys((current) => ({ ...current, [block.keyField]: next }));
-                  setCleared((current) => ({ ...current, [block.keyField]: false }));
-                }}
-                onClear={() => {
-                  setKeys((current) => ({ ...current, [block.keyField]: "" }));
-                  setCleared((current) => ({ ...current, [block.keyField]: true }));
-                }}
+                id={`${key}-key`}
+                stored={profile.hasApiKey}
+                value={secrets[key]?.value ?? ""}
+                onChange={(value) => setSecrets((current) => ({ ...current, [key]: { value, clear: false } }))}
+                onClear={() => setSecrets((current) => ({ ...current, [key]: { value: "", clear: true } }))}
               />
-              {block.extraHint && (
-                <p className="text-xs text-muted-foreground">{block.extraHint}</p>
-              )}
-
-              {result && (
-                <p
-                  role="status"
-                  className={
-                    result.ok
-                      ? "rounded-lg bg-success/10 p-2.5 text-xs text-success-ink ring-1 ring-success/20"
-                      : "rounded-lg bg-danger/10 p-2.5 text-xs text-danger-ink ring-1 ring-danger/20"
-                  }
-                >
-                  {result.ok
-                    ? t(block.okKey, { model: result.model })
-                    : t("admin.subtitles.testFailed", {
-                        reason: result.message ?? String(result.status ?? ""),
-                      })}
-                </p>
-              )}
-              {cleared[block.keyField] && (
-                <p className="text-xs text-danger-ink">{t("admin.subtitles.keyClear")}</p>
-              )}
+              {profile.lastHealthAt && <p className="text-xs text-muted-foreground">{t("admin.subtitles.lastChecked", { date: new Date(profile.lastHealthAt).toLocaleString() })}</p>}
+              {result && <p role="status" className={result.ok ? "rounded-lg bg-success/10 p-2.5 text-xs text-success-ink ring-1 ring-success/20" : "rounded-lg bg-danger/10 p-2.5 text-xs text-danger-ink ring-1 ring-danger/20"}>{result.ok ? t("admin.subtitles.testOk", { model: result.model, latency: String(result.latencyMs ?? 0) }) : t("admin.subtitles.testFailed", { reason: result.message ?? String(result.status ?? "") })}</p>}
             </div>
           </div>
         );
-      })}
+      }) : (
+        <div className="adm-panel"><div className="adm-panel__body text-sm text-muted-foreground">{t("admin.subtitles.advancedUnavailable")}</div></div>
+      )}
 
-      <div className="flex items-center justify-end gap-2">
-        <Button onClick={() => void save()} disabled={saving || !dirty}>
-          {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-          {saving ? t("admin.subtitles.saving") : t("admin.subtitles.save")}
-        </Button>
-      </div>
+      {advanced?.operational && (
+        <div className="adm-panel">
+          <div className="adm-panel__head"><span className="adm-panel__badge"><Activity aria-hidden="true" /></span><div className="min-w-0"><h3 className="adm-panel__title">{t("admin.subtitles.operational.heading")}</h3><p className="adm-panel__sub">{t("admin.subtitles.operational.lede")}</p></div></div>
+          <div className="adm-panel__body">
+            {advanced.operational.available ? (
+              <div className="space-y-3">
+                <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {([["activeRuns", advanced.operational.activeRuns], ["pendingWork", advanced.operational.pendingWorkItems], ["leasedWork", advanced.operational.leasedWorkItems], ["failedRuns", advanced.operational.failedRuns]] as const).map(([label, count]) => <div key={label} className="rounded-lg bg-muted p-3"><dt className="text-xs text-muted-foreground">{t(`admin.subtitles.operational.${label}`)}</dt><dd className="mt-1 text-xl font-semibold text-foreground">{count}</dd></div>)}
+                </dl>
+                <p className="text-xs text-muted-foreground">
+                  {advanced.operational.backfill
+                    ? t("admin.subtitles.operational.backfill", { status: advanced.operational.backfill.status, processed: String(advanced.operational.backfill.processedCount), scanned: String(advanced.operational.backfill.scannedCount), failed: String(advanced.operational.backfill.failedCount) })
+                    : t("admin.subtitles.operational.backfillNotStarted")}
+                </p>
+              </div>
+            ) : <p className="text-sm text-muted-foreground">{t("admin.subtitles.operational.unavailable")}</p>}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-2"><Button onClick={() => void save()} disabled={saving || !dirty || !advanced?.available}>{saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}{saving ? t("admin.subtitles.saving") : t("admin.subtitles.save")}</Button></div>
     </div>
   );
 }

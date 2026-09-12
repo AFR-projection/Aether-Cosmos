@@ -71,6 +71,7 @@ import {
   runTranslateSubtitles,
 } from "@files/application/subtitles/subtitle-jobs";
 import { Queue } from "bullmq";
+import { ensureSubtitlesForInspectedMedia } from "@files/infrastructure/subtitles/ensure-adapter";
 import { PassThrough, Readable } from "stream";
 import { ZipArchive } from "archiver";
 import {
@@ -1012,6 +1013,7 @@ const mediaWorkerDependencies: MediaWorkerCoreDependencies = {
   transformTrim,
   transformAudio,
   inspect: inspectExactMedia,
+  ensureSubtitles: ensureSubtitlesForInspectedMedia,
   renderThumbnails: renderExactThumbnails,
   putObject: putR2Object,
   copyObject: copyR2Object,

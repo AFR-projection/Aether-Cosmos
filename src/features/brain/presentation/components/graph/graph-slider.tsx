@@ -52,7 +52,12 @@ export function GraphSlider({
         step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-border accent-accent"
+        // Deliberately NOT appearance-none: that removes the native thumb, and
+        // nothing in globals.css re-paints one for this input — the slider was
+        // draggable but had no visible handle and a 6px hit area on touch. The
+        // native control with accent-color keeps its thumb, its larger hit
+        // area and its keyboard/screen-reader semantics for free.
+        className="w-full cursor-pointer accent-accent"
       />
     </div>
   );

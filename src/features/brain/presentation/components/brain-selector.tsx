@@ -63,7 +63,9 @@ export function BrainSelector({
           <ul
             role="listbox"
             aria-label={t("brain.selector.choose")}
-            className="absolute left-0 z-20 mt-2 w-72 overflow-hidden rounded-xl border border-border/50 bg-surface-elevated p-1 shadow-2xl shadow-black/20"
+            // min() rather than a fixed w-72: at 320px the page column is 256px
+            // and a 288px menu pokes past the viewport edge.
+            className="absolute left-0 z-20 mt-2 w-[min(18rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/50 bg-surface-elevated p-1 shadow-2xl shadow-black/20"
           >
             {brains.map((option) => (
               <li key={option.id}>

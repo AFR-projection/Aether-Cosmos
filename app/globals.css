@@ -369,6 +369,26 @@ body {
   }
 }
 
+/* ── Shared Button primitive on touch pointers ────────────────────────────
+   ui/primitives/button.tsx ships mouse-density sizes (sm = 32px, icon-sm =
+   28px) and stamps itself with data-size. A fingertip needs roughly 44px,
+   so the compact variants grow on coarse pointers only — a narrow desktop
+   window keeps its density, and a touch tablet at 900px finally gets the
+   bump too. Same signal (pointer type) the per-namespace blocks below use. */
+@media (pointer: coarse) {
+  [data-size="sm"] {
+    min-height: 2.5rem;
+  }
+  [data-size="icon-sm"] {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+  [data-size="icon"] {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
 /* ── Custom Scrollbar ── */
 ::-webkit-scrollbar {
   width: 6px;
@@ -2311,6 +2331,7 @@ body {
 .auth-primary-button svg {
   width: 1.05rem;
   height: 1.05rem;
+  flex: 0 0 auto;
 }
 
 .auth-form__footer {
@@ -2605,6 +2626,7 @@ body {
 .auth-text-button svg {
   width: 0.9rem;
   height: 0.9rem;
+  flex: 0 0 auto;
 }
 
 .auth-otp-grid {
@@ -2661,7 +2683,9 @@ body {
   background: rgba(255, 255, 255, 0.04);
   color: var(--auth-text);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 0.9rem;
+  /* 1rem, never smaller: iOS Safari zooms any focused input below 16px, and
+     the Input primitive already follows this rule (text-base sm:text-sm). */
+  font-size: 1rem;
   text-align: center;
   letter-spacing: 0.14em;
   transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
@@ -2675,6 +2699,9 @@ body {
 
 .auth-secondary-actions {
   display: flex;
+  /* wrap: the two Indonesian labels ("Gunakan kode pemulikan" + "Mulai dari
+     awal") measure wider than the card body at 320px. */
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
@@ -3301,6 +3328,12 @@ body {
   padding: 0 1.1rem 1.15rem;
 }
 
+/* Three 60px tiles at 320px cannot hold the mono value and the label; two-up
+   from 520px down keeps both readable and the baselines aligned. */
+@media (max-width: 519px) {
+  .dashboard-inventory__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .dashboard-inventory__metric {
   display: grid;
   gap: 0.32rem;
@@ -3414,6 +3447,7 @@ body {
 .dashboard-file-row__arrow {
   width: 0.95rem;
   height: 0.95rem;
+  flex: 0 0 auto;
   color: var(--dashboard-muted);
   transition: color 180ms ease, transform 180ms ease;
 }
@@ -3642,6 +3676,9 @@ body {
   font-weight: 650;
   letter-spacing: -0.045em;
   line-height: 1.02;
+  /* The title is often a memory title straight off the wire (URLs, hashes);
+     a single long token must wrap rather than widen the page. */
+  overflow-wrap: anywhere;
 }
 
 .brain-lede {
@@ -4263,10 +4300,10 @@ body {
 
 /* ── Responsive ──
    375px is the narrowest phone we support; the fleet cards and metric grids
-   collapse to one column before anything can overflow horizontally. */
+   go one-up (grid-cols-1 in the components, min-[360px]:grid-cols-2 above)
+   before their unbreakable micro-cap labels can overflow a tile. */
 @media (max-width: 30rem) {
   .brain-page::before { display: none; }
-  .brain-rail { width: 100%; overflow-x: auto; }
   .brain-agent { padding: 0.9rem; }
   .brain-metric strong { font-size: 1.25rem; }
   .brain-code { font-size: 0.65rem; }
@@ -4503,6 +4540,11 @@ body {
   display: flex;
   align-items: center;
   gap: 0.65rem;
+  /* Wraps unconditionally: a panel inside a 2-up grid at 1024–1280px is only
+     ~350px wide, and a viewport-keyed wrap rule left its head nowrap there —
+     the non-shrinking tools slot then ran the title over. Wide panels never
+     wrap because everything fits on one line anyway. */
+  flex-wrap: wrap;
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--adm-hairline);
   background: var(--adm-panel-soft);
@@ -4543,6 +4585,8 @@ body {
   gap: 0.4rem;
   margin-left: auto;
   flex-shrink: 0;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .adm-panel__body { padding: 1rem; }
@@ -4654,6 +4698,12 @@ button.adm-metric[aria-pressed="true"]::before { width: 3px; }
   display: inline-flex;
   align-items: center;
   gap: 0.28rem;
+  /* Chips hold wire values (emails, MIME types, user names) that can be far
+     wider than their row. Capped at the row so the worst case is a clipped
+     chip, never a page-wide horizontal scroll. */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: 0.15rem 0.45rem;
   border: 1px solid var(--adm-hairline);
   border-radius: 0.5rem;
@@ -4663,6 +4713,15 @@ button.adm-metric[aria-pressed="true"]::before { width: 3px; }
   font-weight: 550;
   line-height: 1.4;
   white-space: nowrap;
+}
+
+/* The icon never gives way; the label does — a caller that caps the chip
+   (max-w on its own row) gets an ellipsis, not a clipped half-glyph. */
+.adm-chip svg { flex-shrink: 0; }
+.adm-chip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .adm-chip svg { width: 0.72rem; height: 0.72rem; }
@@ -4952,11 +5011,20 @@ button.adm-tile:focus-visible {
 .adm-seg {
   display: inline-flex;
   gap: 0.15rem;
+  /* A seven-button control can be wider than the row it sits in (the logs
+     toolbar at 320px). Cap it to its container and scroll inside — the
+     buttons keep their nowrap labels instead of reflowing into stacks. */
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
   padding: 0.15rem;
   border: 1px solid var(--adm-hairline);
   border-radius: 0.7rem;
   background: color-mix(in srgb, var(--muted) 50%, transparent);
 }
+
+.adm-seg::-webkit-scrollbar { display: none; }
 
 .adm-seg__btn {
   display: inline-flex;
@@ -5332,6 +5400,16 @@ button.adm-tile:focus-visible {
   box-shadow: var(--shadow-xl);
 }
 
+/* Below lg the mobile bottom tab bar owns the screen edge at the same z-index
+   and later DOM order, so it would paint over the save buttons. Lift the bar
+   one layer and clear the tab bar's full height plus its safe-area inset. */
+@media (max-width: 1023px) {
+  .adm-savebar {
+    bottom: calc(1rem + var(--bottom-nav-h) + var(--safe-bottom));
+    z-index: 41;
+  }
+}
+
 /* ── Callout ──
    Short inline explanation attached to a control. Tone comes from [data-tone]. */
 .adm-note {
@@ -5474,7 +5552,11 @@ button.adm-tile:focus-visible {
   .adm-filter,
   .adm-seg__btn { min-height: 2.5rem; }
   .adm-rail__link,
-  .adm-check { min-height: 2.75rem; }
+  /* min-width too: a box-only check (row selector, no label text) is otherwise
+     a 17px-wide strip inside its 44px-tall row — WCAG 2.5.8 wants 24px, the
+     app standard is 44px. The drawn box stays 1.05rem; the empty rest of the
+     label is still part of the hit area. */
+  .adm-check { min-height: 2.75rem; min-width: 2.75rem; }
   a.adm-tile,
   button.adm-tile { min-height: 2.75rem; }
 
@@ -5486,6 +5568,17 @@ button.adm-tile:focus-visible {
     width: max(100%, 2.75rem);
     height: 2.75rem;
     transform: translate(-50%, -50%);
+  }
+}
+
+/* Native checkboxes outside the .adm-check component keep the OS 16px box.
+   Their label text is part of the hit area, but the visible box itself should
+   still clear the 24px minimum on touch. The visually hidden inputs (sr-only,
+   .adm-check's 1px input) are excluded so their hiding trick is untouched. */
+@media (pointer: coarse) {
+  input[type="checkbox"]:not([class*="sr-only"]):not(.adm-check input) {
+    width: 1.25rem;
+    height: 1.25rem;
   }
 }
 
@@ -6726,6 +6819,9 @@ button.adm-tile:focus-visible {
   color: var(--muted-foreground);
   font-size: 0.66rem;
   line-height: 1.3;
+  /* Language hints carry unbreakable parentheticals ("Chinese (Simplified)")
+     in a cell that is ~67px wide at 320px. */
+  overflow-wrap: anywhere;
 }
 
 /* ── Loading ──
@@ -6749,6 +6845,9 @@ button.adm-tile:focus-visible {
     padding: 0.5rem;
     overflow-x: auto;
     scrollbar-width: none;
+    /* Edge fade instead of the hidden scrollbar's dead end: the mask makes
+       the strip read as scrollable while it runs past its last chip. */
+    mask-image: linear-gradient(to right, transparent, #000 0.75rem, #000 calc(100% - 0.75rem), transparent);
   }
 
   .set-nav::-webkit-scrollbar { display: none; }

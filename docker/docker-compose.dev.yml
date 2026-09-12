@@ -10,5 +10,76 @@ services:
       - redis_dev_data:/data
     restart: unless-stopped
 
+  subtitle-control:
+    profiles: ["subtitle-workers"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    command: ["tsx", "workers/subtitles/control.ts"]
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DISABLED=false
+      - SUBTITLE_CONTROL_CONCURRENCY=${SUBTITLE_CONTROL_CONCURRENCY:-2}
+    depends_on: &subtitle-dependencies
+      - redis
+    restart: unless-stopped
+
+  subtitle-prepare:
+    profiles: ["subtitle-workers"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    command: ["tsx", "workers/subtitles/prepare.ts"]
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DISABLED=false
+      - SUBTITLE_PREPARE_CONCURRENCY=${SUBTITLE_PREPARE_CONCURRENCY:-1}
+    depends_on: *subtitle-dependencies
+    tmpfs:
+      - /tmp:size=${SUBTITLE_PREPARE_SCRATCH_SIZE:-2g},mode=1777
+    restart: unless-stopped
+
+  subtitle-asr:
+    profiles: ["subtitle-workers"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    command: ["tsx", "workers/subtitles/asr.ts"]
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DISABLED=false
+      - SUBTITLE_ASR_CONCURRENCY=${SUBTITLE_ASR_CONCURRENCY:-1}
+      - SUBTITLE_OPENAI_FALLBACK_URL=${SUBTITLE_OPENAI_FALLBACK_URL:-}
+      - SUBTITLE_LOCAL_PROVIDER_HOSTS=${SUBTITLE_LOCAL_PROVIDER_HOSTS:-}
+    depends_on: *subtitle-dependencies
+    restart: unless-stopped
+
+  subtitle-translate:
+    profiles: ["subtitle-workers"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    command: ["tsx", "workers/subtitles/translate.ts"]
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DISABLED=false
+      - SUBTITLE_TRANSLATE_CONCURRENCY=${SUBTITLE_TRANSLATE_CONCURRENCY:-2}
+      - SUBTITLE_OPENAI_FALLBACK_URL=${SUBTITLE_OPENAI_FALLBACK_URL:-}
+      - SUBTITLE_LOCAL_PROVIDER_HOSTS=${SUBTITLE_LOCAL_PROVIDER_HOSTS:-}
+    depends_on: *subtitle-dependencies
+    restart: unless-stopped
+
 volumes:
   redis_dev_data:

@@ -490,6 +490,9 @@ function AddLinkForm({
         </div>
       )}
 
+      {/* The label interpolates a memory title (up to 300 chars); the button
+          itself cannot wrap (whitespace-nowrap on the primitive), so the text
+          has to truncate inside it instead of spilling past the panel. */}
       <Button type="submit" disabled={!canSubmit} className="w-full">
         {link.isPending ? (
           <>
@@ -498,10 +501,12 @@ function AddLinkForm({
           </>
         ) : (
           <>
-            <Link2 className="h-4 w-4" aria-hidden="true" />
-            {selected
-              ? t("brain.links.linkTo", { label: selected.label })
-              : t("brain.links.linkToNothing")}
+            <Link2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">
+              {selected
+                ? t("brain.links.linkTo", { label: selected.label })
+                : t("brain.links.linkToNothing")}
+            </span>
           </>
         )}
       </Button>

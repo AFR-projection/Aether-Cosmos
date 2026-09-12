@@ -98,7 +98,10 @@ export function OfflineOverlay() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-background/95 backdrop-blur-sm p-4"
+          /* overflow-y-auto + py-8: body scroll is locked below, so the overlay
+             itself must scroll — in landscape on a phone the stacked content is
+             taller than the viewport and the retry button was unreachable. */
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto bg-background/95 p-4 py-8 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="offline-overlay-title"

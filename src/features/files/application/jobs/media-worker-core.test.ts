@@ -79,6 +79,7 @@ function setup() {
       extension: ".mp3",
     })),
     inspect: vi.fn(async () => ({ mediaDurationMs: 12_000 })),
+    ensureSubtitles: vi.fn(async () => undefined),
     renderThumbnails: vi.fn(async () => [
       { size: 300, body: Buffer.from("thumb") },
     ]),
@@ -177,6 +178,17 @@ describe("media worker core", () => {
     await createMediaWorkerCore(h.deps).inspectMedia(exact);
     expect(h.deps.inspect).not.toHaveBeenCalled();
     expect(h.deps.persistInspection).not.toHaveBeenCalled();
+    expect(h.deps.ensureSubtitles).not.toHaveBeenCalled();
+  });
+
+  it("ensures automatic subtitles once after an exact inspection commits", async () => {
+    const h = setup();
+    await expect(createMediaWorkerCore(h.deps).inspectMedia(exact)).resolves.toBe("completed");
+    expect(h.deps.ensureSubtitles).toHaveBeenCalledOnce();
+    expect(h.deps.ensureSubtitles).toHaveBeenCalledWith(exact);
+    expect(vi.mocked(h.deps.persistInspection)).toHaveBeenCalledBefore(
+      vi.mocked(h.deps.ensureSubtitles!),
+    );
   });
 
   it("treats a zero-row final inspection CAS as a stale no-op", async () => {
@@ -184,6 +196,7 @@ describe("media worker core", () => {
     vi.mocked(h.deps.persistInspection).mockResolvedValue(false);
     await expect(createMediaWorkerCore(h.deps).inspectMedia(exact)).resolves.toBe("stale");
     expect(h.deps.inspect).toHaveBeenCalledOnce();
+    expect(h.deps.ensureSubtitles).not.toHaveBeenCalled();
   });
 
   it("does not transform or publish a stale trim job", async () => {

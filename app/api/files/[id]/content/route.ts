@@ -12,6 +12,7 @@ import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { readBoundedText } from "@/shared/api/read-body";
 import { objectExists, putR2Object } from "@files/infrastructure/storage/r2";
 import { snapshotFileVersion } from "@files/application/commands/versions";
+import { invalidateSubtitleSourceForFile } from "@files/infrastructure/subtitles/invalidate-adapter";
 import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
 import {
   TEXT_EDIT_MAX_BYTES,
@@ -143,7 +144,7 @@ export async function PUT(
 
     // Keep the previous bytes recoverable before overwriting them — the same
     // guarantee the image editor and the trim job give.
-    await snapshotFileVersion(file, actorId);
+    await snapshotFileVersion(file, actorId, { invalidateSubtitleSource: invalidateSubtitleSourceForFile });
 
     await putR2Object(file.r2Key, body, file.mimeType || "text/plain");
 

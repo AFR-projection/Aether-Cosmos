@@ -92,9 +92,8 @@ describe("the descriptor and the schema agree, column for column", () => {
   it("found the schema at all", () => {
     // Guards every test below: a refactor that stopped finding tables would make them
     // pass by comparing nothing to nothing.
-    // 53: the original 52 + `media_operations` from migration 0030 (class `never` —
-    // a restore must not write half-finished work records for another machine).
-    expect(schemaTables.size).toBe(53);
+    // 61: the previous 53 plus eight subtitle pipeline tables from migration 0031.
+    expect(schemaTables.size).toBe(61);
     expect(CARRIED).toHaveLength(16);
   });
 
@@ -477,10 +476,10 @@ describe("carried plus excluded is every table of both domains", () => {
   it("carries the counts the design states", () => {
     expect(accountTables("files")).toHaveLength(3);
     expect(accountTables("brain")).toHaveLength(13);
-    // 5 + the three `subtitle_*` tables, which the archive format has no room for.
-    expect(excludedAccountTables("files")).toHaveLength(8);
+    // 5 + the eleven `subtitle_*` tables, which the archive format has no room for.
+    expect(excludedAccountTables("files")).toHaveLength(16);
     expect(excludedAccountTables("brain")).toHaveLength(2);
-    expect(EXCLUDED_ACCOUNT_TABLES).toHaveLength(10);
+    expect(EXCLUDED_ACCOUNT_TABLES).toHaveLength(18);
   });
 
   it("gives every omission a reason a user could read", () => {

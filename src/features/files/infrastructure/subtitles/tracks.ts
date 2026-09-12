@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/shared/infrastructure/db/schema";
 import { db as defaultDb } from "@/shared/infrastructure/db";
@@ -28,6 +28,42 @@ type SubtitleDb = PostgresJsDatabase<typeof schema>;
 export type SubtitleTrackRow = typeof subtitleTracks.$inferSelect;
 export type SubtitleOrigin = SubtitleTrackRow["origin"];
 
+export const WHOLE_VTT_MAX_CUES = 20_000;
+export const WHOLE_VTT_MAX_ESTIMATED_BYTES = 10 * 1024 * 1024;
+export const CUE_WINDOW_MAX_MS = 30 * 60 * 1000;
+export const CUE_WINDOW_MAX_CUES = 500;
+
+export type CueCursor = { startMs: number; idx: number };
+export type CueWindow = {
+  cues: SubtitleCue[];
+  nextCursor: CueCursor | null;
+};
+export type WholeVttSize = { cueCount: number; estimatedBytes: number };
+
+/** Conservative UTF-8 VTT size, including identifier, timing, and blank-line overhead. */
+export function estimateVttBytes(cues: readonly SubtitleCue[]): number {
+  let bytes = Buffer.byteLength("WEBVTT\n", "utf8");
+  for (const cue of cues) {
+    bytes +=
+      Buffer.byteLength(cue.text, "utf8") +
+      String(cue.idx + 1).length +
+      // Two timestamps, the arrow, separators, and a blank line. Hours may exceed two digits.
+      48 +
+      String(Math.floor(Math.max(cue.startMs, cue.endMs) / 3_600_000)).length * 2;
+  }
+  return bytes;
+}
+
+export function wholeVttRequiresSegmentation(size: WholeVttSize): boolean {
+  return size.cueCount > WHOLE_VTT_MAX_CUES || size.estimatedBytes > WHOLE_VTT_MAX_ESTIMATED_BYTES;
+}
+
+function assertSafeTimestamp(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer`);
+  }
+}
+
 /** Every track of one file, oldest first, so the CC menu order is stable across reloads. */
 export async function listTracks(
   fileId: string,
@@ -36,7 +72,9 @@ export async function listTracks(
   return db
     .select()
     .from(subtitleTracks)
-    .where(eq(subtitleTracks.fileId, fileId))
+    .where(
+      and(eq(subtitleTracks.fileId, fileId), eq(subtitleTracks.trackState, "current"))
+    )
     .orderBy(asc(subtitleTracks.createdAt), asc(subtitleTracks.id));
 }
 
@@ -63,7 +101,13 @@ export async function getTrackForFile(
   const [row] = await db
     .select()
     .from(subtitleTracks)
-    .where(and(eq(subtitleTracks.id, trackId), eq(subtitleTracks.fileId, fileId)))
+    .where(
+      and(
+        eq(subtitleTracks.id, trackId),
+        eq(subtitleTracks.fileId, fileId),
+        eq(subtitleTracks.trackState, "current")
+      )
+    )
     .limit(1);
   return row ?? null;
 }
@@ -79,6 +123,9 @@ export async function getTrackForFile(
  * At most one exists in practice — the route always reuses this one — but the ordering makes the
  * choice deterministic if a historical row ever produced two.
  */
+/**
+ * Find an ASR track in candidate or current state for this file.
+ */
 export async function findAsrTrack(
   fileId: string,
   db: SubtitleDb = defaultDb
@@ -86,10 +133,79 @@ export async function findAsrTrack(
   const [row] = await db
     .select()
     .from(subtitleTracks)
-    .where(and(eq(subtitleTracks.fileId, fileId), eq(subtitleTracks.origin, "asr")))
-    .orderBy(asc(subtitleTracks.createdAt), asc(subtitleTracks.id))
+    .where(
+      and(
+        eq(subtitleTracks.fileId, fileId),
+        eq(subtitleTracks.origin, "asr"),
+        inArray(subtitleTracks.trackState, ["candidate", "current"])
+      )
+    )
+    .orderBy(desc(subtitleTracks.createdAt))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Create or reset a candidate track for pipeline materialization.
+ * Returns the track row (new or existing candidate).
+ */
+export async function createCandidateTrack(
+  input: UpsertTrackInput & { trackState: "candidate" },
+  db: SubtitleDb = defaultDb
+): Promise<SubtitleTrackRow> {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    if (input.pipelineRunId) {
+      const [existing] = await tx.select().from(subtitleTracks)
+        .where(and(
+          eq(subtitleTracks.pipelineRunId, input.pipelineRunId),
+          eq(subtitleTracks.language, input.language),
+          eq(subtitleTracks.origin, input.origin),
+          eq(subtitleTracks.trackState, "candidate")
+        )).limit(1);
+      if (existing) {
+        const [updated] = await tx.update(subtitleTracks).set({
+          status: input.status ?? "processing",
+          translatedFromId: input.translatedFromId ?? null,
+          sourceVersion: input.sourceVersion ?? null,
+          sourceR2Key: input.sourceR2Key ?? null,
+          sourceMimeType: input.sourceMimeType ?? null,
+          sourceTrackRevision: input.sourceTrackRevision ?? null,
+          cueCount: input.cueCount ?? 0,
+          durationSeconds: input.durationSeconds ?? 0,
+          provider: input.provider ?? null,
+          model: input.model ?? null,
+          failureCode: null,
+          failureMessage: null,
+          createdBy: input.createdBy,
+          updatedAt: now,
+        }).where(eq(subtitleTracks.id, existing.id)).returning();
+        return updated;
+      }
+    }
+    const [inserted] = await tx.insert(subtitleTracks).values({
+      fileId: input.fileId,
+      language: input.language,
+      origin: input.origin,
+      status: input.status ?? "processing",
+      trackState: "candidate",
+      translatedFromId: input.translatedFromId ?? null,
+      pipelineRunId: input.pipelineRunId ?? null,
+      sourceVersion: input.sourceVersion ?? null,
+      sourceR2Key: input.sourceR2Key ?? null,
+      sourceMimeType: input.sourceMimeType ?? null,
+      sourceTrackRevision: input.sourceTrackRevision ?? null,
+      progress: 0,
+      cueCount: input.cueCount ?? 0,
+      durationSeconds: input.durationSeconds ?? 0,
+      provider: input.provider ?? null,
+      model: input.model ?? null,
+      createdBy: input.createdBy,
+      readyAt: null,
+      updatedAt: now,
+    }).returning();
+    return inserted;
+  });
 }
 
 /** Put a track back in the queue: progress cleared, previous failure forgotten. */
@@ -109,11 +225,12 @@ export async function requeueTrack(
     .where(eq(subtitleTracks.id, trackId));
 }
 
-/** A track's lines in order. Bounded, because this feeds a response body. */export async function listCues(
+/** Read every cue. Callers must gate this with {@link getWholeVttSize}; nothing is truncated. */
+export async function listCues(
   trackId: string,
   db: SubtitleDb = defaultDb
 ): Promise<SubtitleCue[]> {
-  const rows = await db
+  return db
     .select({
       idx: subtitleCues.idx,
       startMs: subtitleCues.startMs,
@@ -122,9 +239,89 @@ export async function requeueTrack(
     })
     .from(subtitleCues)
     .where(eq(subtitleCues.trackId, trackId))
-    .orderBy(asc(subtitleCues.idx))
-    .limit(SUBTITLE_MAX_CUES);
-  return rows;
+    .orderBy(asc(subtitleCues.idx));
+}
+
+/** Count and estimate a complete WebVTT without loading cue text into the application. */
+export async function getWholeVttSize(
+  trackId: string,
+  db: SubtitleDb = defaultDb
+): Promise<WholeVttSize> {
+  const [row] = await db
+    .select({
+      cueCount: sql<number>`count(*)::bigint`,
+      estimatedBytes: sql<number>`(
+        7 + coalesce(sum(
+          octet_length(${subtitleCues.text})
+          + length((${subtitleCues.idx} + 1)::text)
+          + 56
+        ), 0)
+      )::bigint`,
+    })
+    .from(subtitleCues)
+    .where(eq(subtitleCues.trackId, trackId));
+  return {
+    cueCount: Number(row?.cueCount ?? 0),
+    estimatedBytes: Number(row?.estimatedBytes ?? 7),
+  };
+}
+
+/**
+ * A stable time window. The cursor is `(start_ms, idx)`, so equal timestamps cannot skip cues.
+ * One extra row is fetched only to decide whether a continuation cursor is needed.
+ */
+export async function listCueWindow(
+  trackId: string,
+  input: { startMs: number; endMs: number; cursor?: CueCursor | null; limit?: number },
+  db: SubtitleDb = defaultDb
+): Promise<CueWindow> {
+  assertSafeTimestamp(input.startMs, "startMs");
+  assertSafeTimestamp(input.endMs, "endMs");
+  if (input.endMs <= input.startMs || input.endMs - input.startMs > CUE_WINDOW_MAX_MS) {
+    throw new RangeError(`Cue windows must be greater than zero and at most ${CUE_WINDOW_MAX_MS}ms`);
+  }
+  const limit = input.limit ?? CUE_WINDOW_MAX_CUES;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > CUE_WINDOW_MAX_CUES) {
+    throw new RangeError(`limit must be between 1 and ${CUE_WINDOW_MAX_CUES}`);
+  }
+  if (input.cursor) {
+    assertSafeTimestamp(input.cursor.startMs, "cursor.startMs");
+    if (!Number.isSafeInteger(input.cursor.idx) || input.cursor.idx < 0) {
+      throw new RangeError("cursor.idx must be a non-negative safe integer");
+    }
+  }
+
+  const cursorFilter = input.cursor
+    ? or(
+        gt(subtitleCues.startMs, input.cursor.startMs),
+        and(eq(subtitleCues.startMs, input.cursor.startMs), gt(subtitleCues.idx, input.cursor.idx))
+      )
+    : undefined;
+  const rows = await db
+    .select({
+      idx: subtitleCues.idx,
+      startMs: subtitleCues.startMs,
+      endMs: subtitleCues.endMs,
+      text: subtitleCues.text,
+    })
+    .from(subtitleCues)
+    .where(
+      and(
+        eq(subtitleCues.trackId, trackId),
+        gte(subtitleCues.startMs, input.startMs),
+        lt(subtitleCues.startMs, input.endMs),
+        cursorFilter
+      )
+    )
+    .orderBy(asc(subtitleCues.startMs), asc(subtitleCues.idx))
+    .limit(limit + 1);
+  const cues = rows.slice(0, limit);
+  const last = cues.at(-1);
+  return {
+    cues,
+    nextCursor:
+      rows.length > limit && last ? { startMs: last.startMs, idx: last.idx } : null,
+  };
 }
 
 /**
@@ -142,11 +339,17 @@ export async function replaceCues(
   cues: readonly SubtitleCue[],
   db: SubtitleDb = defaultDb
 ): Promise<void> {
-  const capped = cues.slice(0, SUBTITLE_MAX_CUES);
+  if (cues.length > SUBTITLE_MAX_CUES) {
+    throw new RangeError(`A subtitle track cannot contain more than ${SUBTITLE_MAX_CUES} cues`);
+  }
+  for (const cue of cues) {
+    assertSafeTimestamp(cue.startMs, "cue.startMs");
+    assertSafeTimestamp(cue.endMs, "cue.endMs");
+  }
   await db.transaction(async (tx) => {
     await tx.delete(subtitleCues).where(eq(subtitleCues.trackId, trackId));
-    for (let start = 0; start < capped.length; start += 500) {
-      const slice = capped.slice(start, start + 500);
+    for (let start = 0; start < cues.length; start += 500) {
+      const slice = cues.slice(start, start + 500);
       await tx.insert(subtitleCues).values(
         slice.map((cue) => ({
           trackId,
@@ -159,8 +362,71 @@ export async function replaceCues(
     }
     await tx
       .update(subtitleTracks)
-      .set({ cueCount: capped.length, updatedAt: new Date() })
+      .set({ cueCount: cues.length, updatedAt: new Date() })
       .where(eq(subtitleTracks.id, trackId));
+  });
+}
+
+export type RevisionReplaceResult =
+  | { ok: true; revision: number }
+  | { ok: false; reason: "missing" | "revision_conflict" };
+
+/** Whole-track editor save, serialized by an atomic revision compare-and-swap. */
+export async function replaceCuesAtRevision(
+  trackId: string,
+  expectedRevision: number,
+  cues: readonly SubtitleCue[],
+  db: SubtitleDb = defaultDb
+): Promise<RevisionReplaceResult> {
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+    throw new RangeError("expectedRevision must be a positive safe integer");
+  }
+  if (cues.length > SUBTITLE_MAX_CUES) {
+    throw new RangeError(`A subtitle track cannot contain more than ${SUBTITLE_MAX_CUES} cues`);
+  }
+  for (const cue of cues) {
+    assertSafeTimestamp(cue.startMs, "cue.startMs");
+    assertSafeTimestamp(cue.endMs, "cue.endMs");
+  }
+
+  return db.transaction(async (tx) => {
+    const [claimed] = await tx
+      .update(subtitleTracks)
+      .set({
+        revision: sql`${subtitleTracks.revision} + 1`,
+        userEditedAt: new Date(),
+        cueCount: cues.length,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(subtitleTracks.id, trackId),
+          eq(subtitleTracks.revision, expectedRevision)
+        )
+      )
+      .returning({ revision: subtitleTracks.revision });
+    if (!claimed) {
+      const [existing] = await tx
+        .select({ id: subtitleTracks.id })
+        .from(subtitleTracks)
+        .where(eq(subtitleTracks.id, trackId))
+        .limit(1);
+      return { ok: false, reason: existing ? "revision_conflict" : "missing" };
+    }
+
+    await tx.delete(subtitleCues).where(eq(subtitleCues.trackId, trackId));
+    for (let start = 0; start < cues.length; start += 500) {
+      await tx.insert(subtitleCues).values(
+        cues.slice(start, start + 500).map((cue) => ({
+          trackId,
+          idx: cue.idx,
+          startMs: cue.startMs,
+          endMs: cue.endMs,
+          text: cue.text,
+        }))
+      );
+    }
+    return { ok: true, revision: claimed.revision };
   });
 }
 
@@ -175,6 +441,12 @@ export type UpsertTrackInput = {
   durationSeconds?: number;
   provider?: string | null;
   model?: string | null;
+  trackState?: SubtitleTrackRow["trackState"];
+  pipelineRunId?: string | null;
+  sourceVersion?: number | null;
+  sourceR2Key?: string | null;
+  sourceMimeType?: string | null;
+  sourceTrackRevision?: number | null;
 };
 
 /**
@@ -191,6 +463,7 @@ export async function upsertTrack(
 ): Promise<SubtitleTrackRow> {
   const now = new Date();
   const status = input.status ?? "queued";
+  const trackState = input.trackState ?? "current";
   const [row] = await db
     .insert(subtitleTracks)
     .values({
@@ -198,7 +471,13 @@ export async function upsertTrack(
       language: input.language,
       origin: input.origin,
       status,
+      trackState,
       translatedFromId: input.translatedFromId ?? null,
+      pipelineRunId: input.pipelineRunId ?? null,
+      sourceVersion: input.sourceVersion ?? null,
+      sourceR2Key: input.sourceR2Key ?? null,
+      sourceMimeType: input.sourceMimeType ?? null,
+      sourceTrackRevision: input.sourceTrackRevision ?? null,
       progress: 0,
       cueCount: input.cueCount ?? 0,
       durationSeconds: input.durationSeconds ?? 0,
@@ -210,10 +489,19 @@ export async function upsertTrack(
     })
     .onConflictDoUpdate({
       target: [subtitleTracks.fileId, subtitleTracks.language, subtitleTracks.origin],
+      // The unique index is partial (`WHERE track_state = 'current'`), so the conflict target
+      // must carry the same predicate.
+      targetWhere: sql`${subtitleTracks.trackState} = 'current'`,
       set: {
         status,
+        trackState,
         progress: 0,
         translatedFromId: input.translatedFromId ?? null,
+        pipelineRunId: input.pipelineRunId ?? null,
+        sourceVersion: input.sourceVersion ?? null,
+        sourceR2Key: input.sourceR2Key ?? null,
+        sourceMimeType: input.sourceMimeType ?? null,
+        sourceTrackRevision: input.sourceTrackRevision ?? null,
         cueCount: input.cueCount ?? 0,
         durationSeconds: input.durationSeconds ?? 0,
         provider: input.provider ?? null,

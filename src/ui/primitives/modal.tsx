@@ -185,7 +185,15 @@ export function Modal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className={cn("scrim fixed inset-0 flex items-center justify-center p-4", LAYER[level])}
+          className={cn(
+            // overflow-y-auto: when the soft keyboard or a short landscape
+            // viewport leaves less room than the panel's max-h, the whole
+            // dialog must stay reachable by scrolling the scrim itself.
+            // The top padding is the larger of 1rem and the notch inset, so a
+            // 90dvh panel's title bar never slides under the iOS status bar.
+            "scrim fixed inset-0 flex items-center justify-center overflow-y-auto px-4 py-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]",
+            LAYER[level]
+          )}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -224,7 +232,13 @@ export function Modal({
                 </span>
               )}
               <div className="min-w-0 flex-1">
-                <h2 id={titleId} className="text-sm font-semibold leading-tight text-foreground">
+                {/* break-words: titles interpolate user-supplied names (project,
+                    agent), and a single long token would otherwise push the close
+                    button out and clip behind the panel's overflow-hidden. */}
+                <h2
+                  id={titleId}
+                  className="break-words text-sm font-semibold leading-tight text-foreground"
+                >
                   {title}
                 </h2>
                 {description && (

@@ -582,7 +582,7 @@ function AddSenderSheet({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="scrim fixed inset-0 z-[60] flex items-center justify-center p-4"
+      className="scrim fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto p-4 sm:items-center"
       onClick={onClose}
       role="presentation"
     >
@@ -591,7 +591,10 @@ function AddSenderSheet({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.97, y: 8 }}
         transition={{ type: "spring", stiffness: 320, damping: 26 }}
-        className="adm-sheet max-w-md"
+        /* my-auto: with the soft keyboard up on a phone the sheet can be taller
+           than the scrim — items-start + the scrim's own scroll keeps the head
+           and the save button reachable. */
+        className="adm-sheet my-auto max-w-md"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-sender-title"
@@ -636,7 +639,9 @@ function AddSenderSheet({
                 placeholder={t("admin.email.appPasswordPlaceholder")}
                 value={values.appPassword}
                 onChange={(e) => onChange.setAppPassword(e.target.value)}
-                className="pr-10 font-mono"
+                /* pr-14 below sm: the reveal button is an .adm-iconbtn, which
+                   grows to 44px on coarse pointers and would cover the digits. */
+                className="pr-14 font-mono sm:pr-10"
               />
               <button
                 type="button"

@@ -130,7 +130,10 @@ export function DownloadsWidget() {
       : t("files.download.recentSummary", { count: downloads.length });
 
   return (
-    <div className="fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-2">
+    /* Same mobile offset as the toast viewport and the browser's own fixed
+       bar: clear the bottom tab bar plus its safe-area inset, then park at the
+       corner on lg. */
+    <div className="fixed bottom-[calc(var(--bottom-nav-h)+var(--safe-bottom)+0.75rem)] right-4 z-[60] flex flex-col items-end gap-2 lg:bottom-4">
       <AnimatePresence>
         {open && (
           <motion.div

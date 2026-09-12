@@ -129,14 +129,14 @@ function EncryptionSetupForm({
                 placeholder={t("files.encrypt.passphrasePlaceholder")}
                 autoComplete="new-password"
                 autoFocus
-                className="pr-10"
+                className="pr-12"
               />
               <button
                 type="button"
                 onClick={() => setShow((v) => !v)}
                 aria-label={show ? t("files.encrypt.hidePassphrase") : t("files.encrypt.showPassphrase")}
                 aria-pressed={show}
-                className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
               >
                 {show ? (
                   <EyeOff className="h-4 w-4" aria-hidden="true" />

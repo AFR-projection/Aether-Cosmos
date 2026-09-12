@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { eq, and, isNull, isNotNull, desc, lt, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/shared/infrastructure/db";
-import { files } from "@/shared/infrastructure/db/schema";
+import { files, type File } from "@/shared/infrastructure/db/schema";
 import { getClientIp, requireAuth } from "@/shared/lib/auth/session";
 import { requireAuthOrApiKey } from "@/shared/lib/auth/api-key";
 import {
@@ -27,6 +27,15 @@ import { cacheGet, cacheSet, cacheDelPattern } from "@/shared/infrastructure/cac
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { recalculateUsedBytes } from "@/shared/infrastructure/db";
 import { dispatchWebhookEvent } from "@/shared/infrastructure/webhooks/dispatch";
+
+export type FileSubtitleLifecycleHooks = {
+  /** Cancel in-flight subtitle work for a source that is no longer live. */
+  invalidateSource?(file: File): Promise<unknown>;
+  /** Reconciliation may ensure this exact source after a file leaves the recycle bin. */
+  restoreSource?(file: File): Promise<unknown>;
+};
+
+export const fileSubtitleLifecycleHooks: FileSubtitleLifecycleHooks = {};
 import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
 import { timestampParam } from "@/shared/api/query-params";
 
@@ -278,6 +287,7 @@ export async function PATCH(request: NextRequest) {
       }
       case "delete": {
         await db.update(files).set({ deletedAt: new Date() }).where(eq(files.id, body.id));
+        await fileSubtitleLifecycleHooks.invalidateSource?.(file);
         await recalculateUsedBytes(file.userId);
         await logActivity(sessionUser, "delete", { resourceType: "file", resourceId: body.id, ip });
         break;

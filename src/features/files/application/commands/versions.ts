@@ -4,6 +4,23 @@ import { files, fileVersions, changeHistory, type File } from "@/shared/infrastr
 import { copyR2Object, objectExists } from "@files/infrastructure/storage/r2";
 import { mediaMetadataReset } from "@files/application/jobs/media-inspection";
 
+export type SubtitleSourceInvalidation = {
+  fileId: string;
+  sourceVersion: number;
+  sourceR2Key: string;
+  sourceMimeType: string;
+};
+
+export type VersionCommandHooks = {
+  /**
+   * Supersede tracks and cancel work tied to the source being replaced.
+   * Optional until the subtitle pipeline exports its invalidation adapter.
+   */
+  invalidateSubtitleSource?(source: SubtitleSourceInvalidation): Promise<unknown>;
+};
+
+const noVersionCommandHooks: VersionCommandHooks = {};
+
 function versionObjectKey(file: File, version: number): string {
   return `${file.userId}/${file.id}/versions/${version}/${file.name}`;
 }
@@ -24,7 +41,8 @@ export function hasPersistedObject(file: File): boolean {
  */
 export async function snapshotFileVersion(
   file: File,
-  createdBy: string
+  createdBy: string,
+  hooks: VersionCommandHooks = noVersionCommandHooks,
 ): Promise<{ previousVersion: number; newVersion: number } | null> {
   if (!hasPersistedObject(file)) return null;
 
@@ -62,6 +80,13 @@ export async function snapshotFileVersion(
     snapshot: { version: previousVersion, r2Key: versionKey },
   });
 
+  await hooks.invalidateSubtitleSource?.({
+    fileId: file.id,
+    sourceVersion: previousVersion,
+    sourceR2Key: file.r2Key,
+    sourceMimeType: file.mimeType,
+  });
+
   return { previousVersion, newVersion };
 }
 
@@ -71,7 +96,8 @@ export async function snapshotFileVersion(
 export async function restoreFileVersion(
   file: File,
   targetVersion: number,
-  restoredBy: string
+  restoredBy: string,
+  hooks: VersionCommandHooks = noVersionCommandHooks,
 ): Promise<File> {
   const [target] = await db
     .select()
@@ -83,8 +109,8 @@ export async function restoreFileVersion(
     throw new Error("Version not found");
   }
 
-  // Snapshot current before restore
-  await snapshotFileVersion(file, restoredBy);
+  // Snapshot current before restore; this also invalidates the source being replaced.
+  await snapshotFileVersion(file, restoredBy, hooks);
 
   // Re-fetch after snapshot bumped version
   const [fresh] = await db.select().from(files).where(eq(files.id, file.id)).limit(1);

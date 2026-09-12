@@ -128,7 +128,7 @@ function VerifyEmailContent() {
             </h1>
             <p className="mt-2 text-sm text-muted-foreground/80">
               {t("auth.verify.sentTo")}{" "}
-              <span className="font-medium text-foreground">{email}</span>
+              <span className="break-all font-medium text-foreground">{email}</span>
             </p>
           </div>
 
@@ -157,7 +157,9 @@ function VerifyEmailContent() {
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 maxLength={6}
-                className="h-12 text-center text-2xl tracking-[0.5em] font-mono"
+                /* pl-[0.5em]: letter-spacing adds a full space after the last
+                   digit, which nudged the "centered" code half a space right. */
+                className="h-12 pl-[0.5em] text-center text-2xl tracking-[0.5em] font-mono"
                 disabled={verifying}
                 autoFocus
               />
@@ -254,7 +256,7 @@ function VerifyEmailContent() {
                 </li>
                 <li className="flex gap-2">
                   <span className="font-semibold">2.</span>
-                  <div>
+                  <div className="min-w-0 break-all">
                     {t("auth.verify.help2", { email: email ?? "" })}{" "}
                     <button
                       type="button"

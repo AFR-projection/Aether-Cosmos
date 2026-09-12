@@ -234,7 +234,7 @@ export default function AdminOverviewPage() {
         }
       >
         <Meter value={ratio} tone={ratio >= 0.9 ? "danger" : "accent"} />
-        <div className="mt-3 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Figure label={t("admin.overview.figUsed")} value={formatBytes(used)} />
           <Figure label={t("admin.overview.figFree")} value={formatBytes(free)} />
           <Figure label={t("admin.overview.figUtilisation")} value={`${pct}%`} />
@@ -463,7 +463,7 @@ export default function AdminOverviewPage() {
           title={t("admin.overview.breakdownTitle")}
           sub={t("admin.overview.breakdownSub")}
         >
-          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
             {byType.map((item) => {
               const meta = auditAction(item.action);
               return (
@@ -502,7 +502,9 @@ export default function AdminOverviewPage() {
 /** One number in a three-up summary strip. */
 function Figure({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[0.7rem] bg-[var(--adm-inset)] px-2.5 py-2">
+    // bg-muted/40, not var(--adm-inset): that token is a box-shadow value, so
+    // it resolved to nothing as a background and the tile rendered flat.
+    <div className="rounded-[0.7rem] bg-muted/40 px-2.5 py-2">
       <p className="adm-num text-[0.9rem] font-semibold">{value}</p>
       <p className="adm-tile__label">{label}</p>
     </div>

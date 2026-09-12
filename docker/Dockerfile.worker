@@ -37,4 +37,6 @@ COPY tsconfig.json ./
 
 # tsx, not `npx tsx`: npx falls back to fetching from the registry when it cannot
 # resolve the binary, which turns a broken image into a slow runtime failure.
+# Override per Compose service with, for example,
+# `tsx workers/subtitles/asr.ts`; the default preserves the current storage worker.
 CMD ["tsx", "workers/index.ts"]

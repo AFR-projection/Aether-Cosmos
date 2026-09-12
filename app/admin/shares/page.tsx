@@ -242,7 +242,7 @@ export default function AdminSharesPage() {
             <span className="text-[0.8rem] font-medium">
               {t("common.selectedCount", { count: selected.size })}
             </span>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
                 {t("common.cancel")}
               </Button>
@@ -356,7 +356,7 @@ export default function AdminSharesPage() {
         <td>
           <Link
             href={`/admin/users/${s.ownerId}`}
-            className="font-medium text-accent-ink hover:underline"
+            className="block max-w-[12rem] truncate font-medium text-accent-ink hover:underline"
           >
             {s.ownerUsername}
           </Link>

@@ -72,7 +72,7 @@ export function ConfirmDialog({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="scrim fixed inset-0 z-[60] flex items-center justify-center p-4"
+          className="scrim fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto p-4 sm:items-center"
           onClick={() => !busy && onCancel()}
         >
           <motion.div
@@ -80,17 +80,21 @@ export function ConfirmDialog({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: "spring", stiffness: 340, damping: 28 }}
-            className="w-full max-w-md rounded-2xl border border-border/50 bg-surface shadow-2xl"
+            /* my-auto keeps it centered when it fits, reachable by scrim scroll
+               when the reason input raises the soft keyboard. */
+            className="my-auto w-full max-w-md rounded-2xl border border-border/50 bg-surface shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 border-b border-border/40 px-6 py-4">
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-3">
                 {options.danger && (
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-danger/10 text-danger-ink">
                     <AlertTriangle className="h-4 w-4" />
                   </div>
                 )}
-                <h2 className="text-lg font-semibold">{options.title}</h2>
+                {/* Titles interpolate names ("Suspend <user>"); a long token
+                    must wrap, not push the close button off the panel. */}
+                <h2 className="min-w-0 break-words text-lg font-semibold">{options.title}</h2>
               </div>
               <Button
                 variant="ghost"

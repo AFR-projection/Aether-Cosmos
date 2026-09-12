@@ -68,6 +68,14 @@ export const FILES_TABLES = [
   "subtitle_settings",
   "subtitle_tracks",
   "subtitle_cues",
+  "subtitle_provider_profiles",
+  "subtitle_pipeline_runs",
+  "subtitle_pipeline_targets",
+  "subtitle_pipeline_work_items",
+  "subtitle_audio_chunks",
+  "subtitle_cue_partitions",
+  "subtitle_provider_attempts",
+  "subtitle_reconciliation_state",
 ] as const;
 
 /** `memories.embedding` rides along: delivery is a download with no size ceiling. */

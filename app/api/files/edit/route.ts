@@ -17,6 +17,7 @@ import { validateCsrf } from "@/shared/lib/security";
 import { enqueueJob, getQueue } from "@/shared/infrastructure/queue";
 import { logActivity } from "@/shared/lib/auth/audit";
 import { snapshotFileVersion } from "@files/application/commands/versions";
+import { invalidateSubtitleSourceForFile } from "@files/infrastructure/subtitles/invalidate-adapter";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
 import { readStreamBounded, StreamTooLargeError } from "@/shared/lib/stream/read-bounded";
 import {
@@ -357,7 +358,7 @@ export async function POST(request: NextRequest) {
     if (refusal) return refusal;
 
     // Overwriting in place is only safe because the previous bytes stay reachable.
-    const snapshot = await snapshotFileVersion(file, getEffectiveUserId(sessionUser));
+    const snapshot = await snapshotFileVersion(file, getEffectiveUserId(sessionUser), { invalidateSubtitleSource: invalidateSubtitleSourceForFile });
     const version = snapshot?.newVersion ?? file.version;
 
     await putR2Object(file.r2Key, output, mimeType);
@@ -472,7 +473,7 @@ export async function PUT(request: NextRequest) {
 
     // The trim replaces the object in place, so keep a version to come back to —
     // the image path already does this and the media path silently did not.
-    const snapshot = await snapshotFileVersion(file, getEffectiveUserId(sessionUser));
+    const snapshot = await snapshotFileVersion(file, getEffectiveUserId(sessionUser), { invalidateSubtitleSource: invalidateSubtitleSourceForFile });
     const version = snapshot?.newVersion ?? file.version;
 
     const queued = await enqueueJob(

@@ -58,6 +58,12 @@ describe("parseTimestamp", () => {
     expect(parseTimestamp("00:00:01")).toBe(1_000);
   });
 
+  it("reads any number of hour digits, not just two", () => {
+    // A 40-hour edit session must be enterable in the editor's time cells.
+    expect(parseTimestamp("40:00:00.000")).toBe(144_000_000);
+    expect(parseTimestamp("103:02:03.004")).toBe(370_923_004);
+  });
+
   it("refuses anything that is not a timestamp", () => {
     expect(parseTimestamp("")).toBeNull();
     expect(parseTimestamp("later")).toBeNull();

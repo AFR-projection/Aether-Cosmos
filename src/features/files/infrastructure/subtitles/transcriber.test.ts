@@ -44,11 +44,22 @@ type StubFetch = ReturnType<typeof stubFetch>;
 
 const audio = () => new Uint8Array([1, 2, 3, 4]);
 
-function make(fetchImpl: StubFetch, over?: Partial<{ apiKey: string; baseUrl: string; model: string }>) {
+function make(
+  fetchImpl: StubFetch,
+  over?: Partial<{
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    requestId: string;
+    headers: Readonly<Record<string, string>>;
+  }>
+) {
   return new OpenAiCompatibleTranscriber({
     apiKey: over?.apiKey ?? "sk-test",
     baseUrl: over?.baseUrl ?? "https://api.groq.com/openai/v1",
     model: over?.model ?? "whisper-large-v3-turbo",
+    requestId: over?.requestId,
+    headers: over?.headers,
     fetchImpl: fetchImpl as unknown as typeof fetch,
   });
 }
@@ -99,6 +110,25 @@ describe("OpenAiCompatibleTranscriber request", () => {
       fileName: "c.ogg",
       mimeType: "audio/ogg",
     });
+    expect(authOf(fetchImpl)).toBe("Bearer sk-test");
+  });
+
+  it("forwards deterministic request and idempotency headers when supplied", async () => {
+    const fetchImpl = stubFetch({ language: "english", segments: [segment()] });
+    await make(fetchImpl, { requestId: "run-1:asr:12", headers: { "X-Pipeline": "v2" } })
+      .transcribe({ audio: audio(), fileName: "c.ogg", mimeType: "audio/ogg" });
+    expect(callOf(fetchImpl).init.headers).toMatchObject({
+      "Idempotency-Key": "run-1:asr:12",
+      "X-Request-Id": "run-1:asr:12",
+      "x-pipeline": "v2",
+      Authorization: "Bearer sk-test",
+    });
+  });
+
+  it("does not let custom headers replace authorization", async () => {
+    const fetchImpl = stubFetch({ language: "english", segments: [segment()] });
+    await make(fetchImpl, { headers: { Authorization: "Bearer stolen" } })
+      .transcribe({ audio: audio(), fileName: "c.ogg", mimeType: "audio/ogg" });
     expect(authOf(fetchImpl)).toBe("Bearer sk-test");
   });
 
@@ -308,6 +338,23 @@ describe("OpenAiCompatibleTranscriber failures", () => {
       .transcribe({ audio: audio(), fileName: "c.ogg", mimeType: "audio/ogg" })
       .catch((e: unknown) => e);
     expect((error as SubtitleTranscriptionError).retryAfterMs).toBe(12_000);
+  });
+
+  it("reads an HTTP-date Retry-After value", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("Wed, 21 Oct 2015 07:27:00 GMT"));
+    try {
+      const fetchImpl = stubFetch({}, {
+        status: 503,
+        headers: { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" },
+      });
+      const error = await make(fetchImpl)
+        .transcribe({ audio: audio(), fileName: "c.ogg", mimeType: "audio/ogg" })
+        .catch((e: unknown) => e);
+      expect((error as SubtitleTranscriptionError).retryAfterMs).toBe(60_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says so plainly when the reply is not JSON", async () => {

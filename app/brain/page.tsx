@@ -81,7 +81,8 @@ export default function BrainOverviewPage() {
 
       {brain && overview.data && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {/* One-up below 360px — see the agents page for the label-overflow reasoning. */}
+          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-4">
             <StatTile
               icon={BrainIcon}
               label={t("brain.overview.memories")}

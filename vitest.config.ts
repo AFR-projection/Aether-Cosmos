@@ -6,7 +6,7 @@ const r = (p: string) => resolve(__dirname, p);
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "workers/**/*.test.ts", "tests/**/*.test.ts"],
     // Dynamic route imports and native image modules can exceed Vitest's 5s
     // default on the first test when the full suite runs concurrently.
     testTimeout: 15_000,

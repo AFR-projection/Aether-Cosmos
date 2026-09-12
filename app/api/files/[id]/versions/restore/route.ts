@@ -5,6 +5,7 @@ import { getAccessibleFile, getEffectiveUserId, fileRefusal } from "@/shared/lib
 import { logActivity } from "@/shared/lib/auth/audit";
 import { validateCsrf } from "@/shared/lib/security";
 import { restoreFileVersion } from "@files/application/commands/versions";
+import { invalidateSubtitleSourceForFile } from "@files/infrastructure/subtitles/invalidate-adapter";
 import { enqueueJob } from "@/shared/infrastructure/queue";
 import { enqueueMediaInspection } from "@files/application/jobs/media-inspection";
 import { apiSuccess, apiError, handleApiError } from "@/shared/api/response";
@@ -33,7 +34,8 @@ export async function POST(
     const restored = await restoreFileVersion(
       accessible.file,
       body.version,
-      getEffectiveUserId(sessionUser)
+      getEffectiveUserId(sessionUser),
+      { invalidateSubtitleSource: invalidateSubtitleSourceForFile }
     );
 
     cacheDelPattern(`files:${accessible.file.userId}:*`).catch(() => {});

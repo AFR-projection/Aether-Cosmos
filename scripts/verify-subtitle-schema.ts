@@ -1,8 +1,22 @@
 import "./load-env";
 import postgres from "postgres";
 
+const PIPELINE_TABLES = [
+  "subtitle_settings",
+  "subtitle_tracks",
+  "subtitle_cues",
+  "subtitle_pipeline_runs",
+  "subtitle_pipeline_targets",
+  "subtitle_pipeline_work_items",
+  "subtitle_audio_chunks",
+  "subtitle_cue_partitions",
+  "subtitle_provider_profiles",
+  "subtitle_provider_attempts",
+  "subtitle_reconciliation_state",
+] as const;
+
 /**
- * Read-only check that migration 0029 landed, in the style of `verify-embedding-schema`.
+ * Read-only check that migrations 0029 and 0031 landed.
  *
  * Safe to run against production: it only reads catalog tables and counts rows. Every assertion is
  * something the feature depends on at runtime rather than a restatement of the migration file —
@@ -26,8 +40,8 @@ async function main() {
     const tables = await client<{ table_name: string }[]>`
       SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'public'
-         AND table_name IN ('subtitle_settings', 'subtitle_tracks', 'subtitle_cues')`;
-    for (const name of ["subtitle_settings", "subtitle_tracks", "subtitle_cues"]) {
+         AND table_name = ANY(${PIPELINE_TABLES})`;
+    for (const name of PIPELINE_TABLES) {
       checks.push({
         label: `table ${name}`,
         ok: tables.some((row) => row.table_name === name),
@@ -68,18 +82,55 @@ async function main() {
       });
     }
 
-    /**
-     * The index that makes "generate Indonesian again" replace a row instead of adding a second
-     * entry to the CC menu. Its absence is invisible until a user regenerates.
-     */
-    const indexes = await client<{ indexname: string }[]>`
-      SELECT indexname FROM pg_indexes
-       WHERE schemaname = 'public' AND tablename IN ('subtitle_tracks', 'subtitle_cues')`;
+    const trackColumns = await client<{ column_name: string; data_type: string }[]>`
+      SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'subtitle_tracks'`;
     for (const name of [
-      "subtitle_tracks_unique",
-      "subtitle_tracks_status_idx",
+      "pipeline_run_id", "source_version", "source_r2_key", "source_mime_type",
+      "source_track_revision", "revision", "track_state", "superseded_by_id", "user_edited_at",
+    ]) {
+      const found = trackColumns.find((row) => row.column_name === name);
+      checks.push({ label: `subtitle_tracks.${name}`, ok: !!found, detail: found?.data_type ?? "MISSING" });
+    }
+    for (const name of ["cue_count", "duration_seconds"]) {
+      const found = trackColumns.find((row) => row.column_name === name);
+      checks.push({
+        label: `subtitle_tracks.${name} bigint`,
+        ok: found?.data_type === "bigint",
+        detail: found?.data_type ?? "MISSING",
+      });
+    }
+
+    const cueColumns = await client<{ column_name: string; data_type: string }[]>`
+      SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'subtitle_cues'
+         AND column_name IN ('idx', 'start_ms', 'end_ms')`;
+    for (const name of ["idx", "start_ms", "end_ms"]) {
+      const found = cueColumns.find((row) => row.column_name === name);
+      checks.push({
+        label: `subtitle_cues.${name} bigint`,
+        ok: found?.data_type === "bigint",
+        detail: found?.data_type ?? "MISSING",
+      });
+    }
+
+    /**
+     * The partial indexes preserve the old playable track while a run builds a candidate.
+    const indexes = await client<{ indexname: string; indexdef: string }[]>`
+      SELECT indexname, indexdef FROM pg_indexes
+       WHERE schemaname = 'public' AND tablename IN (
+         'subtitle_tracks', 'subtitle_cues', 'subtitle_pipeline_work_items',
+         'subtitle_provider_profiles', 'subtitle_pipeline_runs'
+       )`;
+    for (const name of [
+      "subtitle_tracks_current_unique",
+      "subtitle_tracks_run_unique",
       "subtitle_cues_unique",
       "subtitle_cues_track_time_idx",
+      "subtitle_pipeline_work_items_due_idx",
+      "subtitle_pipeline_work_items_lease_idx",
+      "subtitle_provider_profiles_capability_role_unique",
+      "subtitle_pipeline_runs_request_key_unique",
     ]) {
       const ok = indexes.some((row) => row.indexname === name);
       checks.push({ label: `index ${name}`, ok, detail: ok ? "present" : "MISSING" });
@@ -87,11 +138,28 @@ async function main() {
 
     // The inverse check: a prefix index the migration used to create and now drops. Its presence
     // means an older revision of 0029 ran and the DROP has not been applied.
-    const stale = indexes.some((row) => row.indexname === "subtitle_tracks_file_idx");
+    const stale = indexes.some((row) => row.indexname === "subtitle_tracks_unique");
     checks.push({
-      label: "no redundant subtitle_tracks_file_idx",
+      label: "legacy subtitle_tracks_unique removed",
       ok: !stale,
-      detail: stale ? "PRESENT — re-apply 0029 to drop it" : "absent, as intended",
+      detail: stale ? "PRESENT — re-apply 0031" : "absent, as intended",
+    });
+
+    const cueWindow = indexes.find((row) => row.indexname === "subtitle_cues_track_time_idx");
+    const cueWindowOk = !!cueWindow && ["track_id", "start_ms", "end_ms", "idx", "id"].every(
+      (column) => cueWindow.indexdef.includes(column)
+    );
+    checks.push({
+      label: "cue window index shape",
+      ok: cueWindowOk,
+      detail: cueWindow?.indexdef ?? "MISSING",
+    });
+
+    const currentTrack = indexes.find((row) => row.indexname === "subtitle_tracks_current_unique");
+    checks.push({
+      label: "current track partial predicate",
+      ok: currentTrack?.indexdef.includes("WHERE (track_state = 'current'::subtitle_track_state)") ?? false,
+      detail: currentTrack?.indexdef ?? "MISSING",
     });
 
     const constraints = await client<{ conname: string }[]>`
@@ -113,20 +181,23 @@ async function main() {
      * written from now on, so an account that predates the migration would otherwise read as `0`
      * — which means unlimited, the opposite of what was intended.
      */
-    const quotas = await client<{ role: string; uncapped: string; capped: string }[]>`
-      SELECT role,
-             count(*) FILTER (WHERE subtitle_quota_seconds = 0)::text AS uncapped,
-             count(*) FILTER (WHERE subtitle_quota_seconds > 0)::text AS capped
-        FROM users GROUP BY role ORDER BY role`;
-    for (const row of quotas) {
-      const ok = row.role === "master" ? row.capped === "0" : row.uncapped === "0";
+    const quotas = await client<{ count: string }[]>`
+      SELECT count(*)::text FROM users WHERE subtitle_quota_seconds <> 0`;
+    checks.push({
+      label: "legacy subtitle quota disabled",
+      ok: quotas[0].count === "0",
+      detail: `${quotas[0].count} rows still capped`,
+    });
+
+    const profiles = await client<{ capability: string; role: string; count: string }[]>`
+      SELECT capability::text, role::text, count(*)::text
+        FROM subtitle_provider_profiles GROUP BY capability, role`;
+    for (const capability of ["asr", "translation"]) {
+      const primary = profiles.find((row) => row.capability === capability && row.role === "primary");
       checks.push({
-        label: `allowance for role=${row.role}`,
-        ok,
-        detail:
-          row.role === "master"
-            ? `${row.uncapped} uncapped, ${row.capped} capped (master should be all uncapped)`
-            : `${row.capped} capped, ${row.uncapped} uncapped (users should be all capped)`,
+        label: `${capability} primary profile cardinality`,
+        ok: !primary || primary.count === "1",
+        detail: primary?.count ?? "0 (legacy settings row was absent)",
       });
     }
 

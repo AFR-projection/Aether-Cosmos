@@ -7,7 +7,7 @@ import {
   saveSubtitlePrefs,
   type SubtitlePrefs,
 } from "@files/domain/services/subtitles/view-prefs";
-import type { SubtitleTrack } from "./use-subtitle-tracks";
+import { type SubtitleTrack } from "./use-subtitle-tracks";
 
 /**
  * Which subtitle track is showing, and remembering that between videos.

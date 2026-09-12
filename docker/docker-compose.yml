@@ -39,6 +39,63 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  subtitle-control:
+    <<: &subtitle-worker
+      build:
+        context: ..
+        dockerfile: docker/Dockerfile.worker
+      env_file:
+        - ../.env
+      environment:
+        - NODE_ENV=production
+        - REDIS_URL=redis://redis:6379
+        - REDIS_DISABLED=false
+      depends_on:
+        redis:
+          condition: service_healthy
+        app:
+          condition: service_healthy
+      restart: unless-stopped
+    command: ["tsx", "workers/subtitles/control.ts"]
+
+  subtitle-prepare:
+    <<: *subtitle-worker
+    command: ["tsx", "workers/subtitles/prepare.ts"]
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DISABLED=false
+      - SUBTITLE_PREPARE_CONCURRENCY=${SUBTITLE_PREPARE_CONCURRENCY:-1}
+    tmpfs:
+      - /tmp:size=${SUBTITLE_PREPARE_SCRATCH_SIZE:-2g},mode=1777
+    deploy:
+      resources:
+        limits:
+          cpus: "${SUBTITLE_PREPARE_CPUS:-2.0}"
+          memory: ${SUBTITLE_PREPARE_MEMORY:-2G}
+
+  subtitle-asr:
+    <<: *subtitle-worker
+    command: ["tsx", "workers/subtitles/asr.ts"]
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DISABLED=false
+      - SUBTITLE_ASR_CONCURRENCY=${SUBTITLE_ASR_CONCURRENCY:-1}
+      - SUBTITLE_OPENAI_FALLBACK_URL=${SUBTITLE_OPENAI_FALLBACK_URL:-}
+      - SUBTITLE_LOCAL_PROVIDER_HOSTS=${SUBTITLE_LOCAL_PROVIDER_HOSTS:-}
+
+  subtitle-translate:
+    <<: *subtitle-worker
+    command: ["tsx", "workers/subtitles/translate.ts"]
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DISABLED=false
+      - SUBTITLE_TRANSLATE_CONCURRENCY=${SUBTITLE_TRANSLATE_CONCURRENCY:-2}
+      - SUBTITLE_OPENAI_FALLBACK_URL=${SUBTITLE_OPENAI_FALLBACK_URL:-}
+      - SUBTITLE_LOCAL_PROVIDER_HOSTS=${SUBTITLE_LOCAL_PROVIDER_HOSTS:-}
+
   redis:
     image: redis:7-alpine
     volumes:

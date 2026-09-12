@@ -219,8 +219,9 @@ export default function OAuthConsentClient() {
           <h1 className="text-lg font-semibold">{t("oauth.title")}</h1>
         </div>
         {/* The app name is no longer bolded inside the sentence: the emphasis span
-            cannot survive a translation that reorders the clause. */}
-        <p className="text-sm text-muted-foreground leading-relaxed">
+            cannot survive a translation that reorders the clause. break-all:
+            client_name is an attacker-controlled query param, not our copy. */}
+        <p className="text-sm text-muted-foreground leading-relaxed [overflow-wrap:anywhere]">
           {t("oauth.intro", { app: appLabel, product: APP_NAME })}
         </p>
 

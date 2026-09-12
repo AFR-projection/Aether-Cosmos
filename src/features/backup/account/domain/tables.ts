@@ -682,6 +682,46 @@ export const EXCLUDED_ACCOUNT_TABLES: readonly ExcludedAccountTable[] = [
     why: "The lines of a subtitle track. They travel with their track or not at all, and their track does not travel — see `subtitle_tracks`.",
   },
   {
+    name: "subtitle_provider_profiles",
+    domain: "files",
+    why: "Provider configuration including encrypted API keys sealed with this server's own secret. The sealed values would be unreadable in another installation.",
+  },
+  {
+    name: "subtitle_pipeline_runs",
+    domain: "files",
+    why: "Pipeline orchestration state tied to specific R2 objects and file versions on this instance. The staged intermediate objects, leases, and fencing tokens are server-local bookkeeping that would be meaningless elsewhere.",
+  },
+  {
+    name: "subtitle_pipeline_targets",
+    domain: "files",
+    why: "Per-language generation targets for pipeline runs. They reference pipeline runs and candidate tracks, neither of which travel.",
+  },
+  {
+    name: "subtitle_pipeline_work_items",
+    domain: "files",
+    why: "Queue ledger and transactional outbox for subtitle generation work. Contains server-local lease state, worker identifiers, and references to R2 intermediate objects that only exist on this instance.",
+  },
+  {
+    name: "subtitle_audio_chunks",
+    domain: "files",
+    why: "Intermediate audio extraction results stored in R2 with instance-specific keys. Checkpointed work items for crash recovery that would reference objects not present after restore.",
+  },
+  {
+    name: "subtitle_cue_partitions",
+    domain: "files",
+    why: "Bounded checkpoint partitions of ASR and translation results stored in R2. References intermediate objects with server-local R2 keys that would not exist in another installation.",
+  },
+  {
+    name: "subtitle_provider_attempts",
+    domain: "files",
+    why: "Provider request audit trail without secrets. Records provider-specific request IDs, retry state, and circuit breaker health tied to this instance's provider configuration.",
+  },
+  {
+    name: "subtitle_reconciliation_state",
+    domain: "files",
+    why: "Durable cursor state for background reconciliation jobs (library backfill, locale sync, cleanup). The cursor positions and lease state are server-local bookkeeping for this instance's work queue.",
+  },
+  {
     name: "brain_embedding_settings",
     domain: "brain",
     why: "A single instance-wide row holding a provider API key sealed with this server's own secret. It is not the account's data, and the sealed value would be unreadable in another installation even if it were.",

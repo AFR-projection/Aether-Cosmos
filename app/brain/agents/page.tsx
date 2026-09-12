@@ -340,7 +340,10 @@ export default function BrainAgentsPage() {
             <SyncPill state={syncState} updatedAt={audit.dataUpdatedAt} now={now} />
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {/* One-up below 360px: the metric labels are unbreakable uppercase
+              micro-caps ("Connected", "Menganggur") and two 100px columns
+              force them out of their tiles on small phones. */}
+          <div className="mt-4 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-4">
             <div className="brain-metric" data-presence="live">
               <span>
                 <Zap aria-hidden="true" />

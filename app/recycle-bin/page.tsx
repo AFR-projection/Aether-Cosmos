@@ -438,17 +438,22 @@ export default function RecycleBinPage() {
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: Math.min(idx * 0.02, 0.2) }}
                             className={cn(
-                              "group/item flex items-center gap-3 rounded-2xl border p-4 transition-all",
+                              /* flex-wrap: two labelled action buttons (~200px
+                                 in Indonesian) plus icon and name never fit one
+                                 row at 320px; the actions drop to their own
+                                 line instead of spilling past the card. */
+                              "group/item flex flex-wrap items-center gap-3 rounded-2xl border p-4 transition-all",
                               isSelected
                                 ? "border-accent/30 bg-accent/5 shadow-sm"
                                 : "border-border/40 bg-surface hover:border-accent/20 hover:shadow-sm hover:bg-accent/[0.02]"
                             )}
                           >
-                            {/* Checkbox */}
+                            {/* Checkbox — visible box stays 24px; the invisible
+                                ::after pads the hit area out to fingertip size. */}
                             <button
                               onClick={() => toggleSelect(item.id)}
                               className={cn(
-                                "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all",
+                                "relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-all after:absolute after:-inset-2.5 after:rounded-lg after:content-['']",
                                 isSelected
                                   ? "border-accent bg-accent text-on-accent"
                                   : "border-border/60 text-transparent hover:border-accent/50 group-hover/item:border-accent/30"
@@ -501,8 +506,8 @@ export default function RecycleBinPage() {
                               </div>
                             </div>
 
-                            {/* Actions */}
-                            <div className="flex items-center gap-1 shrink-0">
+                            {/* Actions — own full-width row under 640px */}
+                            <div className="flex shrink-0 items-center gap-1 max-sm:w-full max-sm:justify-end">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -599,26 +604,26 @@ function ConfirmModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="scrim fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="scrim fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center"
       onClick={onCancel}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="w-full max-w-sm rounded-2xl border border-border/60 bg-surface p-6 shadow-2xl"
+        className="my-auto w-full max-w-sm rounded-2xl border border-border/60 bg-surface p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-4 mb-4">
+        <div className="mb-4 flex items-center gap-4">
           <div className={cn(
             "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl",
             danger ? "bg-danger/10" : "bg-accent/10"
           )}>
             <Icon className={cn("h-6 w-6", danger ? "text-danger-ink" : "text-accent-ink")} />
           </div>
-          <div>
-            <h3 className="text-lg font-semibold">{title}</h3>
-            <p className="text-sm text-muted-foreground/70 mt-0.5">{description}</p>
+          <div className="min-w-0">
+            <h3 className="break-words text-lg font-semibold">{title}</h3>
+            <p className="mt-0.5 text-sm text-muted-foreground/70">{description}</p>
           </div>
         </div>
         <div className="flex justify-end gap-2 mt-6">

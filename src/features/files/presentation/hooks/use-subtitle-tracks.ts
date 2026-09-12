@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/shared/api/client";
 import type { SubtitleRefusal } from "@files/domain/services/subtitles/eligibility";
+import type { SubtitleCue } from "@files/domain/services/subtitles/vtt";
 
 /**
  * A file's subtitle tracks, kept current while any of them is still being made.
@@ -32,7 +33,126 @@ export type SubtitleTrack = {
   translatedFromId: string | null;
   failureCode: string | null;
   failureMessage: string | null;
+  /** Absent on older servers, which continue to deliver one native WebVTT file. */
+  deliveryMode?: "whole" | "segmented";
+  /** Opaque version used to invalidate cue caches and reject stale editor saves. */
+  revision?: string | number | null;
+  /** Server-measured length, when supplied. */
+  duration?: number | null;
+  durationSeconds?: number | null;
 };
+
+export type SubtitleCuePage = {
+  cues: SubtitleCue[];
+  nextCursor: string | null;
+  revision?: string | number | null;
+};
+
+export const SUBTITLE_WINDOW_BEHIND_MS = 15_000;
+export const SUBTITLE_WINDOW_AHEAD_MS = 45_000;
+export const SUBTITLE_WINDOW_MS =
+  SUBTITLE_WINDOW_BEHIND_MS + SUBTITLE_WINDOW_AHEAD_MS;
+const SUBTITLE_PAGE_LIMIT = 500;
+const SUBTITLE_CACHE_LIMIT = 6;
+
+/** A bounded interval cache, exported so pagination/eviction behavior can be unit-tested. */
+export class SubtitleCueWindowCache {
+  readonly #limit: number;
+  readonly #entries = new Map<string, SubtitleCue[]>();
+
+  constructor(limit = SUBTITLE_CACHE_LIMIT) {
+    this.#limit = Math.max(1, Math.floor(limit));
+  }
+
+  get(key: string): SubtitleCue[] | undefined {
+    const cues = this.#entries.get(key);
+    if (!cues) return undefined;
+    this.#entries.delete(key);
+    this.#entries.set(key, cues);
+    return cues;
+  }
+
+  set(key: string, cues: SubtitleCue[]): void {
+    this.#entries.delete(key);
+    this.#entries.set(key, cues);
+    while (this.#entries.size > this.#limit) {
+      const oldest = this.#entries.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#entries.delete(oldest);
+    }
+  }
+
+  clear(): void {
+    this.#entries.clear();
+  }
+
+  get size(): number {
+    return this.#entries.size;
+  }
+}
+
+export function cueWindowKey(track: SubtitleTrack, startMs: number): string {
+  return `${track.id}:${String(track.revision ?? "legacy")}:${startMs}`;
+}
+
+function cuesPath(
+  source: SubtitleSource,
+  trackId: string,
+  startMs: number,
+  endMs: number,
+  cursor?: string
+): string {
+  // The cue-window route lives at `<trackId>/cues`, not on the track route itself: the track
+  // route answers whole WebVTT (or 413 for segmented tracks), never JSON.
+  const root = `${basePath(source)}/${trackId}/cues`;
+  const query = new URLSearchParams({
+    startMs: String(startMs),
+    endMs: String(endMs),
+    limit: String(SUBTITLE_PAGE_LIMIT),
+  });
+  if (cursor) query.set("cursor", cursor);
+  return `${root}?${query.toString()}`;
+}
+
+/** Read every cursor page for one bounded playhead interval. */
+export async function fetchSubtitleCueWindow(
+  source: SubtitleSource,
+  track: SubtitleTrack,
+  startMs: number,
+  endMs: number,
+  signal: AbortSignal,
+  fetchImpl: typeof fetch = fetch
+): Promise<SubtitleCue[]> {
+  const cues: SubtitleCue[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+
+  do {
+    const response = await fetchImpl(
+      cuesPath(source, track.id, startMs, endMs, cursor),
+      { credentials: "include", signal }
+    );
+    if (!response.ok) throw new Error(`Subtitle cue request failed (${response.status})`);
+    const body = (await response.json()) as {
+      success?: boolean;
+      data?: SubtitleCuePage;
+      cues?: SubtitleCue[];
+      nextCursor?: string | null;
+      error?: string;
+    };
+    const page = body.data ?? body;
+    if (body.success === false || !Array.isArray(page.cues)) {
+      throw new Error(body.error ?? "Invalid subtitle cue response");
+    }
+    cues.push(...page.cues);
+    const next = page.nextCursor ?? null;
+    if (next && seen.has(next)) throw new Error("Subtitle cursor repeated");
+    if (next) seen.add(next);
+    cursor = next ?? undefined;
+  } while (cursor);
+
+  return cues.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+}
 
 /**
  * Why the SERVER cannot make a track, as distinct from why the FILE cannot have one.

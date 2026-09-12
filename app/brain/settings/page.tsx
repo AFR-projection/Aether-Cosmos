@@ -219,6 +219,9 @@ export default function BrainSettingsPage() {
                 onChange={(event) => setNewName(event.target.value)}
                 placeholder={t("brain.settings.newBrainPlaceholder")}
                 aria-label={t("brain.settings.newBrainPlaceholder")}
+                // min-w-0: an input's default min-width is its intrinsic size
+                // (~20 chars), which overflows the panel next to the button at 320px.
+                className="min-w-0 flex-1"
               />
               <Button type="submit" size="sm" disabled={!newName.trim() || createBrain.isPending}>
                 {createBrain.isPending && (

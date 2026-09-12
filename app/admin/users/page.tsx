@@ -760,7 +760,10 @@ export default function AdminUsersPage() {
             <span className="text-[0.8rem] font-medium">
               {t("common.selectedCount", { count: selected.size })}
             </span>
-            <div className="ml-auto flex items-center gap-2">
+            {/* flex-wrap + justify-end: four labelled buttons never fit one
+                row at 320px; the cluster wraps under the count instead of
+                pushing the toolbar wider than the panel. */}
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => runBulk("activate")}>
                 {bulkBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

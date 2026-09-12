@@ -1,5 +1,6 @@
 import { normalizeLanguageTag } from "@files/domain/services/subtitles/languages";
 import type { SubtitleCue } from "@files/domain/services/subtitles/vtt";
+import { retryAfterFromResponse } from "./provider-retry";
 
 /**
  * Speech recognition over one audio chunk, against an OpenAI-compatible endpoint.
@@ -54,6 +55,10 @@ export type TranscriberOptions = {
   /** Everything before `/audio/transcriptions`. A trailing slash is tolerated. */
   baseUrl: string;
   model: string;
+  /** Stable work identity forwarded when an OpenAI-compatible host supports idempotency. */
+  requestId?: string;
+  /** Additional deterministic headers; Authorization and multipart Content-Type cannot be replaced. */
+  headers?: Readonly<Record<string, string>>;
   /**
    * Ten minutes of audio takes a few seconds on Groq and can take a minute elsewhere, so this is
    * generous by default — a timeout that fires early wastes the upload as well as the request.
@@ -150,19 +155,13 @@ function friendlyError(error: unknown): string {
   return message.slice(0, 300);
 }
 
-function retryAfterMs(response: Response): number | undefined {
-  const header = response.headers.get("retry-after");
-  if (!header) return undefined;
-  const seconds = Number(header);
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * 1000) : undefined;
-}
-
 export class OpenAiCompatibleTranscriber {
   readonly model: string;
   private readonly apiKey: string;
   private readonly endpoint: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly requestHeaders: Readonly<Record<string, string>>;
 
   constructor(options: TranscriberOptions) {
     this.apiKey = options.apiKey;
@@ -170,6 +169,17 @@ export class OpenAiCompatibleTranscriber {
     this.endpoint = `${options.baseUrl.replace(/\/+$/, "")}/audio/transcriptions`;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    const headers = Object.fromEntries(
+      Object.entries(options.headers ?? {})
+        .filter(([key]) => !["authorization", "content-type"].includes(key.toLowerCase()))
+        .map(([key, value]) => [key.toLowerCase(), value])
+    );
+    this.requestHeaders = {
+      ...headers,
+      ...(options.requestId
+        ? { "Idempotency-Key": options.requestId, "X-Request-Id": options.requestId }
+        : {}),
+    };
   }
 
   /** Cheap and never-throwing: a key must be present. No network call. */
@@ -208,7 +218,7 @@ export class OpenAiCompatibleTranscriber {
       response = await this.fetchImpl(this.endpoint, {
         method: "POST",
         // Content-Type is deliberately NOT set: fetch has to add the multipart boundary itself.
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: { ...this.requestHeaders, Authorization: `Bearer ${this.apiKey}` },
         body: form,
         signal: controller.signal,
       });
@@ -228,7 +238,7 @@ export class OpenAiCompatibleTranscriber {
       }
       throw new SubtitleTranscriptionError(
         `Transcription failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`,
-        { status: response.status, retryAfterMs: retryAfterMs(response) }
+        { status: response.status, retryAfterMs: retryAfterFromResponse(response) }
       );
     }
 

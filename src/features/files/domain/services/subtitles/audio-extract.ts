@@ -171,6 +171,13 @@ export function totalSegmentSeconds(segments: readonly AudioSegment[]): number {
 const CHUNK_INDEX_DIGITS = 4;
 
 /**
+ * Each prepare work item (one 600-second range) yields at most a handful of ffmpeg segments,
+ * and audio-chunk rows must stay unique per `(run, ordinal)`. Segment ordinals are therefore
+ * `workItemOrdinal * AUDIO_CHUNK_ORDINAL_SCALE + segmentIndex`.
+ */
+export const AUDIO_CHUNK_ORDINAL_SCALE = 1000;
+
+/**
  * The printf-style pattern ffmpeg writes its chunks to.
  *
  * `%04d` and nothing else: the segment muxer substitutes the index, and the extension is what

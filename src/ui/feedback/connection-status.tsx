@@ -101,7 +101,11 @@ export function ConnectionStatusPill({ className }: { className?: string }) {
           className={cn(
             // `fixed` and `relative` cannot both apply — the pill needs the first
             // to pin itself, and `overflow-hidden` alone contains the sheen.
-            "pointer-events-none fixed left-1/2 top-3 z-[120] overflow-hidden",
+            // Below lg it sits under the fixed mobile header, whose title it
+            // would otherwise sit on top of; above lg it hugs the top edge,
+            // still clear of an iOS status bar via --safe-top.
+            "pointer-events-none fixed left-1/2 z-[120] overflow-hidden",
+            "top-[calc(3.5rem+var(--safe-top)+0.5rem)] lg:top-[calc(var(--safe-top)+0.75rem)]",
             "inline-flex items-center gap-1.5 rounded-full border px-3 py-1",
             "text-xs font-semibold tracking-wide backdrop-blur-xl",
             v.tone,

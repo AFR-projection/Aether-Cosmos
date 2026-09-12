@@ -2,7 +2,14 @@ import { NextRequest } from "next/server";
 import { apiError, handleApiError } from "@/shared/api/response";
 import { resolveSharedFile } from "@shares/application/shared-subtitles";
 import { cuesToVtt } from "@files/domain/services/subtitles/vtt";
-import { getTrackForFile, listCues } from "@files/infrastructure/subtitles/tracks";
+import {
+  getTrackForFile,
+  getWholeVttSize,
+  listCues,
+  wholeVttRequiresSegmentation,
+  WHOLE_VTT_MAX_CUES,
+  WHOLE_VTT_MAX_ESTIMATED_BYTES,
+} from "@files/infrastructure/subtitles/tracks";
 import { vttResponse } from "@files/application/subtitles/vtt-response";
 
 /**
@@ -32,7 +39,23 @@ export async function GET(
     // caller the two are the same fact, and the second one describes internal state.
     if (!track || track.status !== "ready") return apiError("Subtitle track not found", 404);
 
-    return vttResponse(cuesToVtt(await listCues(trackId)), { language: track.language });
+    const wholeSize = await getWholeVttSize(trackId);
+    if (wholeVttRequiresSegmentation(wholeSize)) {
+      return apiError("This subtitle track must be read in cue windows", 413, {
+        code: "SEGMENTED_SUBTITLE_REQUIRED",
+        cueCount: wholeSize.cueCount,
+        estimatedBytes: wholeSize.estimatedBytes,
+        maxCues: WHOLE_VTT_MAX_CUES,
+        maxEstimatedBytes: WHOLE_VTT_MAX_ESTIMATED_BYTES,
+        cuesUrl: `/api/shared/${token}/subtitles/${trackId}/cues`,
+      });
+    }
+
+    const response = vttResponse(cuesToVtt(await listCues(trackId)), {
+      language: track.language,
+    });
+    response.headers.set("X-Subtitle-Revision", String(track.revision));
+    return response;
   } catch (error) {
     return handleApiError(error);
   }

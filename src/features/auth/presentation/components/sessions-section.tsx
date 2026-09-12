@@ -258,7 +258,9 @@ export function SessionsSection() {
                           {t("settings.devices.locationUnavailable")}
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-1 font-mono text-[11px]">
+                      {/* break-all: IPv6 literals are single 39-char tokens
+                          that neither wrap nor truncate on their own. */}
+                      <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px]">
                         {/* An initialism, the same three characters in every locale. */}
                         IP {session.ip ?? "—"}
                       </span>
@@ -283,13 +285,17 @@ export function SessionsSection() {
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      "h-8 w-8 shrink-0 text-muted-foreground transition-opacity",
+                      /* h-10, not h-8: a destructive action deserves a real
+                         fingertip; opacity stays as the hover affordance but
+                         the button is never hidden from touch, which has no
+                         hover — hence the full opacity floor at 70%. */
+                      "h-10 w-10 shrink-0 text-muted-foreground transition-opacity",
                       "opacity-70 hover:text-rose-500 group-hover:opacity-100",
                       session.isCurrent && "opacity-100"
                     )}
                     disabled={revokingId === session.id || busy !== null}
                     onClick={() => handleRevoke(session.id, session.isCurrent)}
-                    title={t(
+                    aria-label={t(
                       session.isCurrent
                         ? "settings.devices.signOutThisDevice"
                         : "settings.devices.revokeSession"

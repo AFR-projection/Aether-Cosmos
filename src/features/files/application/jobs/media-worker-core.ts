@@ -99,6 +99,11 @@ export type MediaWorkerCoreDependencies = {
   transformTrim(input: TrimMediaInput): Promise<ProducedMedia>;
   transformAudio(input: ExtractedAudioInput): Promise<Required<ProducedMedia>>;
   inspect(input: ExactMediaState): Promise<InspectionValues>;
+  /**
+   * Reconcile automatic subtitles only after an exact-state inspection has committed.
+   * Optional until the subtitle pipeline exports its production ensure adapter.
+   */
+  ensureSubtitles?(input: ExactMediaState): Promise<unknown>;
   renderThumbnails(input: ExactMediaState): Promise<Thumbnail[]>;
   putObject(key: string, body: Buffer, contentType: string): Promise<unknown>;
   copyObject(sourceKey: string, destinationKey: string): Promise<unknown>;
@@ -240,7 +245,10 @@ export function createMediaWorkerCore(deps: MediaWorkerCoreDependencies) {
       return "stale";
     }
     const inspected = await deps.inspect(input);
-    return (await deps.persistInspection(input, inspected)) ? "completed" : "stale";
+    const persisted = await deps.persistInspection(input, inspected);
+    if (!persisted) return "stale";
+    await deps.ensureSubtitles?.(input);
+    return "completed";
   }
 
   async function generateThumbnail(input: ExactMediaState): Promise<WorkerOutcome> {

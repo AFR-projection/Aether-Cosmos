@@ -143,7 +143,7 @@ export default function BrainProjectsPage() {
               {projects.data.projects.map((project) => (
                 <article key={project.id} className="brain-surface flex flex-col gap-2 p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="min-w-0 text-sm font-semibold text-foreground">
+                    <h3 className="min-w-0 break-words text-sm font-semibold text-foreground">
                       {project.name}
                     </h3>
                     <span
