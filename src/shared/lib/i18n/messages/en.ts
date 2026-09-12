@@ -1919,6 +1919,12 @@ export const en = {
           other: "{count} files uploaded successfully.",
         },
         uploadFailedTitle: "Upload failed",
+        /**
+         * A folder upload whose payload is only structure — folders with nothing in
+         * them. There is no file to report on, so without this it would finish in
+         * total silence and look like nothing happened.
+         */
+        foldersCreated: "Folders created",
         transferFailed: "Transfer failed",
         /**
          * The name and the reason, in whichever order the language wants them.
@@ -1957,12 +1963,22 @@ export const en = {
         favoriteBatch: "Favorite failed",
         createFolder: "Failed to create folder",
         createFolders: "Failed to create folders",
-        createSubfolders: "Failed to create subfolders",
         folderTree: "Couldn't create the folders for this upload",
+        /**
+         * Partial, not fatal. This used to say the upload was cancelled — and it
+         * was: a single unresolved folder discarded every file, which is exactly how
+         * a large folder upload arrived as a skeleton of empty directories. Now the
+         * files that found their folder are already uploading when this appears.
+         */
         unresolvedFolders: {
-          one: "Couldn't create {count} folder — upload cancelled so nothing lands in the wrong place.",
+          one: "{count} folder couldn't be created — what was inside it was skipped, the rest is uploading.",
           other:
-            "Couldn't create {count} folders — upload cancelled so nothing lands in the wrong place.",
+            "{count} folders couldn't be created — what was inside them was skipped, the rest is uploading.",
+        },
+        /** An entry the browser would not open: locked, moved mid-scan, or denied. */
+        unreadableEntries: {
+          one: "{count} item couldn't be read and was skipped.",
+          other: "{count} items couldn't be read and were skipped.",
         },
         readFolder: "Failed to read folder",
         move: "Failed to move",

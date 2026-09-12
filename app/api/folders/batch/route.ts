@@ -12,6 +12,7 @@ import { getAdminSettings } from "@/shared/lib/settings/admin-settings";
 import { escapeLike } from "@/shared/lib/utils";
 import { deleteR2Objects } from "@files/infrastructure/storage/r2";
 import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
+import { UPLOAD_RATE_MULTIPLIER } from "@files/application/commands/limits";
 
 /**
  * Kept in step with `FOLDER_BATCH_SIZE` in `src/features/files/domain/services/folder-tree-upload.ts`: the
@@ -19,8 +20,11 @@ import { cacheDelPattern } from "@/shared/infrastructure/cache/redis";
  * old cap of 200 in a single un-chunked request is why uploading a real project
  * silently lost its folders — this repository has 1,193 directories without
  * `node_modules`, so the request never got past validation.
+ *
+ * Each request reloads the caller's whole folder index once, so a bigger chunk is
+ * strictly cheaper per path; 2,000 keeps a 20,000-directory tree down to ten calls.
  */
-const MAX_PATHS_PER_REQUEST = 500;
+const MAX_PATHS_PER_REQUEST = 2000;
 
 const schema = z.object({
   paths: z.array(z.string().min(1).max(1024)).min(1).max(MAX_PATHS_PER_REQUEST),
@@ -63,50 +67,113 @@ async function loadFolderIndex(ownerId: string): Promise<Map<string, FolderNode>
   return index;
 }
 
-async function getOrCreateFolder(
-  userId: string,
-  pathParts: string[],
+/**
+ * Create every folder in `paths`, one multi-row INSERT per depth level, and return
+ * the path → id map.
+ *
+ * The previous shape was a `getOrCreateFolder` per path that inserted one row at a
+ * time, awaiting each: a 10,000-directory project meant 10,000 sequential INSERT
+ * round-trips and a request that ran for minutes before the platform killed it. The
+ * dependency here is only ever parent → child, so a whole level can go in one
+ * statement, turning that into one INSERT per level — about ten for any real tree.
+ *
+ * `paths` is expanded to include ancestors: a caller that asks for `a/b/c` gets `a`
+ * and `a/b` too, so a client that chunks mid-subtree cannot produce an orphan.
+ */
+async function createFolderLevels(
+  ownerId: string,
+  paths: string[],
   cache: Map<string, FolderNode>,
-  root: Folder | null = null,
-): Promise<string | null> {
-  let parentId: string | null = root?.id ?? null;
-  // Paths of created folders must continue the ROOT's path, not restart at "/": an upload
-  // into a subfolder used to write "/a/b/" for a folder that really lives at "/root/a/b/".
-  let parentPath: string = root?.materializedPath ?? "/";
-  let parentDepth: number = root ? root.depth : -1;
+  root: Folder | null
+): Promise<Record<string, string>> {
+  const rootPath = root?.materializedPath ?? "/";
+  const rootDepth = root ? root.depth : -1;
+  const rootId = root?.id ?? null;
 
-  for (const name of pathParts) {
-    const key = cacheKey(parentId, name);
-    const known = cache.get(key);
-
-    if (known) {
-      parentId = known.id;
-      parentPath = known.materializedPath;
-      parentDepth = known.depth;
-      continue;
-    }
-
-    const materializedPath = `${parentPath}${name}/`;
-    const depth = parentDepth + 1;
-
-    const [created]: { id: string }[] = await db
-      .insert(folders)
-      .values({
-        userId,
-        parentId: parentId ?? null,
-        name,
-        materializedPath,
-        depth,
-      })
-      .returning({ id: folders.id });
-
-    parentId = created.id;
-    parentPath = materializedPath;
-    parentDepth = depth;
-    cache.set(key, { id: created.id, materializedPath, depth });
+  // Ancestors first, then group by depth. A Set keeps the expansion idempotent.
+  const wanted = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/").filter((segment) => segment.length > 0 && segment !== ".");
+    for (let i = 1; i <= parts.length; i++) wanted.add(parts.slice(0, i).join("/"));
   }
 
-  return parentId;
+  const byLevel = new Map<number, string[]>();
+  for (const path of wanted) {
+    const level = path.split("/").length;
+    const bucket = byLevel.get(level);
+    if (bucket) bucket.push(path);
+    else byLevel.set(level, [path]);
+  }
+
+  const resolved: Record<string, string> = {};
+  /** path → materializedPath, so a child never has to re-derive its parent's. */
+  const materialized = new Map<string, string>();
+  const levels = [...byLevel.keys()].sort((a, b) => a - b);
+
+  for (const level of levels) {
+    const pending: { path: string; parentId: string | null; name: string; materializedPath: string; depth: number }[] = [];
+
+    for (const path of byLevel.get(level)!) {
+      const parts = path.split("/");
+      const name = parts[parts.length - 1];
+      const parentPath = parts.slice(0, -1).join("/");
+      // Levels run shallow-first, so the parent is already resolved unless it is
+      // the root itself (level 1) or its own creation was skipped.
+      const parentId = parentPath === "" ? rootId : resolved[parentPath];
+      if (parentId === undefined) continue; // Parent missing: skip the whole subtree.
+      // Paths of created folders must continue the ROOT's path, not restart at "/":
+      // an upload into a subfolder used to write "/a/b/" for a folder that really
+      // lives at "/root/a/b/".
+      const parentMaterialized = parentPath === "" ? rootPath : materialized.get(parentPath);
+      if (parentMaterialized === undefined) continue;
+
+      const known = cache.get(cacheKey(parentId, name));
+      if (known) {
+        resolved[path] = known.id;
+        materialized.set(path, known.materializedPath);
+        continue;
+      }
+      pending.push({
+        path,
+        parentId,
+        name,
+        materializedPath: `${parentMaterialized}${name}/`,
+        depth: rootDepth + level,
+      });
+    }
+
+    if (pending.length === 0) continue;
+
+    const inserted = await db
+      .insert(folders)
+      .values(
+        pending.map((row) => ({
+          userId: ownerId,
+          parentId: row.parentId,
+          name: row.name,
+          materializedPath: row.materializedPath,
+          depth: row.depth,
+        }))
+      )
+      .returning({ id: folders.id, parentId: folders.parentId, name: folders.name, materializedPath: folders.materializedPath, depth: folders.depth });
+
+    // `returning` preserves the order of `values`, but matching on parent+name is
+    // independent of that guarantee and costs nothing.
+    const byKey = new Map(inserted.map((row) => [cacheKey(row.parentId, row.name), row]));
+    for (const row of pending) {
+      const created = byKey.get(cacheKey(row.parentId, row.name));
+      if (!created) continue;
+      resolved[row.path] = created.id;
+      materialized.set(row.path, created.materializedPath);
+      cache.set(cacheKey(row.parentId, row.name), {
+        id: created.id,
+        materializedPath: created.materializedPath,
+        depth: created.depth,
+      });
+    }
+  }
+
+  return resolved;
 }
 
 export async function POST(request: NextRequest) {
@@ -118,7 +185,16 @@ export async function POST(request: NextRequest) {
     const sessionUser = await requireAuth();
     const userId = getEffectiveUserId(sessionUser);
     const settings = await getAdminSettings();
-    const rl = await checkUserApiRateLimit(userId, settings.rateLimitPerMinute);
+    // Folder creation is part of an upload, not a page load: a folder upload issues
+    // one of these per chunk of the tree back to back. On the plain per-user bucket
+    // a real project tripped the limit mid-tree, `createFolderTree` threw, and the
+    // client abandoned the upload with the folders from earlier chunks already
+    // created — the "only folder names arrived" bug. Shares the upload bucket with
+    // /api/uploads/* so the two cannot starve each other.
+    const rl = await checkUserApiRateLimit(userId, settings.rateLimitPerMinute, {
+      bucket: "upload",
+      multiplier: UPLOAD_RATE_MULTIPLIER,
+    });
     if (!rl.allowed) return apiError("Rate limit exceeded", 429);
     const { paths, rootFolderId } = schema.parse(await request.json());
 
@@ -139,21 +215,10 @@ export async function POST(request: NextRequest) {
     }
 
     const uniquePaths = [...new Set(paths.map((p: string) => p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")))]
-      // Parents before children, so a chunk that contains both creates the parent
-      // once and reuses it instead of racing to insert two rows with the same name.
-      .sort((a, b) => a.split("/").length - b.split("/").length);
+      .filter((p) => p.length > 0);
 
     const cache = await loadFolderIndex(ownerId);
-    const result: Record<string, string> = {};
-
-    for (const path of uniquePaths) {
-      const parts = path.split("/").filter((segment) => segment.length > 0 && segment !== ".");
-      if (parts.length === 0) continue;
-      const folderId = await getOrCreateFolder(ownerId, parts, cache, root);
-      if (folderId) {
-        result[path] = folderId;
-      }
-    }
+    const result = await createFolderLevels(ownerId, uniquePaths, cache, root);
 
     return apiSuccess({ folders: result });
   } catch (error) {

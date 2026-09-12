@@ -1534,6 +1534,7 @@ export const id: LocaleMessages = {
         uploadDoneTitle: "Unggahan selesai",
         uploadDoneBody: { other: "{count} file berhasil diunggah." },
         uploadFailedTitle: "Unggahan gagal",
+        foldersCreated: "Folder dibuat",
         transferFailed: "Transfer gagal",
         transferFailedBody: "{name} — {reason}",
         readyToPaste: "{label} siap ditempel",
@@ -1556,11 +1557,13 @@ export const id: LocaleMessages = {
         favoriteBatch: "Gagal menandai favorit",
         createFolder: "Gagal membuat folder",
         createFolders: "Gagal membuat folder",
-        createSubfolders: "Gagal membuat subfolder",
         folderTree: "Folder untuk unggahan ini tidak bisa dibuat",
         unresolvedFolders: {
           other:
-            "{count} folder tidak bisa dibuat — unggahan dibatalkan supaya tidak ada yang masuk ke tempat yang salah.",
+            "{count} folder tidak bisa dibuat — isinya dilewati, sisanya tetap diunggah.",
+        },
+        unreadableEntries: {
+          other: "{count} item tidak bisa dibaca dan dilewati.",
         },
         readFolder: "Gagal membaca folder",
         move: "Gagal memindahkan",

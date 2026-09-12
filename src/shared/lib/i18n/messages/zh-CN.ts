@@ -1476,6 +1476,7 @@ export const zhCN: LocaleMessages = {
         uploadDoneTitle: "上传完成",
         uploadDoneBody: { other: "{count} 个文件已成功上传。" },
         uploadFailedTitle: "上传失败",
+        foldersCreated: "文件夹已创建",
         transferFailed: "传输失败",
         transferFailedBody: "{name} — {reason}",
         readyToPaste: "{label}已可粘贴",
@@ -1498,10 +1499,12 @@ export const zhCN: LocaleMessages = {
         favoriteBatch: "收藏失败",
         createFolder: "创建文件夹失败",
         createFolders: "创建文件夹失败",
-        createSubfolders: "创建子文件夹失败",
         folderTree: "无法为此次上传创建文件夹",
         unresolvedFolders: {
-          other: "有 {count} 个文件夹无法创建 — 上传已取消，以免内容进入错误的位置。",
+          other: "有 {count} 个文件夹无法创建 — 其中的内容已跳过，其余部分继续上传。",
+        },
+        unreadableEntries: {
+          other: "有 {count} 个项目无法读取，已跳过。",
         },
         readFolder: "读取文件夹失败",
         move: "移动失败",

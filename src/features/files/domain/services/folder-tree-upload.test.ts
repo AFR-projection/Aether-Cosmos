@@ -73,6 +73,29 @@ describe("collectFolderPaths", () => {
   it("treats a Windows-separated path as nested", () => {
     expect(collectFolderPaths(["src\\lib\\x.ts"])).toEqual(["src", "src/lib"]);
   });
+
+  /**
+   * An empty directory is invisible in the file paths — nothing under it has one.
+   * Uploading a project used to silently drop every `logs/`, `.cache/` and
+   * `__pycache__/`, which is not what a file explorer does with a folder.
+   */
+  it("keeps a directory that holds no files at all", () => {
+    expect(collectFolderPaths([], ["logs"])).toEqual(["logs"]);
+  });
+
+  it("includes an explicit directory itself, not only its ancestors", () => {
+    // The file-path rule drops the last segment because it is the filename. A
+    // directory has no filename, so the last segment is a directory too.
+    expect(collectFolderPaths([], ["a/b/c"])).toEqual(["a", "a/b", "a/b/c"]);
+  });
+
+  it("merges explicit directories with the ones files imply", () => {
+    expect(collectFolderPaths(["a/b/x.ts"], ["a/c"])).toEqual(["a", "a/b", "a/c"]);
+  });
+
+  it("does not duplicate a directory that files already imply", () => {
+    expect(collectFolderPaths(["a/b/x.ts"], ["a/b"])).toEqual(["a", "a/b"]);
+  });
 });
 
 describe("chunkPaths", () => {
@@ -214,5 +237,41 @@ describe("splitCommonRoot", () => {
       "app/api",
       "lib/db",
     ]);
+  });
+
+  it("re-bases empty directories on the same root as the files", () => {
+    const { rootName, entries, directories } = splitCommonRoot(
+      [entry("proj/src/a.ts")],
+      ["proj/logs", "proj/src/generated"]
+    );
+    expect(rootName).toBe("proj");
+    expect(entries.map((e) => e.relativePath)).toEqual(["src/a.ts"]);
+    expect(directories).toEqual(["logs", "src/generated"]);
+  });
+
+  it("drops a directory that is the root itself", () => {
+    // The caller creates the root folder; re-creating it underneath itself would
+    // bury the whole project one level deeper than the user picked it.
+    const { directories } = splitCommonRoot([entry("proj/a.ts")], ["proj", "proj/logs"]);
+    expect(directories).toEqual(["logs"]);
+  });
+
+  it("finds the root from directories alone when the folder holds no files", () => {
+    const { rootName, entries, directories } = splitCommonRoot([], ["proj/logs/archive"]);
+    expect(rootName).toBe("proj");
+    expect(entries).toEqual([]);
+    expect(directories).toEqual(["logs/archive"]);
+  });
+
+  it("keeps directories intact when the entries share no single root", () => {
+    const { rootName, directories } = splitCommonRoot([entry("one/a.ts")], ["two/logs"]);
+    expect(rootName).toBeNull();
+    expect(directories).toEqual(["two/logs"]);
+  });
+
+  it("normalizes Windows separators in directories too", () => {
+    const { rootName, directories } = splitCommonRoot([entry("p\\a.ts")], ["p\\logs\\old"]);
+    expect(rootName).toBe("p");
+    expect(directories).toEqual(["logs/old"]);
   });
 });

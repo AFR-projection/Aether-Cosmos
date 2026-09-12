@@ -15,8 +15,19 @@ const localUploads = new Map<string, number>();
  */
 const TTL_MS = 15 * 60_000;
 
-/** Marked but never consumed — a stuck entry must not pin memory forever. */
-const MAX_TRACKED = 500;
+/**
+ * Marked but never consumed — a stuck entry must not pin memory forever.
+ *
+ * 500 was too small once uploads batched: two lanes hold up to
+ * `BATCH_INIT_MAX_FILES` marks each from init until their batch-complete frame
+ * arrives, and a lane that starts its next batch before the previous frame lands
+ * overlaps them. Evicting a live mark makes the tab toast its OWN upload as if it
+ * came from another device, and file it in Activity a second time. The TTL above
+ * is what actually bounds this; the cap is only a backstop, so it should sit well
+ * clear of a real folder upload. An entry is a uuid and a timestamp — 5,000 of
+ * them is under a megabyte.
+ */
+const MAX_TRACKED = 5000;
 
 export function clearLocalUploads(): void {
   localUploads.clear();

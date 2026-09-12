@@ -542,6 +542,8 @@ function SettingsField({
       case "number":
         return (
           <div className="relative max-w-[12rem]">
+            {/* pr-24: the unit suffix is translated ("surel/hari" runs wider
+                than "emails/day") and pr-16 let it overlap typed digits. */}
             <Input
               id={id}
               type="number"
@@ -550,8 +552,6 @@ function SettingsField({
               max={field.max}
               step={field.step}
               onChange={(e) => onChange(Number(e.target.value))}
-              {/* pr-24: the unit suffix is translated ("surel/hari" runs wider
-                  than "emails/day") and pr-16 let it overlap typed digits. */}
               className={cn("h-9 text-sm", field.unit && "pr-24")}
             />
             {field.unit && (

@@ -1,6 +1,22 @@
 export type RealtimeEvent =
   | { type: "upload_complete"; fileId: string; name: string; sizeBytes?: number }
   /**
+   * A batch of uploads landed, from `/api/uploads/batch-complete`.
+   *
+   * One frame instead of one per file: a folder upload finishing 5,000 files used
+   * to push 5,000 `upload_complete` frames into the uploader's own tab, which the
+   * browser parsed and dispatched while the upload was still running. `fileIds`
+   * carries the whole set so a listening tab can still suppress its own uploads
+   * and reconcile its transfer rows.
+   */
+  | {
+      type: "upload_batch_complete";
+      count: number;
+      fileIds: string[];
+      name: string;
+      sizeBytes?: number;
+    }
+  /**
    * A subtitle track finished, or did not.
    *
    * `language` is a BCP-47 tag rather than a label: the toast names the language in the reader's

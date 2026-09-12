@@ -19,9 +19,20 @@
  */
 
 /** Batch size per `POST /api/folders/batch` call. Must stay ≤ the route's own cap. */
-export const FOLDER_BATCH_SIZE = 500;
+export const FOLDER_BATCH_SIZE = 2000;
 
 export type UploadEntry = { file: File; relativePath: string };
+
+/**
+ * One directory walk: the files to upload, plus every directory that was seen.
+ *
+ * The directory list is not redundant with the file paths. A real file explorer
+ * keeps an empty folder, and an empty folder is invisible in `entries` — nothing
+ * under it has a path. Uploading a project used to drop `logs/`, `.cache/` and
+ * every other empty directory on the floor because the tree was reconstructed
+ * from file paths alone.
+ */
+export type UploadScan = { entries: UploadEntry[]; directories: string[] };
 
 /** Normalize one upload path: `\` → `/`, no leading/trailing or doubled slashes. */
 export function normalizeRelativePath(path: string): string {
@@ -39,13 +50,28 @@ export function normalizeRelativePath(path: string): string {
  * a chain per path and the caller needs a map entry for each level it may reference.
  * Shallow-first ordering keeps a chunked upload sane to reason about: a parent is
  * always requested no later than its children.
+ *
+ * `explicitDirectories` are directories the walk saw for themselves. They are
+ * included whether or not a file lives under them, which is the only way an empty
+ * folder survives the round trip — see `UploadScan`.
  */
-export function collectFolderPaths(relativePaths: string[]): string[] {
+export function collectFolderPaths(
+  relativePaths: string[],
+  explicitDirectories: string[] = []
+): string[] {
   const seen = new Set<string>();
   for (const raw of relativePaths) {
     const parts = normalizeRelativePath(raw).split("/").filter(Boolean);
     // The last segment is the file itself.
     for (let i = 1; i < parts.length; i++) {
+      seen.add(parts.slice(0, i).join("/"));
+    }
+  }
+  for (const raw of explicitDirectories) {
+    const parts = normalizeRelativePath(raw).split("/").filter(Boolean);
+    // Every segment, inclusive: this path IS a directory, not a file path whose
+    // last segment must be dropped.
+    for (let i = 1; i <= parts.length; i++) {
       seen.add(parts.slice(0, i).join("/"));
     }
   }
@@ -122,25 +148,37 @@ export function resolveFileFolderIds(
  * Returns the common root name plus the paths with that segment removed. When the
  * entries do not share a single root (a multi-select, or a browser that reports no
  * relative path at all), `rootName` is null and paths are left untouched.
+ *
+ * `directories` rides along so an empty folder is re-based on the same root as the
+ * files; a directory equal to the root itself collapses to `""` and is dropped,
+ * because the root is created by the caller and is not part of the subtree.
  */
-export function splitCommonRoot(entries: UploadEntry[]): {
+export function splitCommonRoot(
+  entries: UploadEntry[],
+  directories: string[] = []
+): {
   rootName: string | null;
   entries: UploadEntry[];
+  directories: string[];
 } {
   const normalized = entries.map((entry) => ({
     file: entry.file,
     relativePath: normalizeRelativePath(entry.relativePath),
   }));
+  const normalizedDirs = directories.map(normalizeRelativePath).filter(Boolean);
 
   const roots = new Set<string>();
   for (const entry of normalized) {
     const parts = entry.relativePath.split("/").filter(Boolean);
     // A bare filename means this entry has no root directory to share.
-    if (parts.length < 2) return { rootName: null, entries: normalized };
+    if (parts.length < 2) return { rootName: null, entries: normalized, directories: normalizedDirs };
     roots.add(parts[0]);
   }
+  for (const dir of normalizedDirs) {
+    roots.add(dir.split("/").filter(Boolean)[0]);
+  }
 
-  if (roots.size !== 1) return { rootName: null, entries: normalized };
+  if (roots.size !== 1) return { rootName: null, entries: normalized, directories: normalizedDirs };
   const rootName = [...roots][0];
 
   return {
@@ -149,5 +187,8 @@ export function splitCommonRoot(entries: UploadEntry[]): {
       file: entry.file,
       relativePath: entry.relativePath.split("/").slice(1).join("/"),
     })),
+    directories: normalizedDirs
+      .map((dir) => dir.split("/").slice(1).join("/"))
+      .filter(Boolean),
   };
 }

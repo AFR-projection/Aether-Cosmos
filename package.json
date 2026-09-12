@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "lint:contrast": "node scripts/check-contrast.mjs",
     "check:i18n": "tsx scripts/check-i18n.ts",
     "test:a11y": "playwright test tests/e2e/accessibility.spec.ts",

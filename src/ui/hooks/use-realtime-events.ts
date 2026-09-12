@@ -60,7 +60,13 @@ export function showRealtimeToast(message: string, durationMs = 4200): void {
 }
 
 function toastForEvent(
-  event: RealtimeEvent
+  event: RealtimeEvent,
+  /**
+   * For `upload_batch_complete`: how many of the batch's files did NOT come from
+   * this tab. Consumption of the local-upload registry happens once, in
+   * `onmessage`, so this branch must be told the answer rather than ask again.
+   */
+  foreignUploadCount = 0
 ): { title: string; description?: string; tone?: "info" | "success" | "warning" | "system" } | null {
   switch (event.type) {
     case "upload_complete":
@@ -71,6 +77,13 @@ function toastForEvent(
       return {
         title: "Upload complete",
         description: event.name,
+        tone: "success",
+      };
+    case "upload_batch_complete":
+      if (foreignUploadCount === 0) return null;
+      return {
+        title: "Upload complete",
+        description: foreignUploadCount === 1 ? event.name : `${foreignUploadCount} files`,
         tone: "success",
       };
     case "share_access":
@@ -191,6 +204,17 @@ export function useRealtimeEvents(enabled = true): void {
           if (event.type === "upload_complete" && !localUploadComplete) {
             syncTransferActivity({ id: event.fileId, type: "upload", name: event.name, phase: "completed", loaded: event.sizeBytes, total: event.sizeBytes, fileId: event.fileId });
           }
+          // Every id in a batch must be consumed, or a file uploaded here could
+          // toast later on an unrelated event. Only the ones that were NOT ours
+          // reach the activity feed, which is the single case's rule applied set-wise.
+          let foreignUploads = 0;
+          if (event.type === "upload_batch_complete") {
+            for (const fileId of event.fileIds) {
+              if (consumeLocalUpload(fileId)) continue;
+              foreignUploads++;
+              syncTransferActivity({ id: fileId, type: "upload", name: event.name, phase: "completed", fileId });
+            }
+          }
           if (event.type === "session_revoked" && shouldForceLogout(event)) {
             const reason =
               event.reason === "ip_change"
@@ -201,7 +225,7 @@ export function useRealtimeEvents(enabled = true): void {
             forceLogout(reason);
             return;
           }
-          const text = localUploadComplete ? null : toastForEvent(event);
+          const text = localUploadComplete ? null : toastForEvent(event, foreignUploads);
           if (text) {
             notify({
               title: text.title,

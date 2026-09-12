@@ -3,6 +3,11 @@
 import { encryptFile, type EncryptionMetaV1 } from "@/shared/lib/crypto/client-encryption";
 import { markLocalUpload } from "@/shared/lib/system/local-upload-registry";
 import { getActivityScopeId, syncTransferActivity, type ActivityStatus } from "@/shared/lib/activity/activity-store";
+import {
+  BATCH_COMPLETE_MAX_SESSIONS,
+  BATCH_INIT_MAX_FILES,
+  SMALL_FILE_MAX_BYTES,
+} from "@files/application/commands/limits";
 
 export type UploadItemStatus =
   | "queued"
@@ -86,13 +91,31 @@ type InitResult = Omit<UploadSession, "name" | "mimeType" | "fileStatus" | "part
   uploadId: string | null;
   uploadUrl: string | null;
 };
+/** One entry of `POST /api/uploads/batch-init`, which reports refusals per file. */
+type BatchInitEntry =
+  | ({ index: number; ok: true } & InitResult)
+  | { index: number; ok: false; error: string; code: string };
 
 const MAX_ACTIVE_FILES = 3;
+/**
+ * Direct-to-R2 PUTs in flight at once.
+ *
+ * Was 4, which is right for a handful of large files and badly wrong for a folder
+ * of thousands of small ones: each small PUT is mostly latency, so the link sits
+ * idle waiting for round trips. Small files get {@link SMALL_TRANSFER_CONCURRENCY}
+ * instead — these go straight to object storage, not through the app, so the limit
+ * that matters is the browser's own per-host cap rather than anything of ours.
+ */
 const MAX_ACTIVE_TRANSFERS = 4;
+const SMALL_TRANSFER_CONCURRENCY = 12;
+/** Batch lanes running at once, so init/complete of one overlaps the PUTs of another. */
+const MAX_ACTIVE_BATCHES = 2;
 const MAX_RETRIES = 3;
 const API_BATCH_PARTS = 50;
 const PROGRESS_THROTTLE_MS = 100;
 const LARGE_ENCRYPTION_LIMIT = 64 * 1024 * 1024;
+/** Ceiling for the exponential backoff between retries of a throttled API call. */
+const MAX_BACKOFF_MS = 20_000;
 
 function isActivityPopupPresentation(): boolean {
   return typeof window !== "undefined" && window.name === "FileActivityCenter";
@@ -123,17 +146,78 @@ async function apiPost<T>(url: string, body: Record<string, unknown>): Promise<A
   return (await response.json()) as ApiResponse<T>;
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * `apiPost`, but a throttled or transiently-failed call waits and tries again.
+ *
+ * Rate limiting is the normal state of a large upload, not an error: the server
+ * deliberately meters uploads, so a 429 means "later", not "give up". The old code
+ * had neither a delay nor a distinction — a 429 consumed one of an item's three
+ * retries immediately, so a burst of them exhausted every retry within a second and
+ * a folder upload died with a pile of red rows while the server was merely asking
+ * it to slow down.
+ *
+ * Backoff is exponential with jitter. The jitter matters more than the curve here:
+ * a batch fans out dozens of parallel calls, and without it they would all retry on
+ * the same tick and re-trip the limit together.
+ */
+async function apiPostResilient<T>(
+  url: string,
+  body: Record<string, unknown>,
+  opts: { attempts?: number; aborted?: () => boolean } = {}
+): Promise<ApiResponse<T>> {
+  const attempts = opts.attempts ?? 5;
+  let lastError = "REQUEST_FAILED";
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (opts.aborted?.()) throw new Error("CANCELLED");
+    if (attempt > 0) {
+      const backoff = Math.min(MAX_BACKOFF_MS, 500 * 2 ** (attempt - 1));
+      await sleep(backoff / 2 + Math.random() * backoff);
+      if (opts.aborted?.()) throw new Error("CANCELLED");
+    }
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-csrf-token": await getCsrf() },
+        body: JSON.stringify(body),
+      });
+      // 429 and 5xx are worth waiting out. A 4xx is a decision about this request
+      // and repeating it verbatim would only produce the same answer.
+      if (response.status === 429 || response.status >= 500) {
+        lastError = response.status === 429 ? "RATE_LIMITED" : `HTTP_${response.status}`;
+        continue;
+      }
+      return (await response.json()) as ApiResponse<T>;
+    } catch (error) {
+      // A dropped connection mid-flight: retry, same as a 5xx.
+      lastError = error instanceof Error ? error.message : "NETWORK_ERROR";
+    }
+  }
+
+  return { success: false, error: lastError, code: lastError };
+}
+
 async function apiGet<T>(url: string): Promise<ApiResponse<T>> {
   const response = await fetch(url);
   return (await response.json()) as ApiResponse<T>;
 }
 
+/**
+ * Global cap on PUTs in flight, shared by both lanes so they cannot oversubscribe
+ * the link between them. Each lane still applies its own, tighter pool on top: a
+ * multipart file wants a few fat streams, a folder of small files wants many thin
+ * ones, and the right number is not the same.
+ */
 class TransferLimiter {
   private active = 0;
   private readonly waiters: (() => void)[] = [];
 
+  constructor(private readonly capacity: number) {}
+
   async acquire(): Promise<() => void> {
-    if (this.active < MAX_ACTIVE_TRANSFERS) {
+    if (this.active < this.capacity) {
       this.active++;
     } else {
       await new Promise<void>((resolve) => this.waiters.push(resolve));
@@ -149,7 +233,7 @@ class TransferLimiter {
   }
 }
 
-const transferLimiter = new TransferLimiter();
+const transferLimiter = new TransferLimiter(SMALL_TRANSFER_CONCURRENCY);
 
 function mapPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
   let index = 0;
@@ -160,6 +244,45 @@ function mapPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<vo
     }
   }
   return Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker)).then(() => undefined);
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Bounds concurrent filesystem reads during a directory walk.
+ *
+ * `traverseDirectory` descends into every subdirectory at once, which is what makes
+ * a deep tree fast, but on a real project — `node_modules`, `.git` — that is tens of
+ * thousands of simultaneous `readEntries`/`file()` calls. The browser serialises them
+ * internally anyway, so the overshoot buys nothing and costs an unresponsive tab and,
+ * on a big enough tree, outright failures.
+ *
+ * The slot is held ONLY around the filesystem call and never across the recursive
+ * descent: a parent that waits on its children while holding a slot is exactly how a
+ * semaphore wrapped around a recursive walk deadlocks. The release hands the slot
+ * straight to the next waiter instead of decrementing, so a caller arriving in the
+ * gap cannot slip past the limit.
+ */
+const FS_SCAN_CONCURRENCY = 32;
+let fsActive = 0;
+const fsWaiters: (() => void)[] = [];
+
+async function fsAcquire(): Promise<() => void> {
+  if (fsActive >= FS_SCAN_CONCURRENCY) await new Promise<void>((resolve) => fsWaiters.push(resolve));
+  else fsActive++;
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = fsWaiters.shift();
+    if (next) next();
+    else fsActive--;
+  };
 }
 
 function putBlob(
@@ -232,6 +355,7 @@ export class UploadQueue {
   private readonly listeners = new Map<keyof UploadQueueEvents, Set<(...args: never[]) => void>>();
   private paused = false;
   private activeWorkers = 0;
+  private activeBatches = 0;
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastNotifyAt = 0;
   /** Last value published to the activity store per item, so unchanged rows are skipped. */
@@ -396,21 +520,218 @@ export class UploadQueue {
     }
   }
 
+  /**
+   * Whether an item takes the batched lane.
+   *
+   * Encryption is excluded because the bytes that go up are not the bytes on disk —
+   * the size is only known after `encryptFile`, and batch-init has to state it
+   * up front. Large files are excluded because the per-file route's resumability
+   * is worth more to them than a saved handshake.
+   */
+  private isBatchable(item: UploadItem): boolean {
+    return !!item.file && !item.encrypted && item.file.size <= SMALL_FILE_MAX_BYTES;
+  }
+
   private async processNext() {
     if (this.disposed || this.scopeId !== getActivityScopeId() || this.paused) return;
+
+    // The batched lane first: a folder upload is overwhelmingly small files, and
+    // leaving them to the three per-file slots is what made a real project take
+    // hours. Claimed synchronously, like the per-file slots below, so a second
+    // turn of this loop cannot hand the same item to two lanes.
+    while (this.activeBatches < MAX_ACTIVE_BATCHES) {
+      const batch: UploadItem[] = [];
+      for (const item of this.items) {
+        if (batch.length >= BATCH_INIT_MAX_FILES) break;
+        if (item.status === "queued" && this.isBatchable(item)) batch.push(item);
+      }
+      if (batch.length === 0) break;
+      for (const item of batch) item.status = "preparing";
+      this.activeBatches++;
+      void this.runBatch(batch);
+    }
+
     // Slot-based, not batch-based. The old version ran a pool over a slice of
     // three and awaited the whole slice, so two finished slots sat idle behind
     // one slow file. Each slot now pulls the next queued file immediately.
     while (this.activeWorkers < MAX_ACTIVE_FILES) {
-      const next = this.items.find((item) => item.status === "queued" && item.file);
+      // Batchable items belong to the lane above, even when it is saturated:
+      // taking them here would upload the same folder through two schedulers at
+      // once and undo the batching.
+      const next = this.items.find(
+        (item) => item.status === "queued" && item.file && !this.isBatchable(item)
+      );
       if (!next) break;
       // Claimed synchronously so the next turn of this loop cannot pick it again.
       next.status = "preparing";
       this.activeWorkers++;
       void this.runItem(next);
     }
-    if (this.activeWorkers === 0 && this.items.length > 0 && this.getStats().active === 0) {
+    if (this.activeWorkers === 0 && this.activeBatches === 0 && this.items.length > 0 && this.getStats().active === 0) {
       this.emit("allComplete");
+    }
+  }
+
+  /**
+   * Record a failure the same way whichever lane hit it: requeue while the item
+   * still has retries left, give up once it does not.
+   */
+  private failItem(item: UploadItem, message: string) {
+    if ((item.status as UploadItemStatus) === "cancelled") return;
+    item.error = message;
+    item.status = item.retries < MAX_RETRIES ? "queued" : "error";
+    if (item.status === "queued") item.retries++;
+    this.emit("error", item, message);
+  }
+
+  private markDone(item: UploadItem) {
+    item.uploadedBytes = item.totalBytes;
+    item.progress = 100;
+    item.status = "done";
+    markLocalUpload(item.fileId);
+    this.emit("complete", item);
+  }
+
+  /**
+   * Upload a group of small files with one init call, one PUT each, and one
+   * complete call per {@link BATCH_COMPLETE_MAX_SESSIONS}.
+   *
+   * The per-file path costs four app round trips per file (init, state, PUT,
+   * complete). For 5,000 small files that is 20,000 requests against a metered
+   * endpoint — the upload spent nearly all of its time in handshakes and then died
+   * on the rate limit. Here the same 5,000 files cost 25 init calls, 25 complete
+   * calls and 5,000 PUTs that go straight to object storage and are not metered by
+   * us at all.
+   */
+  private async runBatch(items: UploadItem[]) {
+    try {
+      this.notify(true);
+      const live = () => !this.disposed && this.scopeId === getActivityScopeId();
+      if (!live()) return;
+
+      const initialized = await apiPostResilient<{ results: BatchInitEntry[] }>(
+        "/api/uploads/batch-init",
+        {
+          files: items.map((item) => ({
+            filename: item.file!.name,
+            mimeType: item.file!.type || "application/octet-stream",
+            sizeBytes: item.file!.size,
+            folderId: item.folderId,
+            idempotencyKey: item.id,
+            encrypted: false,
+          })),
+        }
+      );
+
+      if (!live()) return;
+      if (!initialized.success || !initialized.data) {
+        // The whole call failed, so nothing was reserved: every item goes back in
+        // the queue on its own retry budget rather than dying as a group.
+        for (const item of items) this.failItem(item, initialized.error ?? "UPLOAD_INIT_FAILED");
+        this.notify(true);
+        return;
+      }
+
+      const ready: { item: UploadItem; url: string; mime: string }[] = [];
+      for (const entry of initialized.data.results) {
+        const item = items[entry.index];
+        if (!item || item.status === "cancelled") continue;
+        if (!entry.ok) {
+          // A per-file refusal — a blocked extension, quota, a folder that moved.
+          // Retrying it verbatim would produce the same answer, so it is final.
+          item.retries = MAX_RETRIES;
+          this.failItem(item, entry.error);
+          continue;
+        }
+        item.sessionId = entry.sessionId;
+        item.fileId = entry.fileId;
+        // Registered before the transfer, not after: the complete route publishes
+        // its realtime event before returning, so it can reach this tab first.
+        markLocalUpload(entry.fileId);
+        item.totalBytes = entry.totalSizeBytes;
+        if (entry.status === "completed") {
+          this.markDone(item);
+          continue;
+        }
+        if (!entry.uploadUrl) {
+          this.failItem(item, "UPLOAD_URL_MISSING");
+          continue;
+        }
+        ready.push({
+          item,
+          url: entry.uploadUrl,
+          mime: item.file!.type || "application/octet-stream",
+        });
+      }
+      this.notify(true);
+
+      const uploaded: UploadItem[] = [];
+      await mapPool(ready, SMALL_TRANSFER_CONCURRENCY, async ({ item, url, mime }) => {
+        if (!live() || item.status === "cancelled") return;
+        const signal = { aborted: false, xhrs: [] as XMLHttpRequest[] };
+        this.abortSignals.set(item.id, signal);
+        item.status = "uploading";
+        let lastLoaded = 0;
+        let lastTime = Date.now();
+        try {
+          const release = await transferLimiter.acquire();
+          try {
+            await putBlob(url, item.file!, mime, (loaded, total) => {
+              item.uploadedBytes = loaded;
+              item.progress = total > 0 ? (loaded / total) * 100 : 0;
+              const now = Date.now();
+              const elapsed = (now - lastTime) / 1000;
+              if (elapsed >= 0.3) {
+                const speed = (loaded - lastLoaded) / elapsed;
+                item.speed = speed;
+                this.trackSpeed(speed);
+                lastLoaded = loaded;
+                lastTime = now;
+              }
+              this.notify();
+            }, signal);
+          } finally {
+            release();
+          }
+          // A zero-byte file never fires a progress event, so its bytes are
+          // settled here rather than left at whatever the last tick said.
+          item.uploadedBytes = item.totalBytes;
+          item.status = "verifying";
+          uploaded.push(item);
+        } catch (error) {
+          this.failItem(item, error instanceof Error ? error.message : "UPLOAD_FAILED");
+        } finally {
+          this.abortSignals.delete(item.id);
+        }
+        this.notify();
+      });
+
+      if (!live()) return;
+      this.notify(true);
+
+      for (const group of chunk(uploaded, BATCH_COMPLETE_MAX_SESSIONS)) {
+        const completed = await apiPostResilient<{
+          results: ({ sessionId: string; ok: true } | { sessionId: string; ok: false; error: string })[];
+        }>("/api/uploads/batch-complete", {
+          sessions: group.map((item) => ({ sessionId: item.sessionId })),
+        });
+        if (!live()) return;
+
+        if (!completed.success || !completed.data) {
+          for (const item of group) this.failItem(item, completed.error ?? "FINALIZATION_FAILED");
+          continue;
+        }
+        const verdicts = new Map(completed.data.results.map((result) => [result.sessionId, result]));
+        for (const item of group) {
+          const verdict = item.sessionId ? verdicts.get(item.sessionId) : undefined;
+          if (verdict && verdict.ok) this.markDone(item);
+          else this.failItem(item, (verdict && !verdict.ok ? verdict.error : undefined) ?? "FINALIZATION_FAILED");
+        }
+        this.notify(true);
+      }
+    } finally {
+      this.activeBatches--;
+      if (!this.paused && !this.disposed) void this.processNext();
     }
   }
 
@@ -441,7 +762,7 @@ export class UploadQueue {
         encryptionMeta = encrypted.meta;
       }
 
-      const initialized = await apiPost<InitResult>("/api/uploads/init", {
+      const initialized = await apiPostResilient<InitResult>("/api/uploads/init", {
         filename: item.file.name,
         mimeType: item.file.type || "application/octet-stream",
         sizeBytes: uploadSize,
@@ -464,23 +785,19 @@ export class UploadQueue {
       item.mimeType = uploadMime;
 
       if (init.status === "failed") {
-        const retried = await apiPost<InitResult>(`/api/uploads/${init.sessionId}/retry`, {});
+        const retried = await apiPostResilient<InitResult>(`/api/uploads/${init.sessionId}/retry`, {});
         if (!retried.success || !retried.data) throw new Error(retried.error ?? "UPLOAD_RETRY_FAILED");
         init = retried.data;
       }
       if (init.status === "completed") {
-        item.uploadedBytes = item.totalBytes;
-        item.progress = 100;
-        item.status = "done";
-        markLocalUpload(item.fileId);
-        this.emit("complete", item);
+        this.markDone(item);
         this.notify(true);
         return;
       }
 
-      const stateResponse = await apiGet<UploadSession>(`/api/uploads/${init.sessionId}`);
-      if (!stateResponse.success || !stateResponse.data) throw new Error(stateResponse.error ?? "UPLOAD_STATE_FAILED");
-      const state = stateResponse.data;
+      // The session's part list is only meaningful to a resumed multipart upload,
+      // so it is fetched inside that branch. Asking for it on every single-part
+      // upload added a whole round trip per file to no purpose.
       item.status = "uploading";
       this.notify(true);
       const signal = { aborted: false, xhrs: [] as XMLHttpRequest[] };
@@ -511,10 +828,15 @@ export class UploadQueue {
         }
         item.status = "verifying";
         this.notify(true);
-        const complete = await apiPost<{ sessionId: string; fileId: string; name: string; status: "ready" }>(`/api/uploads/${init.sessionId}/complete`, {});
+        const complete = await apiPostResilient<{ sessionId: string; fileId: string; name: string; status: "ready" }>(`/api/uploads/${init.sessionId}/complete`, {});
         if (!complete.success) throw new Error(complete.error ?? "FINALIZATION_FAILED");
       } else {
         if (!init.partSizeBytes || !init.partCount || !init.uploadId) throw new Error("MULTIPART_SESSION_INCOMPLETE");
+        // Only a resumed upload has parts already on the server, and only this
+        // branch can use them.
+        const stateResponse = await apiGet<UploadSession>(`/api/uploads/${init.sessionId}`);
+        if (!stateResponse.success || !stateResponse.data) throw new Error(stateResponse.error ?? "UPLOAD_STATE_FAILED");
+        const state = stateResponse.data;
         const uploaded = new Map(state.parts.filter((part) => part.status === "uploaded" && part.etag).map((part) => [part.partNumber, part]));
         let committedBytes = [...uploaded.values()].reduce((sum, part) => sum + part.sizeBytes, 0);
         item.uploadedBytes = committedBytes;
@@ -526,7 +848,7 @@ export class UploadQueue {
         let speedAt = Date.now();
         for (let offset = 0; offset < missingParts.length; offset += API_BATCH_PARTS) {
           const partNumbers = missingParts.slice(offset, offset + API_BATCH_PARTS);
-          const signed = await apiPost<{ parts: { partNumber: number; sizeBytes: number; url: string }[] }>(`/api/uploads/${init.sessionId}/parts/sign`, { partNumbers });
+          const signed = await apiPostResilient<{ parts: { partNumber: number; sizeBytes: number; url: string }[] }>(`/api/uploads/${init.sessionId}/parts/sign`, { partNumbers }, { aborted: () => signal.aborted });
           if (!signed.success || !signed.data) throw new Error(signed.error ?? "PART_SIGNING_FAILED");
           await mapPool(signed.data.parts, MAX_ACTIVE_TRANSFERS, async (part) => {
             let attempt = 0;
@@ -551,7 +873,7 @@ export class UploadQueue {
                     this.notify();
                   }, signal);
                   etags.set(part.partNumber, etag);
-                  const committed = await apiPost(`/api/uploads/${init.sessionId}/parts/commit`, { partNumber: part.partNumber, etag });
+                  const committed = await apiPostResilient(`/api/uploads/${init.sessionId}/parts/commit`, { partNumber: part.partNumber, etag }, { aborted: () => signal.aborted });
                   if (!committed.success) throw new Error(committed.error ?? "PART_COMMIT_FAILED");
                   committedBytes += part.sizeBytes;
                   inFlightProgress.delete(part.partNumber);
@@ -562,27 +884,23 @@ export class UploadQueue {
                 return;
               } catch (error) {
                 if (attempt >= 3 || signal.aborted) throw error;
+                // A part that failed on a blip needs the link to settle before
+                // the next attempt; retrying three times inside a second just
+                // spends the budget without ever letting it recover.
+                await sleep(500 * 2 ** (attempt - 1) * (0.5 + Math.random()));
               }
             }
           });
         }
         item.status = "verifying";
         this.notify(true);
-        const complete = await apiPost<{ sessionId: string; fileId: string; name: string; status: "ready" }>(`/api/uploads/${init.sessionId}/complete`, { parts: [...etags.entries()].map(([partNumber, etag]) => ({ partNumber, etag })) });
+        const complete = await apiPostResilient<{ sessionId: string; fileId: string; name: string; status: "ready" }>(`/api/uploads/${init.sessionId}/complete`, { parts: [...etags.entries()].map(([partNumber, etag]) => ({ partNumber, etag })) });
         if (!complete.success) throw new Error(complete.error ?? "FINALIZATION_FAILED");
       }
-      item.uploadedBytes = item.totalBytes;
-      item.progress = 100;
-      item.status = "done";
-      markLocalUpload(item.fileId);
-      this.emit("complete", item);
+      this.markDone(item);
       this.notify(true);
     } catch (error) {
-      if ((item.status as UploadItemStatus) === "cancelled") return;
-      item.error = error instanceof Error ? error.message : "UPLOAD_FAILED";
-      item.status = item.retries < MAX_RETRIES ? "queued" : "error";
-      if (item.status === "queued") item.retries++;
-      this.emit("error", item, item.error);
+      this.failItem(item, error instanceof Error ? error.message : "UPLOAD_FAILED");
       this.notify(true);
     } finally {
       this.abortSignals.delete(item.id);
@@ -662,21 +980,82 @@ export function formatETA(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m remaining`;
 }
 
-export async function traverseDirectory(entry: FileSystemEntry, path = ""): Promise<{ file: File; relativePath: string }[]> {
-  const results: { file: File; relativePath: string }[] = [];
+/**
+ * Walk a dropped directory into the files it holds AND the directories it holds.
+ *
+ * Three things this fixes over the previous shape, all of which cost real content:
+ *
+ *  - Directories are reported. An empty folder has no file under it, so a tree
+ *    rebuilt from file paths alone silently loses every empty directory — and a
+ *    file explorer that drops folders is not a file explorer.
+ *  - One unreadable entry no longer aborts the walk. `readEntries` and `file()`
+ *    both reject on a file that vanished, is locked, or is a dangling symlink;
+ *    a single one of those used to reject the whole traversal, so a 40,000-file
+ *    project uploaded nothing at all. Failures are collected and reported.
+ *  - Sibling directories are read concurrently. Serial recursion over a deep tree
+ *    spent most of the scan waiting on the filesystem one `readEntries` at a time.
+ */
+export async function traverseDirectory(
+  entry: FileSystemEntry,
+  path = ""
+): Promise<{ files: { file: File; relativePath: string }[]; directories: string[]; failed: string[] }> {
+  const files: { file: File; relativePath: string }[] = [];
+  const directories: string[] = [];
+  const failed: string[] = [];
+
   if (entry.isFile) {
     const fileEntry = entry as FileSystemFileEntry;
-    const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject));
-    results.push({ file, relativePath: path ? `${path}/${file.name}` : file.name });
-    return results;
+    const release = await fsAcquire();
+    try {
+      const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject));
+      // `path` is this entry's OWN full path — the recursion below already appended
+      // `child.name` before descending. Appending the filename a second time here
+      // produced `src/index.ts/index.ts`, and since `collectFolderPaths` treats the
+      // last segment as the filename, every file in a dropped tree was turned into a
+      // FOLDER named after itself. That is precisely the "I opened it and there are
+      // only folder names, no files" report: the files were uploaded, each one buried
+      // in a directory wearing its own name.
+      files.push({ file, relativePath: path || file.name });
+    } catch {
+      failed.push(path || entry.name);
+    } finally {
+      release();
+    }
+    return { files, directories, failed };
   }
-  if (!entry.isDirectory) return results;
+  if (!entry.isDirectory) return { files, directories, failed };
+
+  if (path) directories.push(path);
+
   const reader = (entry as FileSystemDirectoryEntry).createReader();
-  const entries = await new Promise<FileSystemEntry[]>((resolve) => {
-    const allEntries: FileSystemEntry[] = [];
-    const readBatch = () => reader.readEntries((batch) => batch.length === 0 ? resolve(allEntries) : (allEntries.push(...batch), readBatch()));
-    readBatch();
-  });
-  for (const child of entries) results.push(...await traverseDirectory(child, path ? `${path}/${child.name}` : child.name));
-  return results;
+  // `readEntries` returns at most 100 per call and signals the end with an empty
+  // batch, so it has to be drained in a loop rather than called once.
+  const children: FileSystemEntry[] = [];
+  const release = await fsAcquire();
+  try {
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+        reader.readEntries(resolve, reject)
+      );
+      if (batch.length === 0) break;
+      children.push(...batch);
+    }
+  } catch {
+    failed.push(path || entry.name);
+  } finally {
+    // Before the recursion, never after: a parent holding a slot while it waits on
+    // its children is how this gate would deadlock on a tree deeper than the limit.
+    release();
+  }
+
+  const results = await Promise.all(
+    children.map((child) => traverseDirectory(child, path ? `${path}/${child.name}` : child.name))
+  );
+  for (const result of results) {
+    files.push(...result.files);
+    directories.push(...result.directories);
+    failed.push(...result.failed);
+  }
+
+  return { files, directories, failed };
 }

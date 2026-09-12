@@ -54,6 +54,20 @@ export function getLegacyThumbnailKey(fileId: string): string {
   return `thumbnails/${fileId}.jpg`;
 }
 
+/**
+ * `ContentLength` is deliberately signed for a real body: it pins the URL to the
+ * exact byte count /init reserved quota for, so a leaked URL cannot be used to
+ * write a larger object than was accounted for. `content-length` is not in the
+ * signer's unsignable set, so it lands in `X-Amz-SignedHeaders` and the client's
+ * PUT must reproduce it — which the browser does automatically from the blob.
+ *
+ * Zero is the exception. Empty files are now legal (a real project is full of
+ * `.gitkeep` and empty `__init__.py`), there is nothing to pin — 0 is the floor,
+ * not a budget — and whether a falsy `ContentLength` survives serialization into
+ * the signature is an SDK implementation detail we should not be betting a 403
+ * on. Omitting it leaves the signature silent about length; `headObject` at
+ * complete time still rejects anything that is not actually 0 bytes.
+ */
 export async function getPresignedUploadUrl(
   r2Key: string,
   mimeType: string,
@@ -64,7 +78,7 @@ export async function getPresignedUploadUrl(
     Bucket: getBucket(),
     Key: r2Key,
     ContentType: mimeType,
-    ContentLength: sizeBytes,
+    ContentLength: sizeBytes > 0 ? sizeBytes : undefined,
   });
 
   const expiry = uploadUrlExpirySeconds();

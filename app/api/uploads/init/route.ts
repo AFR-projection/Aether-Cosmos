@@ -17,7 +17,11 @@ const encryptionMetaSchema = z.object({
 const schema = z.object({
   filename: z.string().min(1).max(255),
   mimeType: z.string().min(1).max(255),
-  sizeBytes: z.number().int().positive().safe(),
+  // Zero is a real size. `.positive()` here rejected every empty file, and a real
+  // project is full of them — `.gitkeep`, an empty `__init__.py`, a placeholder
+  // `index.ts`. Each one 400'd, burned its retries and landed as a failed row, so
+  // an otherwise clean folder upload always reported errors.
+  sizeBytes: z.number().int().nonnegative().safe(),
   folderId: z.string().uuid().nullable().optional(),
   idempotencyKey: z.string().min(16).max(128).optional(),
   encrypted: z.boolean().default(false),

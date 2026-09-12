@@ -20,7 +20,7 @@ import {
   useFloatingMenu,
   type FloatingMenuItem,
 } from "@/ui/primitives/floating-action-menu";
-import { apiFetch } from "@/shared/api/client";
+import { apiFetch, apiFetchWithStatus } from "@/shared/api/client";
 import { cn } from "@/shared/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { File as FileRecord, Folder as FolderRecord } from "@/shared/infrastructure/db/schema";
@@ -204,11 +204,14 @@ const ROLE_BADGE: Record<
  * Create every directory a set of uploaded files needs, in chunks, and return the
  * path → id map.
  *
- * Throws on the first chunk the server refuses. That matters: `apiFetch` resolves
- * on a 4xx, so the previous code read a rejected request as "no folders" and let
- * every file fall back to the root folder — the upload reported success and the
- * project arrived flat. A folder tree that cannot be created is an upload that must
- * not start.
+ * A chunk the server refuses no longer abandons the upload. `apiFetch` resolves on
+ * a 4xx, so the original code read a rejected request as "no folders" and let every
+ * file fall back to the root — the upload reported success and the project arrived
+ * flat. The fix for that was to throw, which traded a flat upload for an empty one:
+ * the folders from earlier chunks were already created, so a tree that tripped the
+ * rate limit half way through left a skeleton of directories and not one file. Now
+ * the failures come back alongside the map, and the caller uploads everything that
+ * DID resolve and reports the rest.
  *
  * `fallbackMessage` arrives already translated: this runs outside the component, so
  * it has no locale of its own, and the server's own message still wins when there
@@ -217,26 +220,75 @@ const ROLE_BADGE: Record<
 async function createFolderTree(
   relativePaths: string[],
   rootFolderId: string | null,
-  fallbackMessage: string
-): Promise<Map<string, string>> {
+  fallbackMessage: string,
+  explicitDirectories: string[] = []
+): Promise<{ folders: Map<string, string>; errors: string[] }> {
   const map = new Map<string, string>();
-  const paths = collectFolderPaths(relativePaths);
-  if (paths.length === 0) return map;
+  const errors: string[] = [];
+  const paths = collectFolderPaths(relativePaths, explicitDirectories);
+  if (paths.length === 0) return { folders: map, errors };
 
   // Sequential, not parallel: two chunks that share an ancestor would otherwise
   // both find it missing and insert it twice.
   for (const chunk of chunkPaths(paths)) {
-    const res = await apiFetch<{ folders: Record<string, string> }>("/api/folders/batch", {
-      method: "POST",
-      body: JSON.stringify({ paths: chunk, rootFolderId }),
-    });
-    if (!res.success || !res.data) {
-      throw new Error(res.error ?? fallbackMessage);
+    const res = await postFolderChunk(chunk, rootFolderId, fallbackMessage);
+    if (!res.ok) {
+      errors.push(res.error);
+      continue;
     }
-    for (const [path, id] of Object.entries(res.data.folders)) map.set(path, id);
+    for (const [path, id] of Object.entries(res.folders)) map.set(path, id);
   }
 
-  return map;
+  return { folders: map, errors };
+}
+
+/**
+ * One chunk of the tree, retried on anything that is not a decision.
+ *
+ * This is the step whose failure is most expensive and least visible: a chunk that
+ * does not land takes every file underneath those directories with it, because
+ * `resolveFileFolderIds` then has no id to file them under and reports them
+ * unresolved. A single dropped connection could therefore silently strip a whole
+ * subtree out of an otherwise healthy upload — the same class of "the folders are
+ * there but empty" failure this whole path exists to stop.
+ *
+ * A 429 or 5xx means "later", so it waits and asks again; the jitter keeps several
+ * uploads in different tabs from retrying on the same tick. A 4xx is an answer
+ * about this request and repeating it verbatim would only produce the same answer.
+ * `apiFetchWithStatus` also THROWS when the body is not JSON — an nginx 502 page,
+ * say — and that used to escape all the way out of the drop handler; here it is
+ * just another transport failure to retry.
+ */
+async function postFolderChunk(
+  chunk: string[],
+  rootFolderId: string | null,
+  fallbackMessage: string,
+  attempts: number = 4
+): Promise<{ ok: true; folders: Record<string, string> } | { ok: false; error: string }> {
+  let lastError = fallbackMessage;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) {
+      const backoff = Math.min(8000, 500 * 2 ** (attempt - 1));
+      await new Promise<void>((resolve) => setTimeout(resolve, backoff / 2 + Math.random() * backoff));
+    }
+    try {
+      const { status, body } = await apiFetchWithStatus<{ folders: Record<string, string> }>(
+        "/api/folders/batch",
+        { method: "POST", body: JSON.stringify({ paths: chunk, rootFolderId }) }
+      );
+      if (status === 429 || status >= 500) {
+        lastError = body.error ?? fallbackMessage;
+        continue;
+      }
+      if (!body.success || !body.data) return { ok: false, error: body.error ?? fallbackMessage };
+      return { ok: true, folders: body.data.folders };
+    } catch {
+      lastError = fallbackMessage;
+    }
+  }
+
+  return { ok: false, error: lastError };
 }
 
 // ─── DockButton ─────────────────────────────────────────────────────────────
@@ -601,6 +653,69 @@ export function FileBrowser({
     if (dragCounter.current === 0) setIsDragActive(false);
   }, []);
 
+  /**
+   * Create the directory tree, then queue every file whose directory exists.
+   *
+   * The old behaviour was all-or-nothing in the worst direction: one unresolved
+   * path aborted the upload AFTER the folders had been created, which is exactly
+   * how a large folder upload produced a tree of empty directories and no content.
+   * Partial progress is strictly better than none here — the files that can go,
+   * go, and what could not is named instead of being swallowed.
+   *
+   * `directories` carries the empty folders the walk found, which have no file to
+   * imply them and would otherwise be dropped.
+   */
+  const uploadResolvedTree = useCallback(
+    async (
+      entries: UploadEntry[],
+      directories: string[],
+      rootId: string | null,
+      unreadable: string[] = []
+    ) => {
+      // `rootId` as the root: a tree dropped while inside a folder used to be
+      // created at the account root, because this call never said where it landed.
+      const { folders: folderIds, errors } = await createFolderTree(
+        entries.map((entry) => entry.relativePath),
+        rootId,
+        t("files.browser.error.folderTree"),
+        directories
+      );
+
+      const { items: uploadItems, unresolved } = resolveFileFolderIds(entries, folderIds, rootId);
+
+      // Show the tree the moment it exists rather than when the last byte lands: a
+      // 5,000-file folder takes minutes, and a file explorer that shows nothing until
+      // then looks broken. The queue invalidates again on completion for the files.
+      if (folderIds.size > 0) queryClient.invalidateQueries({ queryKey: ["folders"] });
+
+      if (uploadItems.length > 0) getQueue().addFolderStructure(uploadItems);
+
+      const skipped = entries.length - uploadItems.length;
+      if (skipped > 0 || errors.length > 0) {
+        // Named, not silent — but only after the rest of the upload is running.
+        showError(
+          skipped > 0
+            ? t("files.browser.error.unresolvedFolders", { count: unresolved.length })
+            : (errors[0] ?? t("files.browser.error.folderTree"))
+        );
+      } else if (unreadable.length > 0) {
+        showError(t("files.browser.error.unreadableEntries", { count: unreadable.length }));
+      }
+
+      if (uploadItems.length === 0 && directories.length > 0 && errors.length === 0) {
+        // A folder of nothing but empty folders is a legitimate upload: the tree
+        // is the payload, so it deserves the same confirmation a file would get.
+        notify({
+          title: t("files.browser.notify.foldersCreated"),
+          description: t("files.browser.folderCount", { count: directories.length }),
+          tone: "success",
+          duration: 2500,
+        });
+      }
+    },
+    [getQueue, showError, queryClient, t]
+  );
+
   // ── Dropzone native handler ──
   const onDropNative = useCallback(
     async (e: React.DragEvent) => {
@@ -615,7 +730,6 @@ export function FileBrowser({
       const items = e.dataTransfer.items;
       if (!items) return;
 
-      const queue = getQueue();
       const entries: FileSystemEntry[] = [];
       for (let i = 0; i < items.length; i++) {
         const entry = items[i].webkitGetAsEntry?.();
@@ -623,56 +737,41 @@ export function FileBrowser({
       }
 
       const dropped: UploadEntry[] = [];
+      const droppedDirs: string[] = [];
+      const unreadable: string[] = [];
       for (const entry of entries) {
         if (entry.isDirectory) {
           const dirEntry = entry as FileSystemDirectoryEntry;
-          const files = await traverseDirectory(entry, dirEntry.name);
-          for (const f of files) {
+          const scan = await traverseDirectory(entry, dirEntry.name);
+          for (const f of scan.files) {
             dropped.push({ file: f.file, relativePath: f.relativePath });
           }
+          droppedDirs.push(...scan.directories);
+          unreadable.push(...scan.failed);
         } else {
           const fileEntry = entry as FileSystemFileEntry;
-          const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject));
-          dropped.push({ file, relativePath: file.name });
+          try {
+            const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject));
+            dropped.push({ file, relativePath: file.name });
+          } catch {
+            unreadable.push(fileEntry.name);
+          }
         }
-      }
-
-      if (dropped.length === 0) {
-        dragCounter.current = 0;
-        setIsDragActive(false);
-        return;
       }
 
       dragCounter.current = 0;
       setIsDragActive(false);
 
-      let folderIds: Map<string, string>;
-      try {
-        // `folderId` as the root: a tree dropped while inside a folder used to be
-        // created at the account root, because this call never said where it landed.
-        folderIds = await createFolderTree(
-          dropped.map((d) => d.relativePath),
-          folderId,
-          t("files.browser.error.folderTree")
-        );
-      } catch (error) {
-        showError(
-          error instanceof Error ? error.message : t("files.browser.error.createFolders")
-        );
+      if (dropped.length === 0 && droppedDirs.length === 0) {
+        if (unreadable.length > 0) {
+          showError(t("files.browser.error.unreadableEntries", { count: unreadable.length }));
+        }
         return;
       }
 
-      const { items: uploadItems, unresolved } = resolveFileFolderIds(dropped, folderIds, folderId);
-      if (unresolved.length > 0) {
-        showError(
-          t("files.browser.error.unresolvedFolders", { count: unresolved.length })
-        );
-        return;
-      }
-
-      queue.addFolderStructure(uploadItems);
+      await uploadResolvedTree(dropped, droppedDirs, folderId, unreadable);
     },
-    [folderId, getQueue, showError, caps.canEdit, favoritesActive, refuse, t]
+    [folderId, uploadResolvedTree, showError, caps.canEdit, favoritesActive, refuse, t]
   );
 
   // ── Clipboard: copy / cut (paste lives below, needs folderId handlers) ──
@@ -970,35 +1069,67 @@ export function FileBrowser({
   }
 
   // ── Recursive directory reader for showDirectoryPicker ──
+  /**
+   * Walk a picked directory handle. Same contract as `traverseDirectory` (the
+   * drag-and-drop walker), so both entry points hand the uploader the same shape.
+   *
+   * Two differences from the version this replaces, both of which cost real files:
+   * empty directories are now reported in their own right — the old reader only ever
+   * returned files, so a folder containing nothing simply ceased to exist — and one
+   * unreadable handle no longer throws out of the whole walk. A single locked or
+   * permission-denied file used to abort the recursion and take the entire upload
+   * with it; now it is named in `failed` and its siblings still go.
+   */
   async function readDirectoryRecursive(
     dirHandle: FileSystemDirectoryHandle,
     path: string = ""
-  ): Promise<{ file: File; relativePath: string }[]> {
-    const results: { file: File; relativePath: string }[] = [];
-    const dirEntries = (
-      dirHandle as unknown as {
-        entries(): AsyncIterable<[string, FileSystemHandle]>;
-      }
-    ).entries();
-    for await (const [name, handle] of dirEntries) {
-      const entryPath = path ? `${path}/${name}` : name;
-      if (handle.kind === "file") {
-        const fileHandle = handle as FileSystemFileHandle;
-        const file = await fileHandle.getFile();
-        results.push({ file, relativePath: entryPath });
-      } else {
-        const subResults = await readDirectoryRecursive(handle as FileSystemDirectoryHandle, entryPath);
-        results.push(...subResults);
-      }
+  ): Promise<{ files: UploadEntry[]; directories: string[]; failed: string[] }> {
+    const files: UploadEntry[] = [];
+    const directories: string[] = [];
+    const failed: string[] = [];
+
+    if (path) directories.push(path);
+
+    const children: [string, FileSystemHandle][] = [];
+    try {
+      const dirEntries = (
+        dirHandle as unknown as {
+          entries(): AsyncIterable<[string, FileSystemHandle]>;
+        }
+      ).entries();
+      for await (const child of dirEntries) children.push(child);
+    } catch {
+      failed.push(path || dirHandle.name);
     }
-    return results;
+
+    const results = await Promise.all(
+      children.map(async ([name, handle]) => {
+        const entryPath = path ? `${path}/${name}` : name;
+        if (handle.kind !== "file") {
+          return readDirectoryRecursive(handle as FileSystemDirectoryHandle, entryPath);
+        }
+        try {
+          const file = await (handle as FileSystemFileHandle).getFile();
+          return { files: [{ file, relativePath: entryPath }], directories: [], failed: [] };
+        } catch {
+          return { files: [], directories: [], failed: [entryPath] };
+        }
+      })
+    );
+    for (const result of results) {
+      files.push(...result.files);
+      directories.push(...result.directories);
+      failed.push(...result.failed);
+    }
+
+    return { files, directories, failed };
   }
 
   // ── Folder upload (showDirectoryPicker + webkitdirectory fallback) ──
   async function pickAndUploadFolder() {
     if (!caps.canEdit) { refuse("edit"); return; }
     let rootFolderName: string;
-    let files: { file: File; relativePath: string }[];
+    let scan: { files: UploadEntry[]; directories: string[]; failed: string[] };
 
     // Try modern File System Access API first
     if (typeof window !== "undefined" && "showDirectoryPicker" in window) {
@@ -1009,7 +1140,7 @@ export function FileBrowser({
           }
         ).showDirectoryPicker();
         rootFolderName = dirHandle.name;
-        files = await readDirectoryRecursive(dirHandle);
+        scan = await readDirectoryRecursive(dirHandle);
       } catch (err) {
         if ((err as { name?: string })?.name === "AbortError") return; // User cancelled
         showError(t("files.browser.error.readFolder"));
@@ -1021,8 +1152,14 @@ export function FileBrowser({
       return;
     }
 
-    if (files.length === 0) return;
-    await uploadFolderStructure(rootFolderName, files, folderId);
+    // A folder of only empty folders is still worth uploading — the tree is the payload.
+    if (scan.files.length === 0 && scan.directories.length === 0) {
+      if (scan.failed.length > 0) {
+        showError(t("files.browser.error.unreadableEntries", { count: scan.failed.length }));
+      }
+      return;
+    }
+    await uploadFolderStructure(rootFolderName, scan.files, scan.directories, folderId, scan.failed);
   }
 
   // ── Webkitdirectory fallback handler ──
@@ -1039,13 +1176,18 @@ export function FileBrowser({
     // `webkitRelativePath` starts with the directory the user chose, so the name is
     // right there. The old code invented "Upload <timestamp>" and then kept the
     // real name as a subfolder, burying every project one level deeper than it is.
-    const { rootName, entries } = splitCommonRoot(picked);
+    //
+    // `directories` is empty on this path by construction: a `FileList` has no way
+    // to mention a directory that holds no files. That is a browser limitation, not
+    // a choice — `showDirectoryPicker` above reports them, and this is the fallback.
+    const { rootName, entries, directories } = splitCommonRoot(picked);
     const now = new Date();
     const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}.${String(now.getMinutes()).padStart(2, "0")}`;
 
     await uploadFolderStructure(
       rootName ?? t("files.browser.uploadFallbackName", { timestamp: ts }),
       entries,
+      directories,
       folderId
     );
     e.target.value = "";
@@ -1055,12 +1197,14 @@ export function FileBrowser({
   async function uploadFolderStructure(
     rootName: string,
     entries: UploadEntry[],
+    directories: string[],
     parentFolderId: string | null,
+    unreadable: string[] = [],
   ) {
-    if (entries.length === 0) return;
-    const queue = getQueue();
+    if (entries.length === 0 && directories.length === 0) return;
 
-    // 1. Create the root folder
+    // 1. Create the root folder. This one IS fatal: without it there is nowhere to
+    //    put anything, and every path below is relative to it.
     const folderRes = await apiFetch<{ folder: FolderRecord }>("/api/folders", {
       method: "POST",
       body: JSON.stringify({ name: rootName, parentId: parentFolderId }),
@@ -1069,31 +1213,10 @@ export function FileBrowser({
       showError(apiErrorMessage(folderRes, t, "files.browser.error.createFolder"));
       return;
     }
-    const rootId = folderRes.data.folder.id;
 
-    // 2. Create every subfolder underneath it, in chunks, failing loudly.
-    let folderIds: Map<string, string>;
-    try {
-      folderIds = await createFolderTree(
-        entries.map((entry) => entry.relativePath),
-        rootId,
-        t("files.browser.error.folderTree")
-      );
-    } catch (error) {
-      showError(
-        error instanceof Error ? error.message : t("files.browser.error.createSubfolders")
-      );
-      return;
-    }
-
-    // 3. Point each file at its own folder — never at the root as a fallback.
-    const { items, unresolved } = resolveFileFolderIds(entries, folderIds, rootId);
-    if (unresolved.length > 0) {
-      showError(t("files.browser.error.unresolvedFolders", { count: unresolved.length }));
-      return;
-    }
-
-    queue.addFolderStructure(items);
+    // 2. Subfolders, then every file that found its home. Shared with drag-and-drop
+    //    so both entry points recover from a partial failure the same way.
+    await uploadResolvedTree(entries, directories, folderRes.data.folder.id, unreadable);
   }
 
   // ── Sort toggle ──
