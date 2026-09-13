@@ -1,12 +1,14 @@
 [
   {
     "AllowedOrigins": ["http://localhost:3000", "https://mindvault.dataku.id"],
-    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
     "AllowedHeaders": [
       "Range",
       "If-Range",
       "If-None-Match",
-      "If-Modified-Since"
+      "If-Modified-Since",
+      "Content-Type",
+      "x-amz-*"
     ],
     "ExposeHeaders": [
       "Accept-Ranges",

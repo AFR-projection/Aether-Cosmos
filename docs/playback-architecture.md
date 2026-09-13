@@ -75,7 +75,7 @@ Signing failure therefore changes no counters. Shared quota refusal does not con
 
 ## Browser and R2 CORS
 
-Direct playback is cross-origin. The desired operator-applied policy is recorded in `docker/r2-cors.json`; source control does not apply it to production. The production origin and local development origin may issue `GET` and `HEAD`, send Range/request headers, and read validators needed by browser media handling. R2 must continue requiring signed requests.
+Direct playback is cross-origin. The desired operator-applied policy is recorded in `docker/r2-cors.json`; source control does not apply it to production. The production origin and local development origin may issue `GET`, `HEAD` and `PUT` (browser uploads PUT directly to R2 on a presigned URL — without `PUT` in the policy every upload fails with a CORS error while folders still appear, because folder creation goes through the app origin), send Range/request headers, and read validators needed by browser media handling. R2 must continue requiring signed requests.
 
 Before enabling direct mode, verify from the deployed browser origin that R2 answers:
 
@@ -83,6 +83,8 @@ Before enabling direct mode, verify from the deployed browser origin that R2 ans
 - an out-of-bounds range with 416;
 - `Accept-Ranges`, `Content-Range`, `Content-Length`, `Content-Type`, `ETag`, and `Last-Modified` as appropriate;
 - CORS preflight/response headers without wildcard credential leakage.
+
+And before declaring uploads working, verify the upload direction too: the CORS policy must allow `PUT` (plus `Content-Type` and `x-amz-*` request headers) from the production origin, or every browser upload fails while folder creation — which goes through the app origin — still succeeds, leaving the account full of empty directory trees.
 
 Never replace this with a public bucket or public custom-domain object path.
 
