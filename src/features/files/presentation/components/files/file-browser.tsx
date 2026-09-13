@@ -1102,21 +1102,69 @@ export function FileBrowser({
       failed.push(path || dirHandle.name);
     }
 
-    const results = await Promise.all(
-      children.map(async ([name, handle]) => {
+    /**
+     * The walk is breadth-of-work bounded, not `Promise.all` over every child.
+     *
+     * The old shape fired `getFile()` on every file in a directory at once, and a
+     * real project (`node_modules`, `.git`) has directories with tens of thousands
+     * of entries — tens of thousands of simultaneous handle reads is precisely the
+     * unresponsive-tab/Out-of-Memory class of failure the drag-and-drop walker was
+     * gated against. This is the picker's lane, so it needs the same gate: a fixed
+     * pool of workers, and a cap on handle reads in flight.
+     *
+     * The slot is held ONLY around `getFile()` and never across the recursive
+     * descent — a directory waiting on its children while holding a slot is how a
+     * semaphore around a recursive walk deadlocks.
+     */
+    const PICKER_HANDLE_CONCURRENCY = 32;
+    const PICKER_WALK_WORKERS = 8;
+    let handleReads = 0;
+    const handleWaiters: (() => void)[] = [];
+    const acquireHandleSlot = async (): Promise<() => void> => {
+      if (handleReads >= PICKER_HANDLE_CONCURRENCY) {
+        await new Promise<void>((resolve) => handleWaiters.push(resolve));
+      } else {
+        handleReads++;
+      }
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const next = handleWaiters.shift();
+        if (next) next();
+        else handleReads--;
+      };
+    };
+
+    type WalkResult = { files: UploadEntry[]; directories: string[]; failed: string[] };
+    const results: WalkResult[] = new Array(children.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < children.length) {
+        const index = cursor++;
+        const [name, handle] = children[index]!;
         const entryPath = path ? `${path}/${name}` : name;
         if (handle.kind !== "file") {
-          return readDirectoryRecursive(handle as FileSystemDirectoryHandle, entryPath);
+          results[index] = await readDirectoryRecursive(handle as FileSystemDirectoryHandle, entryPath);
+          continue;
         }
+        const release = await acquireHandleSlot();
         try {
           const file = await (handle as FileSystemFileHandle).getFile();
-          return { files: [{ file, relativePath: entryPath }], directories: [], failed: [] };
+          results[index] = { files: [{ file, relativePath: entryPath }], directories: [], failed: [] };
         } catch {
-          return { files: [], directories: [], failed: [entryPath] };
+          results[index] = { files: [], directories: [], failed: [entryPath] };
+        } finally {
+          release();
         }
-      })
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(PICKER_WALK_WORKERS, children.length) }, worker)
     );
+
     for (const result of results) {
+      if (!result) continue;
       files.push(...result.files);
       directories.push(...result.directories);
       failed.push(...result.failed);
