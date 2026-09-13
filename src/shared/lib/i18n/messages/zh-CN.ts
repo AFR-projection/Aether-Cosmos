@@ -977,6 +977,7 @@ export const zhCN: LocaleMessages = {
       finishedWithFailures: { other: "已结束 · {count} 个失败" },
       allFinished: "全部上传完成",
       waiting: "在队列中等待",
+      moreQueued: { other: "队列中还有 {count} 个文件" },
       idleTitle: "上传",
       fileTally: "{completed}/{total} 个文件",
       pause: "暂停上传",

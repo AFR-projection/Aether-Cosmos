@@ -1022,6 +1022,7 @@ export const id: LocaleMessages = {
       finishedWithFailures: { other: "Selesai · {count} gagal" },
       allFinished: "Semua unggahan selesai",
       waiting: "Menunggu di antrean",
+      moreQueued: { other: "+{count} file lagi di antrean" },
       idleTitle: "Unggahan",
       fileTally: "{completed}/{total} file",
       pause: "Jeda unggahan",

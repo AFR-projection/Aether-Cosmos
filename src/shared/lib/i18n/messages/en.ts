@@ -1207,6 +1207,16 @@ export const en = {
       },
       allFinished: "All uploads finished",
       waiting: "Waiting in queue",
+      /**
+       * The queue can hold far more rows than a panel can usefully show, and each
+       * one is a layout-animated row — mounting all of them is what made a folder
+       * upload stutter. Only the head of the queue is drawn; this line accounts
+       * for the rest.
+       */
+      moreQueued: {
+        one: "+{count} more file in the queue",
+        other: "+{count} more files in the queue",
+      },
       idleTitle: "Uploads",
       fileTally: "{completed}/{total} files",
       pause: "Pause uploads",

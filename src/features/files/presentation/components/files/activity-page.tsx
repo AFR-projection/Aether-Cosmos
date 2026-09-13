@@ -274,7 +274,10 @@ export function ActivityPage({ scopeId }: { scopeId: string }) {
     void apiFetch<{ scopeId: string; items: ActivityItem[] }>(`/api/activity?scopeId=${encodeURIComponent(scopeId)}&limit=500`).then((response) => {
       if (!cancelled && response.success && response.data?.items) hydrateActivities(response.data.items, response.data.scopeId);
     });
-    const onChange = (items: UploadItem[], stats: UploadStats) => { setUploadItems(items); setUploadStats(stats); };
+    // Copied, not stored by reference: the queue emits its live array now, and
+    // both the state update and the `visibleUploadItems` memo below key off
+    // identity — handing them the same array every tick freezes the page.
+    const onChange = (items: UploadItem[], stats: UploadStats) => { setUploadItems([...items]); setUploadStats(stats); };
     queue.on("change", onChange);
     setUploadItems(queue.getItems());
     setUploadStats(queue.getStats());

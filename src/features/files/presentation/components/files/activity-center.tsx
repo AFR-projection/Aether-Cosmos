@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore, memo } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   Upload, Download, Trash2, Edit2, Move, Copy, RotateCcw, FolderPlus,
@@ -180,9 +180,20 @@ function ProgressBar({
 
 // ─── Live upload row (from UploadQueue) ───────────────────────────────────────
 
-function UploadRow({
+/**
+ * How many upload rows the panel mounts at once.
+ *
+ * The queue's working window holds hundreds of items, and each row here is a
+ * layout-animated `motion.li` inside `AnimatePresence mode="popLayout"` — every
+ * completion re-measures all of its siblings. A person reads the top of the
+ * queue and the aggregate progress bar, not row 300, so the rest is summarised
+ * in one line instead. Large enough to fill any panel height without a gap.
+ */
+const MAX_UPLOAD_ROWS = 60;
+
+function UploadRowBase({
   item, onRetry, onCancel,
-}: { item: UploadItem; onRetry: () => void; onCancel: () => void }) {
+}: { item: UploadItem; onRetry: (id: string) => void; onCancel: (id: string) => void }) {
   const t = useT();
   const { formatBytes } = useFormat();
   const isActive = item.status === "preparing" || item.status === "uploading" || item.status === "verifying";
@@ -220,7 +231,7 @@ function UploadRow({
             {/* Always visible: hover-revealed controls cannot be reached by touch. */}
             <div className="-mt-1 flex shrink-0 items-center gap-0.5">
               {isFailed && (
-                <Button variant="ghost" size="icon" aria-label={t("files.upload.retryItem", { name })} onClick={onRetry}>
+                <Button variant="ghost" size="icon" aria-label={t("files.upload.retryItem", { name })} onClick={() => onRetry(item.id)}>
                   <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 </Button>
               )}
@@ -229,7 +240,7 @@ function UploadRow({
                   variant="ghost"
                   size="icon"
                   aria-label={t("files.upload.removeItem", { name })}
-                  onClick={onCancel}
+                  onClick={() => onCancel(item.id)}
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </Button>
@@ -266,6 +277,33 @@ function UploadRow({
     </motion.li>
   );
 }
+
+/**
+ * Memoized on FIELDS, not on the item reference.
+ *
+ * The queue mutates `UploadItem` objects in place and re-emits the same array,
+ * so `prev.item === next.item` is true even when the progress changed — the
+ * default comparator would freeze every bar at 0%. Comparing what this row
+ * actually reads is what makes the memo both correct and worth having: during a
+ * folder upload nearly every row is `queued` with static fields, so a tick that
+ * moves three active transfers re-renders three rows instead of the whole window.
+ */
+const UploadRow = memo(UploadRowBase, (prev, next) => {
+  const a = prev.item;
+  const b = next.item;
+  return (
+    a.id === b.id &&
+    a.status === b.status &&
+    a.progress === b.progress &&
+    a.speed === b.speed &&
+    a.totalBytes === b.totalBytes &&
+    a.error === b.error &&
+    a.remotePath === b.remotePath &&
+    a.file === b.file &&
+    prev.onRetry === next.onRetry &&
+    prev.onCancel === next.onCancel
+  );
+});
 
 // ─── Live download row (from download-store) ──────────────────────────────────
 
@@ -552,6 +590,12 @@ function PanelContent({
   const t = useT();
   const searchId = useId();
 
+  // Stable across ticks so the memo on UploadRow can actually reject a re-render;
+  // an inline `() => uploadQueue?.cancelItem(item.id)` is a new function every
+  // render and would defeat it.
+  const retryUpload = useCallback((id: string) => uploadQueue?.retryItem(id), [uploadQueue]);
+  const cancelUpload = useCallback((id: string) => uploadQueue?.cancelItem(id), [uploadQueue]);
+
   return (
     <>
       {/* Header */}
@@ -654,13 +698,18 @@ function PanelContent({
             <SectionHeader label={t("files.activity.status.uploading")} count={liveUploads.length} />
             <ul>
               <AnimatePresence mode="popLayout">
-                {liveUploads.map((item) => (
+                {liveUploads.slice(0, MAX_UPLOAD_ROWS).map((item) => (
                   <UploadRow key={item.id} item={item}
-                    onRetry={() => uploadQueue?.retryItem(item.id)}
-                    onCancel={() => uploadQueue?.cancelItem(item.id)} />
+                    onRetry={retryUpload}
+                    onCancel={cancelUpload} />
                 ))}
               </AnimatePresence>
             </ul>
+            {liveUploads.length > MAX_UPLOAD_ROWS && (
+              <p className="px-3 py-2 text-xs text-muted-foreground">
+                {t("files.upload.moreQueued", { count: liveUploads.length - MAX_UPLOAD_ROWS })}
+              </p>
+            )}
           </div>
         )}
 
@@ -1147,6 +1196,11 @@ export function ActivityCenter({ uploadQueue: providedUploadQueue, inline = fals
   useEffect(() => {
     if (!uploadQueue) return;
     const onChange = (items: UploadItem[], stats: UploadStats) => {
+      // The copy is deliberate and load-bearing: the queue now emits its live
+      // array rather than a fresh one, and React bails out of a state update
+      // when the reference is unchanged — storing it directly would leave the
+      // panel frozen. It is bounded by the queue's working window, so this is a
+      // few hundred pointer writes per tick, not a copy of the whole upload.
       setUploadItems([...items]);
       setUploadStats(stats);
     };

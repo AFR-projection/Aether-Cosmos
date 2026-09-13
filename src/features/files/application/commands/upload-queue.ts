@@ -117,6 +117,45 @@ const LARGE_ENCRYPTION_LIMIT = 64 * 1024 * 1024;
 /** Ceiling for the exponential backoff between retries of a throttled API call. */
 const MAX_BACKOFF_MS = 20_000;
 
+/**
+ * How many files may hold a live `UploadItem` at once.
+ *
+ * Everything downstream of this queue costs memory PER ITEM, not per byte: an
+ * `UploadItem`, an entry in `published`, a row in the activity store, a DOM node
+ * in the panel, and — until it is released — a reference to the `File` itself.
+ * Dropping a whole project in meant hundreds of thousands of each, held until the
+ * tab closed, and the tab died with "Out of Memory" long before the transfer
+ * finished.
+ *
+ * The rest of the upload waits in {@link UploadQueue.backlog} as a bare
+ * `{file, relativePath, folderId}` record, which is a reference to bytes on disk
+ * and nothing more. Items are promoted into the window as earlier ones finish and
+ * are pruned, so memory tracks this constant instead of the folder size — a
+ * 200-file folder and a 200,000-file folder cost the same.
+ *
+ * 500, not a round-looking smaller number: the two batch lanes can claim
+ * `MAX_ACTIVE_BATCHES * BATCH_INIT_MAX_FILES` = 400 items between them, and the
+ * per-file lane another `MAX_ACTIVE_FILES` on top. A window at or below 400 would
+ * leave the second batch lane permanently starved and quietly halve throughput.
+ */
+const MAX_LIVE_ITEMS = 500;
+
+/**
+ * How many failed items survive {@link UploadQueue.pruneFinished} with their
+ * `File` handle intact.
+ *
+ * The retry button in the upload panel and `retryFailed()` both re-submit the
+ * original handle, so an error row cannot be dropped the moment its state
+ * reaches the activity store the way a `done` row can. But an unbounded number
+ * of them (a folder uploaded with the storage full) would recreate the very
+ * memory pin the window exists to prevent — so the failures keep coming and the
+ * oldest ones give way, their totals moving into `retired` like a `done` item.
+ *
+ * 40 comfortably covers a visible panel page plus a screenful above it, while
+ * the handles themselves are references to disk, not buffers.
+ */
+const MAX_RETAINED_ERRORS = 40;
+
 function isActivityPopupPresentation(): boolean {
   return typeof window !== "undefined" && window.name === "FileActivityCenter";
 }
@@ -347,6 +386,24 @@ export class UploadQueue {
   private disposed = false;
   private items: UploadItem[] = [];
   /**
+   * Files accepted but not yet given an `UploadItem`.
+   *
+   * This is the half of the queue that makes a 200,000-file folder survivable: a
+   * backlog entry is three fields and a `File` handle (a reference to bytes on
+   * disk, not the bytes), where a live item drags an activity row, a published
+   * signature and a DOM node behind it. Drained into `items` by
+   * {@link refillWindow} as earlier items finish.
+   */
+  private backlog: { file: File; folderId: string | null; remotePath: string }[] = [];
+  /**
+   * Totals for items already pruned out of `items`.
+   *
+   * Pruning is what keeps memory flat, but it also means `items` is no longer the
+   * whole upload, so counting it would make the panel report "12 of 12 done" in the
+   * middle of a 50,000-file transfer. These carry the pruned history forward.
+   */
+  private retired = { completed: 0, failed: 0, totalBytes: 0, loadedBytes: 0 };
+  /**
    * A Set per event, not one callback per event. The upload panel, the activity
    * centre and the activity page all listen for "change"; with a single slot the
    * last one to mount silently replaced the others, and the first one to unmount
@@ -386,6 +443,10 @@ export class UploadQueue {
     this.listeners.clear();
     this.published.clear();
     this.items = [];
+    // The backlog holds a `File` handle per pending upload; leaving it behind would
+    // pin every one of them for as long as the queue object is referenced.
+    this.backlog = [];
+    this.retired = { completed: 0, failed: 0, totalBytes: 0, loadedBytes: 0 };
   }
 
   setEncryption(enabled: boolean, passphrase: string | null) {
@@ -442,20 +503,31 @@ export class UploadQueue {
         this.published.set(item.id, signature);
         syncTransferActivity({ id: item.id, type: "upload", name: item.file?.name ?? item.remotePath, phase, loaded: item.uploadedBytes, total: item.totalBytes, speed: item.speed, error: item.error, fileId: item.fileId });
       }
-      this.emit("change", [...this.items], this.getStats());
+      // Everything above has just been published, so anything finished is now safe
+      // to drop — and dropping it is what lets the backlog move up. Done here rather
+      // than at completion because "published" is exactly the precondition.
+      this.pruneFinished();
+      // `this.items` is handed over without copying. At a 200,000-file folder the
+      // old `[...this.items]` allocated a 200,000-element array every 100ms, and the
+      // React consumer copied it a second time. Listeners must treat it as
+      // read-only; the queue owns it.
+      this.emit("change", this.items, this.getStats());
+      // A prune frees window slots, and the refill inside it queues new items that
+      // nothing has scheduled yet.
+      void this.processNext();
     }, delay);
   }
 
   getStats(): UploadStats {
-    // One pass. This runs on every throttled notify, and the seven separate
-    // filter/reduce traversals it replaces were the second-biggest cost in a
-    // large batch after the activity-store writes.
-    let completed = 0;
-    let failed = 0;
+    // One pass over the LIVE WINDOW only. This runs on every throttled notify, and
+    // bounding it to `MAX_LIVE_ITEMS` is half of what makes a huge folder cheap:
+    // the cost per tick no longer grows with the size of the upload.
+    let completed = this.retired.completed;
+    let failed = this.retired.failed;
     let active = 0;
-    let queued = 0;
-    let totalBytes = 0;
-    let loadedBytes = 0;
+    let queued = this.backlog.length;
+    let totalBytes = this.retired.totalBytes;
+    let loadedBytes = this.retired.loadedBytes;
     for (const item of this.items) {
       switch (item.status) {
         case "done": completed++; break;
@@ -469,9 +541,14 @@ export class UploadQueue {
       totalBytes += item.totalBytes;
       loadedBytes += Math.min(item.uploadedBytes, item.totalBytes);
     }
+    // The backlog has real bytes and belongs in the denominator, or the progress bar
+    // would read 100% every time the window drained and then snap backwards on the
+    // next refill. `file.size` is on the handle already — no work to read it.
+    for (const pending of this.backlog) totalBytes += pending.file.size;
     const overallProgress = totalBytes > 0 ? (loadedBytes / totalBytes) * 100 : 0;
     const speed = this.currentSpeed();
-    return { total: this.items.length, completed, failed, active, queued, totalBytes, loadedBytes, overallProgress, speed, eta: speed > 0 ? (totalBytes - loadedBytes) / speed : 0 };
+    const total = this.retired.completed + this.retired.failed + this.items.length + this.backlog.length;
+    return { total, completed, failed, active, queued, totalBytes, loadedBytes, overallProgress, speed, eta: speed > 0 ? (totalBytes - loadedBytes) / speed : 0 };
   }
 
   private currentSpeed() {
@@ -486,16 +563,30 @@ export class UploadQueue {
     if (this.speedSamples.length > 8) this.speedSamples.shift();
   }
 
+  /**
+   * Both entry points hand work to the backlog and let {@link refillWindow} decide
+   * how much of it becomes live. Pushing straight into `items` is what made a large
+   * folder allocate an item, an activity row and a DOM node for every file in it
+   * before the first byte moved.
+   */
   addFiles(files: File[], baseFolderId: string | null = null, pathPrefix = "") {
     for (const file of files) {
-      this.items.push(this.newItem(file, baseFolderId, pathPrefix ? `${pathPrefix}/${file.name}` : file.name));
+      this.backlog.push({
+        file,
+        folderId: baseFolderId,
+        remotePath: pathPrefix ? `${pathPrefix}/${file.name}` : file.name,
+      });
     }
+    this.refillWindow();
     this.notify(true);
     void this.processNext();
   }
 
   addFolderStructure(entries: { file: File; relativePath: string; folderId: string | null }[]) {
-    for (const entry of entries) this.items.push(this.newItem(entry.file, entry.folderId, entry.relativePath));
+    for (const entry of entries) {
+      this.backlog.push({ file: entry.file, folderId: entry.folderId, remotePath: entry.relativePath });
+    }
+    this.refillWindow();
     this.notify(true);
     void this.processNext();
   }
@@ -535,6 +626,10 @@ export class UploadQueue {
   private async processNext() {
     if (this.disposed || this.scopeId !== getActivityScopeId() || this.paused) return;
 
+    // Cheap when the window is already full, and it removes the need for every
+    // caller to remember to refill before scheduling.
+    this.refillWindow();
+
     // The batched lane first: a folder upload is overwhelmingly small files, and
     // leaving them to the three per-file slots is what made a real project take
     // hours. Claimed synchronously, like the per-file slots below, so a second
@@ -567,7 +662,14 @@ export class UploadQueue {
       this.activeWorkers++;
       void this.runItem(next);
     }
-    if (this.activeWorkers === 0 && this.activeBatches === 0 && this.items.length > 0 && this.getStats().active === 0) {
+    if (
+      this.activeWorkers === 0 &&
+      this.activeBatches === 0 &&
+      this.backlog.length === 0 &&
+      // Nothing retired either would mean nothing was ever submitted.
+      (this.items.length > 0 || this.retired.completed > 0 || this.retired.failed > 0) &&
+      this.getStats().active === 0
+    ) {
       this.emit("allComplete");
     }
   }
@@ -590,6 +692,77 @@ export class UploadQueue {
     item.status = "done";
     markLocalUpload(item.fileId);
     this.emit("complete", item);
+    // The bytes are up; holding the handle only keeps the browser from reclaiming
+    // whatever it buffered for them. `remotePath` already carries the name the UI
+    // shows, so nothing downstream needs the `File` after this point.
+    item.file = null;
+  }
+
+  /**
+   * Promote backlog entries into the live window until it is full.
+   *
+   * Called wherever the window can have room: on submission, and after each prune.
+   */
+  private refillWindow() {
+    while (this.items.length < MAX_LIVE_ITEMS) {
+      const next = this.backlog.shift();
+      if (!next) break;
+      this.items.push(this.newItem(next.file, next.folderId, next.remotePath));
+    }
+  }
+
+  /**
+   * Drop finished items out of the live window so the backlog can move up.
+   *
+   * Only items whose LAST state reached the activity store are removed: that store
+   * is what the panel and the activity page read after an item leaves here, so
+   * pruning one whose final signature was never published would erase its result
+   * from the UI. `notify` publishes on a throttle, hence the check rather than an
+   * unconditional sweep.
+   *
+   * `resume_requires_file` is deliberately never pruned — it is waiting for the
+   * user to re-pick the file, so it has to stay visible and addressable.
+   */
+  private pruneFinished() {
+    if (this.items.length === 0) return;
+    const kept: UploadItem[] = [];
+    let retainedErrors = 0;
+    // Newest failures first, so the cap below keeps the ones the user is most
+    // likely to still be looking at.
+    for (let index = this.items.length - 1; index >= 0; index--) {
+      const item = this.items[index];
+      const finished = item.status === "done" || item.status === "error" || item.status === "cancelled";
+      if (!finished || !this.published.has(item.id)) {
+        kept[index] = item;
+        continue;
+      }
+      // A failure is NOT dropped with the rest. Its `File` handle is what makes
+      // the panel's retry button and `retryFailed` work — pruning it on publish
+      // (the way `done` rows are) emptied the window of failures within one
+      // tick and silently disabled retry. Instead the most recent
+      // MAX_RETAINED_ERRORS failures stay, and only older ones give way. A
+      // folder that fails wholesale still cannot pin memory: the cap bounds it.
+      if (item.status === "error" && retainedErrors < MAX_RETAINED_ERRORS) {
+        retainedErrors++;
+        kept[index] = item;
+        continue;
+      }
+      if (item.status === "done") this.retired.completed++;
+      else if (item.status === "error") this.retired.failed++;
+      // A cancelled item is neither: it is subtracted from the total instead, the
+      // same way the live path treats it.
+      if (item.status !== "cancelled") {
+        this.retired.totalBytes += item.totalBytes;
+        this.retired.loadedBytes += Math.min(item.uploadedBytes, item.totalBytes);
+      }
+      this.published.delete(item.id);
+      this.abortSignals.delete(item.id);
+    }
+    const compacted = kept.filter((item) => item !== undefined);
+    if (compacted.length !== this.items.length) {
+      this.items = compacted;
+      this.refillWindow();
+    }
   }
 
   /**
@@ -609,13 +782,36 @@ export class UploadQueue {
       const live = () => !this.disposed && this.scopeId === getActivityScopeId();
       if (!live()) return;
 
+      // Snapshot the handles while the batch still provably owns them. `markDone`
+      // releases `item.file` — that release is what stops a 100k-file folder from
+      // pinning every blob in memory — so re-reading `item.file` after an await is
+      // a null dereference waiting for a reply that names the same index twice.
+      // Keeping the `File` in this local makes the rest of the method independent
+      // of what happens to the item, and costs one reference per batch member.
+      const members: { item: UploadItem; file: File }[] = [];
+      for (const item of items) {
+        if (item.file) {
+          members.push({ item, file: item.file });
+          continue;
+        }
+        // No handle means nothing to send, and no retry can conjure one back:
+        // both lanes require a file, so a requeued item would sit "queued"
+        // forever and hold `allComplete` open.
+        item.retries = MAX_RETRIES;
+        this.failItem(item, "UPLOAD_FILE_MISSING");
+      }
+      if (members.length === 0) {
+        this.notify(true);
+        return;
+      }
+
       const initialized = await apiPostResilient<{ results: BatchInitEntry[] }>(
         "/api/uploads/batch-init",
         {
-          files: items.map((item) => ({
-            filename: item.file!.name,
-            mimeType: item.file!.type || "application/octet-stream",
-            sizeBytes: item.file!.size,
+          files: members.map(({ item, file }) => ({
+            filename: file.name,
+            mimeType: file.type || "application/octet-stream",
+            sizeBytes: file.size,
             folderId: item.folderId,
             idempotencyKey: item.id,
             encrypted: false,
@@ -627,15 +823,18 @@ export class UploadQueue {
       if (!initialized.success || !initialized.data) {
         // The whole call failed, so nothing was reserved: every item goes back in
         // the queue on its own retry budget rather than dying as a group.
-        for (const item of items) this.failItem(item, initialized.error ?? "UPLOAD_INIT_FAILED");
+        for (const { item } of members) this.failItem(item, initialized.error ?? "UPLOAD_INIT_FAILED");
         this.notify(true);
         return;
       }
 
-      const ready: { item: UploadItem; url: string; mime: string }[] = [];
+      const ready: { item: UploadItem; file: File; url: string; mime: string }[] = [];
       for (const entry of initialized.data.results) {
-        const item = items[entry.index];
-        if (!item || item.status === "cancelled") continue;
+        // Indexes address `members`, not `items` — that is the array the request
+        // was built from, and the two differ whenever a handle went missing above.
+        const member = members[entry.index];
+        if (!member || member.item.status === "cancelled") continue;
+        const { item, file } = member;
         if (!entry.ok) {
           // A per-file refusal — a blocked extension, quota, a folder that moved.
           // Retrying it verbatim would produce the same answer, so it is final.
@@ -659,14 +858,15 @@ export class UploadQueue {
         }
         ready.push({
           item,
+          file,
           url: entry.uploadUrl,
-          mime: item.file!.type || "application/octet-stream",
+          mime: file.type || "application/octet-stream",
         });
       }
       this.notify(true);
 
       const uploaded: UploadItem[] = [];
-      await mapPool(ready, SMALL_TRANSFER_CONCURRENCY, async ({ item, url, mime }) => {
+      await mapPool(ready, SMALL_TRANSFER_CONCURRENCY, async ({ item, file, url, mime }) => {
         if (!live() || item.status === "cancelled") return;
         const signal = { aborted: false, xhrs: [] as XMLHttpRequest[] };
         this.abortSignals.set(item.id, signal);
@@ -676,7 +876,7 @@ export class UploadQueue {
         try {
           const release = await transferLimiter.acquire();
           try {
-            await putBlob(url, item.file!, mime, (loaded, total) => {
+            await putBlob(url, file, mime, (loaded, total) => {
               item.uploadedBytes = loaded;
               item.progress = total > 0 ? (loaded / total) * 100 : 0;
               const now = Date.now();
@@ -746,16 +946,19 @@ export class UploadQueue {
 
   private async processItem(item: UploadItem) {
     if (this.disposed || this.scopeId !== getActivityScopeId() || !item.file || item.status === "cancelled") return;
+    // Captured once, for the same reason the batch lane does it: `markDone`
+    // releases `item.file`, and every read below sits behind an await.
+    const file = item.file;
     item.status = "preparing";
     this.notify(true);
     try {
-      let blob: Blob = item.file;
-      let uploadSize = item.file.size;
-      let uploadMime = item.file.type || "application/octet-stream";
+      let blob: Blob = file;
+      let uploadSize = file.size;
+      let uploadMime = file.type || "application/octet-stream";
       let encryptionMeta: EncryptionMetaV1 | undefined;
       if (item.encrypted && this.encryptPassphrase) {
-        if (item.file.size > LARGE_ENCRYPTION_LIMIT) throw new Error("ENCRYPTION_LARGE_FILE_UNSUPPORTED");
-        const encrypted = await encryptFile(item.file, this.encryptPassphrase);
+        if (file.size > LARGE_ENCRYPTION_LIMIT) throw new Error("ENCRYPTION_LARGE_FILE_UNSUPPORTED");
+        const encrypted = await encryptFile(file, this.encryptPassphrase);
         blob = encrypted.blob;
         uploadSize = encrypted.sizeBytes;
         uploadMime = "application/octet-stream";
@@ -763,8 +966,8 @@ export class UploadQueue {
       }
 
       const initialized = await apiPostResilient<InitResult>("/api/uploads/init", {
-        filename: item.file.name,
-        mimeType: item.file.type || "application/octet-stream",
+        filename: file.name,
+        mimeType: file.type || "application/octet-stream",
         sizeBytes: uploadSize,
         folderId: item.folderId,
         idempotencyKey: item.id,
@@ -935,6 +1138,10 @@ export class UploadQueue {
   }
 
   cancelAll() {
+    // The backlog goes first. Cancelling only the live window would let the next
+    // refill start the very files the user just cancelled — on a large folder that
+    // is thousands of them, and the cancel would look like it did nothing.
+    this.backlog = [];
     this.items.filter((item) => item.status === "queued" || item.status === "uploading" || item.status === "verifying").forEach((item) => this.cancelItem(item.id));
   }
 
@@ -948,6 +1155,10 @@ export class UploadQueue {
       if (!keptIds.has(item.id)) this.published.delete(item.id);
     }
     this.items = kept;
+    // Clearing the panel clears the history it was showing, pruned rows included —
+    // otherwise the counts would keep reporting uploads the user just dismissed.
+    this.retired = { completed: 0, failed: 0, totalBytes: 0, loadedBytes: 0 };
+    this.refillWindow();
     this.notify(true);
   }
 
